@@ -41,6 +41,12 @@
         <input name="title" dir="auto" value="{{ it.title }}" required>
         <input name="note" dir="auto" value="{{ it.note }}" placeholder="Next step / note">
         <input name="waiting_on" dir="auto" value="{{ it.waiting_on }}" placeholder="Waiting on (who)">
+        {% if sec_projects %}
+        <select name="project_id">
+          <option value="">&mdash; no project &mdash;</option>
+          {% for p in sec_projects %}<option value="{{ p.id }}"{% if it.project_id == p.id %} selected{% endif %}>{{ p.title }}</option>{% endfor %}
+        </select>
+        {% endif %}
         <label class="duelabel">Due <input type="date" name="due_date" value="{{ it.due_date or '' }}"></label>
         <div class="btns"><button type="submit">Save</button></div>
       </form>

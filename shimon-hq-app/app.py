@@ -68,6 +68,8 @@ def init_db():
     cols = [r[1] for r in con.execute("PRAGMA table_info(items)")]
     if "due_date" not in cols:
         con.execute("ALTER TABLE items ADD COLUMN due_date TEXT")
+    if "project_id" not in cols:
+        con.execute("ALTER TABLE items ADD COLUMN project_id INTEGER REFERENCES projects(id)")
     os.makedirs(FILES_DIR, exist_ok=True)
     n = con.execute("SELECT COUNT(*) FROM sections").fetchone()[0]
     if n == 0:
@@ -137,6 +139,10 @@ def board():
     files_by_item = {}
     for f in files:
         files_by_item.setdefault(f["item_id"], []).append(f)
+    projects = con.execute("SELECT * FROM projects ORDER BY pos, id").fetchall()
+    projects_by_sec = {}
+    for p in projects:
+        projects_by_sec.setdefault(p["section_id"], []).append(p)
     today_iso = datetime.now().date().isoformat()
     soon_iso = (datetime.now().date() + timedelta(days=3)).isoformat()
     by_sec = {}
@@ -149,6 +155,7 @@ def board():
         "done": sum(1 for it in items if it["status"] == "done"),
     }
     return render_template("board.html", sections=sections, by_sec=by_sec,
+                           projects_by_sec=projects_by_sec,
                            notes_by_item=notes_by_item, files_by_item=files_by_item,
                            today_iso=today_iso, soon_iso=soon_iso,
                            total_active=total_active, stats=stats,
@@ -169,11 +176,12 @@ def add_item():
     pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM items WHERE section_id=?",
                       (sid,)).fetchone()[0]
     con.execute(
-        "INSERT INTO items(section_id, title, note, waiting_on, status, pos, due_date, updated_at)"
-        " VALUES(?,?,?,?,?,?,?,?)",
+        "INSERT INTO items(section_id, title, note, waiting_on, status, pos, due_date,"
+        " project_id, updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
         (sid, title, (request.form.get("note") or "").strip(),
          (request.form.get("waiting_on") or "").strip(), "open", pos,
          (request.form.get("due_date") or "").strip() or None,
+         request.form.get("project_id", type=int) or None,
          datetime.now().isoformat(timespec="seconds")))
     con.commit()
     return redirect(url_for("board", _anchor="sec-%d" % sid))
@@ -187,10 +195,12 @@ def edit_item(item_id):
         return redirect(url_for("board"))
     con = db()
     con.execute(
-        "UPDATE items SET title=?, note=?, waiting_on=?, due_date=?, updated_at=? WHERE id=?",
+        "UPDATE items SET title=?, note=?, waiting_on=?, due_date=?, project_id=?,"
+        " updated_at=? WHERE id=?",
         (title, (request.form.get("note") or "").strip(),
          (request.form.get("waiting_on") or "").strip(),
          (request.form.get("due_date") or "").strip() or None,
+         request.form.get("project_id", type=int) or None,
          datetime.now().isoformat(timespec="seconds"), item_id))
     con.commit()
     return redirect(url_for("board"))
@@ -318,6 +328,126 @@ def delete_file(file_id):
 
 
 # ---------- section actions ----------
+
+@app.route("/projects/add", methods=["POST"])
+@login_required
+def add_project():
+    sid = request.form.get("section_id", type=int)
+    title = (request.form.get("title") or "").strip()
+    if sid and title:
+        con = db()
+        pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM projects WHERE section_id=?",
+                          (sid,)).fetchone()[0]
+        con.execute("INSERT INTO projects(section_id, title, pos, created_at) VALUES(?,?,?,?)",
+                    (sid, title, pos, datetime.now().isoformat(timespec="seconds")))
+        con.commit()
+    return redirect(url_for("board", _anchor="sec-%d" % (sid or 0)))
+
+
+@app.route("/projects/<int:proj_id>/delete", methods=["POST"])
+@login_required
+def delete_project(proj_id):
+    con = db()
+    con.execute("UPDATE items SET project_id=NULL WHERE project_id=?", (proj_id,))
+    con.execute("DELETE FROM projects WHERE id=?", (proj_id,))
+    con.commit()
+    return redirect(url_for("board"))
+
+
+# ---------- calendar ----------
+
+@app.route("/calendar")
+@login_required
+def calendar_view():
+    from datetime import date, timedelta
+    m = request.args.get("m", "")
+    today = date.today()
+    try:
+        y, mo = int(m[:4]), int(m[5:7])
+    except (ValueError, IndexError):
+        y, mo = today.year, today.month
+    first = date(y, mo, 1)
+    start = first - timedelta(days=(first.weekday() + 1) % 7)  # back to Sunday
+    days = [start + timedelta(days=i) for i in range(42)]
+    con = db()
+    rows = con.execute(
+        "SELECT items.*, sections.title AS sec_title FROM items"
+        " JOIN sections ON items.section_id = sections.id"
+        " WHERE due_date IS NOT NULL AND due_date != ''"
+        " ORDER BY due_date").fetchall()
+    by_day, overdue, upcoming = {}, [], []
+    t_iso = today.isoformat()
+    horizon = (today + timedelta(days=14)).isoformat()
+    for r in rows:
+        by_day.setdefault(r["due_date"], []).append(r)
+        if r["status"] != "done":
+            if r["due_date"] < t_iso:
+                overdue.append(r)
+            elif r["due_date"] <= horizon:
+                upcoming.append(r)
+    prev_m = (first - timedelta(days=1)).strftime("%Y-%m")
+    next_m = date(y + (1 if mo == 12 else 0), 1 if mo == 12 else mo + 1, 1).strftime("%Y-%m")
+    return render_template("calendar.html", days=days, by_day=by_day,
+                           overdue=overdue, upcoming=upcoming,
+                           month_label=first.strftime("%B %Y"),
+                           prev_m=prev_m, next_m=next_m,
+                           today_iso=t_iso, cur_month=mo)
+
+
+# ---------- api (for CRM integration) ----------
+
+def _api_auth():
+    tok = os.environ.get("API_TOKEN")
+    return tok and request.headers.get("Authorization") == "Bearer " + tok
+
+
+@app.route("/api/board")
+def api_board():
+    if not _api_auth():
+        abort(401)
+    con = db()
+    out = []
+    for s in con.execute("SELECT * FROM sections ORDER BY pos, id"):
+        sec = {"id": s["id"], "title": s["title"], "projects": [], "tasks": []}
+        for p in con.execute("SELECT * FROM projects WHERE section_id=? ORDER BY pos, id",
+                             (s["id"],)):
+            proj = {"id": p["id"], "title": p["title"], "tasks": []}
+            for it in con.execute("SELECT * FROM items WHERE project_id=? ORDER BY pos, id",
+                                  (p["id"],)):
+                proj["tasks"].append(dict(it))
+            sec["projects"].append(proj)
+        for it in con.execute(
+                "SELECT * FROM items WHERE section_id=? AND project_id IS NULL ORDER BY pos, id",
+                (s["id"],)):
+            sec["tasks"].append(dict(it))
+        out.append(sec)
+    return jsonify(sections=out)
+
+
+@app.route("/api/items", methods=["POST"])
+def api_add_item():
+    if not _api_auth():
+        abort(401)
+    d = request.get_json(silent=True) or {}
+    title = (d.get("title") or "").strip()
+    if not title:
+        return jsonify(error="title required"), 400
+    con = db()
+    sec = con.execute("SELECT id FROM sections WHERE title=?",
+                      (d.get("section", "Inbox"),)).fetchone()
+    sid = sec["id"] if sec else con.execute(
+        "INSERT INTO sections(title, pos) VALUES(?, 99)",
+        (d.get("section", "Inbox"),)).lastrowid
+    pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM items WHERE section_id=?",
+                      (sid,)).fetchone()[0]
+    cur = con.execute(
+        "INSERT INTO items(section_id, title, note, waiting_on, status, pos, due_date, updated_at)"
+        " VALUES(?,?,?,?,?,?,?,?)",
+        (sid, title, d.get("note", ""), d.get("waiting_on", ""), "open", pos,
+         d.get("due_date"), datetime.now().isoformat(timespec="seconds")))
+    con.commit()
+    return jsonify(id=cur.lastrowid), 201
+
 
 @app.route("/sections/add", methods=["POST"])
 @login_required

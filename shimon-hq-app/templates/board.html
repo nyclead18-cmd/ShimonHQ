@@ -7,7 +7,10 @@
     <h1>Shimon HQ</h1>
   </div>
   <div class="right">
-    <span class="totals">{{ today }}</span>
+    <nav class="tabs">
+      <a class="tab on" href="{{ url_for('board') }}">Board</a>
+      <a class="tab" href="{{ url_for('calendar_view') }}">Calendar</a>
+    </nav>
     <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
   </div>
 </header>
@@ -37,6 +40,7 @@
 {% set palette = ['#B8892E', '#1F3A5F', '#3A6B3E', '#C24E2A', '#6B4A8A', '#2A6B6B'] %}
 {% for sec in sections %}
 {% set items = by_sec.get(sec.id, []) %}
+{% set sec_projects = projects_by_sec.get(sec.id, []) %}
 {% set done = items | selectattr('status', 'equalto', 'done') | list %}
 {% set active = items | rejectattr('status', 'equalto', 'done') | list %}
 <section class="card" id="sec-{{ sec.id }}" style="--sa: {{ palette[loop.index0 % 6] }}">
@@ -46,19 +50,73 @@
       {% if done %}&middot; <button type="button" class="linky" data-toggle-done="{{ sec.id }}">{{ done | length }} done</button>{% endif %}
     </span>
   </div>
+
+  {% for p in sec_projects %}
+  {% set pitems = items | selectattr('project_id', 'equalto', p.id) | list %}
+  {% set pdone = pitems | selectattr('status', 'equalto', 'done') | list %}
+  {% set pactive = pitems | rejectattr('status', 'equalto', 'done') | list %}
+  <div class="project">
+    <div class="proj-head">
+      <h3 dir="auto">{{ p.title }}</h3>
+      <span class="pcount">{{ pdone | length }}/{{ pitems | length }}</span>
+      <form method="post" action="{{ url_for('delete_project', proj_id=p.id) }}" class="pdelform">
+        <button type="submit" class="del" title="Remove project (tasks stay)">&#x2715;</button>
+      </form>
+    </div>
+    <ul class="items">
+      {% for it in pactive %}{% include "_item.html" %}{% endfor %}
+      {% for it in pdone %}{% set hidden = true %}{% include "_item.html" %}{% endfor %}
+    </ul>
+    <div class="addrow slim">
+      <details>
+        <summary>+ task</summary>
+        <form class="edit" method="post" action="{{ url_for('add_item') }}">
+          <input type="hidden" name="section_id" value="{{ sec.id }}">
+          <input type="hidden" name="project_id" value="{{ p.id }}">
+          <input name="title" placeholder="Task" dir="auto" required>
+          <input name="note" placeholder="Next step / note" dir="auto">
+          <input name="waiting_on" placeholder="Waiting on (who)" dir="auto">
+          <label class="duelabel">Due <input type="date" name="due_date"></label>
+          <div class="btns"><button type="submit">Add</button></div>
+        </form>
+      </details>
+    </div>
+  </div>
+  {% endfor %}
+
+  {% set loose_active = active | selectattr('project_id', 'none') | list %}
+  {% set loose_done = done | selectattr('project_id', 'none') | list %}
+  {% if loose_active or loose_done %}
+  {% if sec_projects %}<div class="proj-head loose"><h3>Single tasks</h3></div>{% endif %}
   <ul class="items">
-    {% for it in active %}{% include "_item.html" %}{% endfor %}
-    {% for it in done %}{% set hidden = true %}{% include "_item.html" %}{% endfor %}
+    {% for it in loose_active %}{% include "_item.html" %}{% endfor %}
+    {% for it in loose_done %}{% set hidden = true %}{% include "_item.html" %}{% endfor %}
   </ul>
+  {% endif %}
+
   <div class="addrow">
     <details>
-      <summary>+ Add item</summary>
+      <summary>+ Add task</summary>
       <form class="edit" method="post" action="{{ url_for('add_item') }}">
         <input type="hidden" name="section_id" value="{{ sec.id }}">
-        <input name="title" placeholder="Item" dir="auto" required>
+        <input name="title" placeholder="Task" dir="auto" required>
         <input name="note" placeholder="Next step / note" dir="auto">
         <input name="waiting_on" placeholder="Waiting on (who)" dir="auto">
+        {% if sec_projects %}
+        <select name="project_id">
+          <option value="">&mdash; no project &mdash;</option>
+          {% for p in sec_projects %}<option value="{{ p.id }}">{{ p.title }}</option>{% endfor %}
+        </select>
+        {% endif %}
         <label class="duelabel">Due <input type="date" name="due_date"></label>
+        <div class="btns"><button type="submit">Add</button></div>
+      </form>
+    </details>
+    <details>
+      <summary>+ Add project</summary>
+      <form class="edit" method="post" action="{{ url_for('add_project') }}">
+        <input type="hidden" name="section_id" value="{{ sec.id }}">
+        <input name="title" placeholder="Project name" dir="auto" required>
         <div class="btns"><button type="submit">Add</button></div>
       </form>
     </details>
@@ -96,6 +154,10 @@ function applyFilter() {
     li.style.display = (okText && okMode)
       ? (li.classList.contains('donerow') ? 'grid' : '')
       : 'none';
+  });
+  document.querySelectorAll('.project').forEach(function (pr) {
+    var any = Array.prototype.some.call(pr.querySelectorAll('li.item'), function (li) { return li.style.display !== 'none'; });
+    pr.style.display = (any || !filtering) ? '' : 'none';
   });
   document.querySelectorAll('section.card').forEach(function (sec) {
     var any = Array.prototype.some.call(sec.querySelectorAll('li.item'), function (li) { return li.style.display !== 'none'; });
@@ -213,7 +275,7 @@ document.addEventListener('submit', function (ev) {
     if (!list) {
       list = document.createElement('ul');
       list.className = 'notes';
-      itemBody.insertBefore(list, form);
+      itemBody.insertBefore(list, itemBody.querySelector('.files'));
     }
     var dt = d.created_at ? (parseInt(d.created_at.slice(5, 7), 10) + '/' + parseInt(d.created_at.slice(8, 10), 10)) : '';
     var li = document.createElement('li');

@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Calendar · Shimon HQ{% endblock %}
+{% block body %}
+<div class="wrap wide">
+<header class="top">
+  <div>
+    <div class="eyebrow">Pinta &middot; Ohr Chaim &middot; Personal</div>
+    <h1>Shimon HQ</h1>
+  </div>
+  <div class="right">
+    <nav class="tabs">
+      <a class="tab" href="{{ url_for('board') }}">Board</a>
+      <a class="tab on" href="{{ url_for('calendar_view') }}">Calendar</a>
+    </nav>
+    <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
+  </div>
+</header>
+
+{% if overdue %}
+<div class="overdue-strip">
+  <div class="os-title">Overdue</div>
+  {% for it in overdue %}
+  <div class="os-item"><span class="os-date">{{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}</span>
+    <span dir="auto">{{ it.title }}</span>
+    <a class="os-link" href="{{ url_for('board', _anchor='sec-' ~ it.section_id) }}">{{ it.sec_title }}</a></div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="cal-nav">
+  <a class="cal-arrow" href="{{ url_for('calendar_view', m=prev_m) }}">&larr;</a>
+  <h2 class="cal-month">{{ month_label }}</h2>
+  <a class="cal-arrow" href="{{ url_for('calendar_view', m=next_m) }}">&rarr;</a>
+</div>
+
+<div class="cal-scroll">
+<div class="cal">
+  {% for w in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'] %}<div class="cal-wd">{{ w }}</div>{% endfor %}
+  {% for d in days %}
+  {% set iso = d.isoformat() %}
+  <div class="cal-day{% if d.month != cur_month %} dim{% endif %}{% if iso == today_iso %} today{% endif %}">
+    <div class="cal-num">{{ d.day }}</div>
+    {% for it in by_day.get(iso, []) %}
+    <a class="cal-item {{ it.status }}{% if it.status != 'done' and iso < today_iso %} late{% endif %}"
+       href="{{ url_for('board', _anchor='sec-' ~ it.section_id) }}" dir="auto" title="{{ it.title }}">{{ it.title }}</a>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+</div>
+
+<div class="upcoming">
+  <h2>Next two weeks</h2>
+  {% if upcoming %}
+  <ul class="up-list">
+    {% for it in upcoming %}
+    <li><span class="nd">{{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}</span>
+      <span dir="auto">{{ it.title }}</span>
+      {% if it.waiting_on %}<span class="w">&mdash; waiting on <b dir="auto">{{ it.waiting_on }}</b></span>{% endif %}
+      <a class="os-link" href="{{ url_for('board', _anchor='sec-' ~ it.section_id) }}">{{ it.sec_title }}</a></li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="quiet">Nothing due in the next two weeks. Set due dates on the board and they show up here.</p>
+  {% endif %}
+</div>
+
+</div>
+{% endblock %}
