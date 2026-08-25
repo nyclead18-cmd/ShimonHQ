@@ -363,6 +363,49 @@ def delete_project(proj_id):
     return redirect(url_for("board"))
 
 
+# ---------- people (chase view) ----------
+
+@app.route("/people")
+@login_required
+def people_view():
+    con = db()
+    rows = con.execute(
+        "SELECT items.*, sections.title AS sec_title FROM items"
+        " JOIN sections ON items.section_id = sections.id"
+        " WHERE items.status != 'done' AND COALESCE(items.waiting_on,'') != ''"
+        " ORDER BY items.due_date IS NULL, items.due_date, items.id").fetchall()
+    groups = {}
+    for r in rows:
+        key = r["waiting_on"].strip()
+        groups.setdefault(key, []).append(r)
+    people = sorted(groups.items(), key=lambda kv: -len(kv[1]))
+    return render_template("people.html", people=people,
+                           today_iso=datetime.now().date().isoformat())
+
+
+# ---------- joel meeting mode ----------
+
+@app.route("/joel")
+@login_required
+def joel_view():
+    con = db()
+    sec = con.execute("SELECT * FROM sections WHERE title LIKE '%Joel%' ORDER BY id LIMIT 1").fetchone()
+    items, notes_by_item = [], {}
+    if sec:
+        items = con.execute(
+            "SELECT * FROM items WHERE section_id=? ORDER BY status='done', pos, id",
+            (sec["id"],)).fetchall()
+        ids = [str(it["id"]) for it in items]
+        if ids:
+            for n in con.execute(
+                    "SELECT * FROM item_notes WHERE item_id IN (%s) ORDER BY id"
+                    % ",".join(ids)):
+                notes_by_item.setdefault(n["item_id"], []).append(n)
+    return render_template("joel.html", sec=sec, items=items,
+                           notes_by_item=notes_by_item,
+                           today=datetime.now().strftime("%B %d, %Y"))
+
+
 # ---------- calendar ----------
 
 @app.route("/calendar")

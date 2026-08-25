@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Joel Review · Shimon HQ{% endblock %}
+{% block body %}
+<div class="wrap joelpage">
+<header class="top noprint">
+  <div>
+    <div class="eyebrow">Meeting mode</div>
+    <h1>Shimon HQ</h1>
+  </div>
+  <div class="right">
+    <nav class="tabs">
+      <a class="tab" href="{{ url_for('board') }}">Board</a>
+      <a class="tab" href="{{ url_for('calendar_view') }}">Calendar</a>
+      <a class="tab" href="{{ url_for('people_view') }}">People</a>
+      <a class="tab on" href="{{ url_for('joel_view') }}">Joel</a>
+    </nav>
+    <button type="button" class="printbtn" onclick="window.print()">Print</button>
+    <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
+  </div>
+</header>
+
+<div class="joel-sheet">
+  <div class="joel-head">
+    <div>
+      <div class="joel-eyebrow">Joel / Shimon Review</div>
+      <div class="joel-date">{{ today }}</div>
+    </div>
+    <div class="joel-brand">Pinta Capital Partners</div>
+  </div>
+
+  {% if not sec %}<p class="quiet">No Joel section found on the board.</p>{% endif %}
+
+  {% set open_items = items | rejectattr('status', 'equalto', 'done') | list %}
+  {% set done_items = items | selectattr('status', 'equalto', 'done') | list %}
+
+  <h2 class="joel-h2">Open items ({{ open_items | length }})</h2>
+  <table class="joel-table">
+    <tr><th class="jw1">Status</th><th>Item</th><th class="jw3">Waiting on</th><th class="jw4">Due</th></tr>
+    {% for it in open_items %}
+    <tr>
+      <td><span class="jstat {{ it.status }}">{{ 'Open' if it.status == 'open' else 'Waiting' }}</span></td>
+      <td dir="auto"><b>{{ it.title }}</b>{% if it.note %} &mdash; {{ it.note }}{% endif %}
+        {% for n in notes_by_item.get(it.id, []) %}
+        <div class="jnote">{{ n.created_at[5:7]|int }}/{{ n.created_at[8:10]|int }} &mdash; <span dir="auto">{{ n.body }}</span></div>
+        {% endfor %}
+      </td>
+      <td dir="auto">{{ it.waiting_on or '&mdash;'|safe }}</td>
+      <td>{% if it.due_date %}{{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}{% else %}&mdash;{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  {% if done_items %}
+  <h2 class="joel-h2">Recently closed ({{ done_items | length }})</h2>
+  <table class="joel-table">
+    {% for it in done_items %}
+    <tr><td class="jw1"><span class="jstat done">Done</span></td>
+      <td dir="auto">{{ it.title }}{% if it.note %} &mdash; {{ it.note }}{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</div>
+</div>
+{% endblock %}

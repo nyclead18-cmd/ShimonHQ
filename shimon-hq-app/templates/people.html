@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}People · Shimon HQ{% endblock %}
+{% block body %}
+<div class="wrap wide">
+<header class="top">
+  <div>
+    <div class="eyebrow">Who owes you what</div>
+    <h1>Shimon HQ</h1>
+  </div>
+  <div class="right">
+    <nav class="tabs">
+      <a class="tab" href="{{ url_for('board') }}">Board</a>
+      <a class="tab" href="{{ url_for('calendar_view') }}">Calendar</a>
+      <a class="tab on" href="{{ url_for('people_view') }}">People</a>
+      <a class="tab" href="{{ url_for('joel_view') }}">Joel</a>
+    </nav>
+    <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
+  </div>
+</header>
+
+<p class="pageintro">Everything you're waiting on, grouped by person &mdash; open this before you call them.</p>
+
+<div class="grid">
+{% set palette = ['#B8892E', '#1F3A5F', '#3A6B3E', '#C24E2A', '#6B4A8A', '#2A6B6B'] %}
+{% for who, its in people %}
+<section class="card" style="--sa: {{ palette[loop.index0 % 6] }}">
+  <div class="sec-head">
+    <h2><span class="dot"></span><span dir="auto">{{ who }}</span></h2>
+    <span class="counts">{{ its | length }}</span>
+  </div>
+  <ul class="items">
+    {% for it in its %}
+    <li class="item {{ it.status }}">
+      <span class="pill {{ it.status }}">{{ 'Open' if it.status == 'open' else 'Waiting' }}</span>
+      <div class="body">
+        <div class="t" dir="auto"><a class="plain" href="{{ url_for('board', _anchor='sec-' ~ it.section_id) }}">{{ it.title }}</a>
+          {% if it.note %} <span class="n" dir="auto">&mdash; {{ it.note }}</span>{% endif %}</div>
+        <div class="metaline">
+          {% if it.due_date %}<span class="due{% if it.due_date < today_iso %} over{% endif %}">due {{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}</span>{% endif %}
+          <span class="w">{{ it.sec_title }}</span>
+        </div>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endfor %}
+</div>
+{% if not people %}<p class="quiet">Nothing is waiting on anyone. Add a "waiting on" name to tasks and they group here.</p>{% endif %}
+</div>
+{% endblock %}
