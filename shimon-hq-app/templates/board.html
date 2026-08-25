@@ -138,7 +138,53 @@ document.addEventListener('click', function (ev) {
     del.classList.add('arm');
     del.textContent = 'sure?';
     setTimeout(function () { del.classList.remove('arm'); del.textContent = '✕'; }, 2500);
+    return;
   }
+  // armed response-delete: remove in place, no reload
+  if (del && del.classList.contains('arm') && del.closest('.ndelform')) {
+    ev.preventDefault();
+    var f = del.closest('form');
+    fetch(f.action, {method: 'POST', headers: {'X-Requested-With': 'fetch'}});
+    var noteLi = f.closest('li');
+    var list = noteLi.parentElement;
+    noteLi.remove();
+    if (!list.querySelector('li')) { list.remove(); }
+  }
+});
+
+// responses save in place — no page reload
+document.addEventListener('submit', function (ev) {
+  var form = ev.target.closest('form.respond');
+  if (!form) return;
+  ev.preventDefault();
+  var input = form.querySelector('input[name=body]');
+  var body = (input.value || '').trim();
+  if (!body) return;
+  fetch(form.action, {
+    method: 'POST',
+    headers: {'X-Requested-With': 'fetch'},
+    body: new FormData(form)
+  }).then(function (r) { return r.json(); }).then(function (d) {
+    if (!d.id) return;
+    var itemBody = form.closest('.body');
+    var list = itemBody.querySelector('ul.notes');
+    if (!list) {
+      list = document.createElement('ul');
+      list.className = 'notes';
+      itemBody.insertBefore(list, form);
+    }
+    var dt = d.created_at ? (parseInt(d.created_at.slice(5, 7), 10) + '/' + parseInt(d.created_at.slice(8, 10), 10)) : '';
+    var li = document.createElement('li');
+    var nd = document.createElement('span'); nd.className = 'nd'; nd.textContent = dt;
+    var tx = document.createElement('span'); tx.setAttribute('dir', 'auto'); tx.textContent = d.body;
+    var df = document.createElement('form');
+    df.className = 'ndelform'; df.method = 'post'; df.action = '/notes/' + d.id + '/delete';
+    df.innerHTML = '<button type="submit" class="del ndel" title="Remove response">✕</button>';
+    li.appendChild(nd); li.appendChild(tx); li.appendChild(df);
+    list.appendChild(li);
+    input.value = '';
+    input.focus();
+  });
 });
 </script>
 {% endblock %}

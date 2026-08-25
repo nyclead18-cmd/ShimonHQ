@@ -171,13 +171,17 @@ def edit_item(item_id):
 @login_required
 def add_note(item_id):
     body = (request.form.get("body") or "").strip()
+    note_id, created = None, None
     if body:
         con = db()
-        con.execute("INSERT INTO item_notes(item_id, body, created_at) VALUES(?,?,?)",
-                    (item_id, body, datetime.now().isoformat(timespec="seconds")))
-        con.execute("UPDATE items SET updated_at=? WHERE id=?",
-                    (datetime.now().isoformat(timespec="seconds"), item_id))
+        created = datetime.now().isoformat(timespec="seconds")
+        cur = con.execute("INSERT INTO item_notes(item_id, body, created_at) VALUES(?,?,?)",
+                          (item_id, body, created))
+        note_id = cur.lastrowid
+        con.execute("UPDATE items SET updated_at=? WHERE id=?", (created, item_id))
         con.commit()
+    if request.headers.get("X-Requested-With") == "fetch":
+        return jsonify(id=note_id, body=body, created_at=created)
     return redirect(url_for("board"))
 
 
@@ -187,6 +191,8 @@ def delete_note(note_id):
     con = db()
     con.execute("DELETE FROM item_notes WHERE id=?", (note_id,))
     con.commit()
+    if request.headers.get("X-Requested-With") == "fetch":
+        return jsonify(ok=True)
     return redirect(url_for("board"))
 
 
