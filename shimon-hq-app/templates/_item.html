@@ -15,16 +15,26 @@
     <ul class="notes">
       {% for n in inotes %}
       <li><span class="nd">{{ n.created_at[5:7]|int }}/{{ n.created_at[8:10]|int }}</span>
-        <span dir="auto">{{ n.body }}</span>
+        <span dir="auto">{{ n.body|linkify }}</span>
         <form method="post" action="{{ url_for('delete_note', note_id=n.id) }}" class="ndelform"><button type="submit" class="del ndel" title="Remove response">&#x2715;</button></form>
       </li>
       {% endfor %}
     </ul>
     {% endif %}
-    <form class="respond" method="post" action="{{ url_for('add_note', item_id=it.id) }}">
-      <input name="body" placeholder="Add a response&hellip;" dir="auto" autocomplete="off">
-      <button type="submit">&#8594;</button>
-    </form>
+    {% set ifiles = files_by_item.get(it.id, []) %}
+    <div class="files"{% if not ifiles %} hidden{% endif %}>
+      {% for f in ifiles %}
+      <span class="fchip"><a href="{{ url_for('get_file', file_id=f.id) }}" target="_blank" rel="noopener">{{ f.filename }}</a>
+        <form method="post" action="{{ url_for('delete_file', file_id=f.id) }}" class="fdelform"><button type="submit" class="del fdel" title="Remove file">&#x2715;</button></form></span>
+      {% endfor %}
+    </div>
+    <div class="respondrow">
+      <form class="respond" method="post" action="{{ url_for('add_note', item_id=it.id) }}">
+        <input name="body" placeholder="Add a response&hellip;" dir="auto" autocomplete="off">
+        <button type="submit">&#8594;</button>
+      </form>
+      <label class="fadd" title="Attach a file">+ file<input type="file" class="fileinput" data-id="{{ it.id }}" hidden></label>
+    </div>
     <details class="editbox">
       <summary>edit</summary>
       <form class="edit" method="post" action="{{ url_for('edit_item', item_id=it.id) }}">

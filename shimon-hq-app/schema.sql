@@ -22,3 +22,12 @@ CREATE TABLE IF NOT EXISTS item_notes (
   body TEXT NOT NULL,
   created_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS item_files (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  filename TEXT NOT NULL,
+  stored_name TEXT NOT NULL,
+  size INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT
+);

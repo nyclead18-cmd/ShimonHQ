@@ -106,6 +106,21 @@ form.respond input{flex:1; background:var(--bg); border:1px solid var(--border);
   color:var(--ink); font:inherit; font-size:13.5px; padding:5px 12px;}
 form.respond button{border:1px solid var(--border); background:var(--card); color:var(--muted);
   border-radius:999px; padding:0 12px; cursor:pointer; font-size:14px;}
+.respondrow{display:flex; gap:6px; align-items:center; max-width:480px;}
+.respondrow form.respond{flex:1; margin-top:6px; max-width:none;}
+.fadd{border:1px dashed var(--border); background:var(--card); color:var(--muted);
+  border-radius:999px; padding:5px 12px; cursor:pointer; font-size:12.5px; margin-top:6px;
+  white-space:nowrap;}
+.fadd.busy{opacity:.5; pointer-events:none;}
+.files{display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;}
+.fchip{display:inline-flex; gap:2px; align-items:center; border:1px solid var(--border);
+  background:var(--card); border-radius:999px; padding:2px 4px 2px 11px; font-size:12.5px;}
+.fchip a{color:var(--sa,var(--accent)); font-weight:600; text-decoration:none; max-width:200px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.fchip a:hover{text-decoration:underline;}
+.fdel{border:none; background:none; padding:0 5px; font-size:10px; opacity:.4;}
+.fchip:hover .fdel{opacity:1;}
+ul.notes a{color:var(--sa,var(--accent)); word-break:break-all;}
 .duelabel{display:flex; gap:8px; align-items:center; color:var(--muted); font-size:13px;}
 .duelabel input{width:auto;}
 details.editbox{margin-top:2px;}

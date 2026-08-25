@@ -149,7 +149,49 @@ document.addEventListener('click', function (ev) {
     var list = noteLi.parentElement;
     noteLi.remove();
     if (!list.querySelector('li')) { list.remove(); }
+    return;
   }
+  // armed file-delete: remove chip in place
+  if (del && del.classList.contains('arm') && del.closest('.fdelform')) {
+    ev.preventDefault();
+    var ff = del.closest('form');
+    fetch(ff.action, {method: 'POST', headers: {'X-Requested-With': 'fetch'}});
+    var chip = ff.closest('.fchip');
+    var box = chip.parentElement;
+    chip.remove();
+    if (!box.querySelector('.fchip')) { box.hidden = true; }
+  }
+});
+
+// file uploads save in place
+document.addEventListener('change', function (ev) {
+  var inp = ev.target.closest('.fileinput');
+  if (!inp || !inp.files.length) return;
+  var id = inp.getAttribute('data-id');
+  var label = inp.closest('label');
+  label.classList.add('busy');
+  var fd = new FormData();
+  fd.append('file', inp.files[0]);
+  fetch('/items/' + id + '/files', {method: 'POST', headers: {'X-Requested-With': 'fetch'}, body: fd})
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      label.classList.remove('busy');
+      if (!d.id) { alert(d.error || 'Upload failed'); return; }
+      var body = inp.closest('.body');
+      var box = body.querySelector('.files');
+      box.hidden = false;
+      var chip = document.createElement('span');
+      chip.className = 'fchip';
+      var a = document.createElement('a');
+      a.href = '/files/' + d.id; a.target = '_blank'; a.rel = 'noopener'; a.textContent = d.filename;
+      var df = document.createElement('form');
+      df.className = 'fdelform'; df.method = 'post'; df.action = '/files/' + d.id + '/delete';
+      df.innerHTML = '<button type="submit" class="del fdel" title="Remove file">✕</button>';
+      chip.appendChild(a); chip.appendChild(df);
+      box.appendChild(chip);
+      inp.value = '';
+    })
+    .catch(function () { label.classList.remove('busy'); });
 });
 
 // responses save in place — no page reload
