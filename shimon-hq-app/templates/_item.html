@@ -4,13 +4,34 @@
   </button>
   <div class="body">
     <div class="t" dir="auto">{{ it.title }}{% if it.note %} <span class="n" dir="auto">&mdash; {{ it.note }}</span>{% endif %}</div>
-    {% if it.waiting_on %}<div class="w">waiting on <b dir="auto">{{ it.waiting_on }}</b></div>{% endif %}
+    <div class="metaline">
+      {% if it.due_date %}
+        <span class="due{% if it.status != 'done' %}{% if it.due_date < today_iso %} over{% elif it.due_date <= soon_iso %} soon{% endif %}{% endif %}">due {{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}</span>
+      {% endif %}
+      {% if it.waiting_on %}<span class="w">waiting on <b dir="auto">{{ it.waiting_on }}</b></span>{% endif %}
+    </div>
+    {% set inotes = notes_by_item.get(it.id, []) %}
+    {% if inotes %}
+    <ul class="notes">
+      {% for n in inotes %}
+      <li><span class="nd">{{ n.created_at[5:7]|int }}/{{ n.created_at[8:10]|int }}</span>
+        <span dir="auto">{{ n.body }}</span>
+        <form method="post" action="{{ url_for('delete_note', note_id=n.id) }}" class="ndelform"><button type="submit" class="del ndel" title="Remove response">&#x2715;</button></form>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    <form class="respond" method="post" action="{{ url_for('add_note', item_id=it.id) }}">
+      <input name="body" placeholder="Add a response&hellip;" dir="auto" autocomplete="off">
+      <button type="submit">&#8594;</button>
+    </form>
     <details class="editbox">
       <summary>edit</summary>
       <form class="edit" method="post" action="{{ url_for('edit_item', item_id=it.id) }}">
         <input name="title" dir="auto" value="{{ it.title }}" required>
         <input name="note" dir="auto" value="{{ it.note }}" placeholder="Next step / note">
         <input name="waiting_on" dir="auto" value="{{ it.waiting_on }}" placeholder="Waiting on (who)">
+        <label class="duelabel">Due <input type="date" name="due_date" value="{{ it.due_date or '' }}"></label>
         <div class="btns"><button type="submit">Save</button></div>
       </form>
       <form method="post" action="{{ url_for('delete_item', item_id=it.id) }}" class="delform">

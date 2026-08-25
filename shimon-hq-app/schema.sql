@@ -12,5 +12,13 @@ CREATE TABLE IF NOT EXISTS items (
   waiting_on TEXT DEFAULT '',
   status TEXT NOT NULL DEFAULT 'open',  -- open | waiting | done
   pos INTEGER NOT NULL DEFAULT 0,
+  due_date TEXT,
   updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS item_notes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  body TEXT NOT NULL,
+  created_at TEXT
 );

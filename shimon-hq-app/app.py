@@ -41,6 +41,9 @@ def init_db():
     con = sqlite3.connect(DB_PATH)
     with open(os.path.join(BASE, "schema.sql"), encoding="utf-8") as f:
         con.executescript(f.read())
+    cols = [r[1] for r in con.execute("PRAGMA table_info(items)")]
+    if "due_date" not in cols:
+        con.execute("ALTER TABLE items ADD COLUMN due_date TEXT")
     n = con.execute("SELECT COUNT(*) FROM sections").fetchone()[0]
     if n == 0:
         with open(os.path.join(BASE, "seed_data.json"), encoding="utf-8") as f:
@@ -97,9 +100,16 @@ def logout():
 @app.route("/")
 @login_required
 def board():
+    from datetime import timedelta
     con = db()
     sections = con.execute("SELECT * FROM sections ORDER BY pos, id").fetchall()
     items = con.execute("SELECT * FROM items ORDER BY pos, id").fetchall()
+    notes = con.execute("SELECT * FROM item_notes ORDER BY id").fetchall()
+    notes_by_item = {}
+    for n in notes:
+        notes_by_item.setdefault(n["item_id"], []).append(n)
+    today_iso = datetime.now().date().isoformat()
+    soon_iso = (datetime.now().date() + timedelta(days=3)).isoformat()
     by_sec = {}
     for it in items:
         by_sec.setdefault(it["section_id"], []).append(it)
@@ -110,6 +120,8 @@ def board():
         "done": sum(1 for it in items if it["status"] == "done"),
     }
     return render_template("board.html", sections=sections, by_sec=by_sec,
+                           notes_by_item=notes_by_item,
+                           today_iso=today_iso, soon_iso=soon_iso,
                            total_active=total_active, stats=stats,
                            today=datetime.now().strftime("%b %-d, %Y")
                            if os.name != "nt" else datetime.now().strftime("%b %d, %Y"))
@@ -128,10 +140,11 @@ def add_item():
     pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM items WHERE section_id=?",
                       (sid,)).fetchone()[0]
     con.execute(
-        "INSERT INTO items(section_id, title, note, waiting_on, status, pos, updated_at)"
-        " VALUES(?,?,?,?,?,?,?)",
+        "INSERT INTO items(section_id, title, note, waiting_on, status, pos, due_date, updated_at)"
+        " VALUES(?,?,?,?,?,?,?,?)",
         (sid, title, (request.form.get("note") or "").strip(),
          (request.form.get("waiting_on") or "").strip(), "open", pos,
+         (request.form.get("due_date") or "").strip() or None,
          datetime.now().isoformat(timespec="seconds")))
     con.commit()
     return redirect(url_for("board", _anchor="sec-%d" % sid))
@@ -145,10 +158,34 @@ def edit_item(item_id):
         return redirect(url_for("board"))
     con = db()
     con.execute(
-        "UPDATE items SET title=?, note=?, waiting_on=?, updated_at=? WHERE id=?",
+        "UPDATE items SET title=?, note=?, waiting_on=?, due_date=?, updated_at=? WHERE id=?",
         (title, (request.form.get("note") or "").strip(),
          (request.form.get("waiting_on") or "").strip(),
+         (request.form.get("due_date") or "").strip() or None,
          datetime.now().isoformat(timespec="seconds"), item_id))
+    con.commit()
+    return redirect(url_for("board"))
+
+
+@app.route("/items/<int:item_id>/notes", methods=["POST"])
+@login_required
+def add_note(item_id):
+    body = (request.form.get("body") or "").strip()
+    if body:
+        con = db()
+        con.execute("INSERT INTO item_notes(item_id, body, created_at) VALUES(?,?,?)",
+                    (item_id, body, datetime.now().isoformat(timespec="seconds")))
+        con.execute("UPDATE items SET updated_at=? WHERE id=?",
+                    (datetime.now().isoformat(timespec="seconds"), item_id))
+        con.commit()
+    return redirect(url_for("board"))
+
+
+@app.route("/notes/<int:note_id>/delete", methods=["POST"])
+@login_required
+def delete_note(note_id):
+    con = db()
+    con.execute("DELETE FROM item_notes WHERE id=?", (note_id,))
     con.commit()
     return redirect(url_for("board"))
 
