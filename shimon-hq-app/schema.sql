@@ -1,0 +1,16 @@
+CREATE TABLE IF NOT EXISTS sections (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  pos INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  section_id INTEGER NOT NULL REFERENCES sections(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  note TEXT DEFAULT '',
+  waiting_on TEXT DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'open',  -- open | waiting | done
+  pos INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT
+);

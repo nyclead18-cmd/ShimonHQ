@@ -1,0 +1,102 @@
+:root{
+  --bg:#F6F3EC; --card:#FFFEFB; --ink:#1E1B16; --muted:#8A8377;
+  --accent:#C24E2A; --border:#E7E2D6; --row:#FAF8F2;
+  --pill-open-bg:#F7E5DD; --pill-open-tx:#A03E1E;
+  --pill-wait-bg:#F3EAD2; --pill-wait-tx:#8A671D;
+  --pill-done-bg:#E4EEE2; --pill-done-tx:#3A6B3E;
+  --danger:#A33B2E; --btn-bg:#1E1B16; --btn-tx:#FFFEFB;
+  --shadow:0 1px 3px rgba(30,27,22,.06);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#191611; --card:#221E18; --ink:#EDE8DF; --muted:#9A9284;
+    --accent:#E07B54; --border:#332E25; --row:#272219;
+    --pill-open-bg:#3D2A20; --pill-open-tx:#EFA283;
+    --pill-wait-bg:#3A331E; --pill-wait-tx:#DCC172;
+    --pill-done-bg:#233026; --pill-done-tx:#9CC79E;
+    --danger:#E08072; --btn-bg:#EDE8DF; --btn-tx:#191611;
+    --shadow:none;
+  }
+}
+*{box-sizing:border-box}
+body{background:var(--bg); color:var(--ink); margin:0;
+  font-family:'Assistant',-apple-system,'Segoe UI',Arial,sans-serif;
+  font-size:15.5px; line-height:1.5;}
+.wrap{max-width:860px; margin:0 auto; padding:30px 18px 90px;}
+header.top{display:flex; align-items:flex-end; justify-content:space-between; gap:12px; flex-wrap:wrap;}
+.eyebrow{color:var(--accent); font-size:11.5px; font-weight:700; letter-spacing:.14em; text-transform:uppercase;}
+h1{font-family:'Playfair Display','Frank Ruhl Libre',Georgia,serif; font-weight:600;
+  font-size:44px; margin:2px 0 0; letter-spacing:.2px; text-wrap:balance;}
+.right{display:flex; gap:14px; align-items:baseline; padding-bottom:8px;}
+.totals{color:var(--muted); font-size:13px; font-variant-numeric:tabular-nums;}
+.logout{color:var(--muted); font-size:13px;}
+.meta{color:var(--muted); font-size:13px; margin:6px 0 20px;}
+.capture{display:flex; gap:8px; margin:0 0 28px;}
+.capture input{flex:1; background:var(--card); border:1px solid var(--border); border-radius:999px;
+  color:var(--ink); font:inherit; font-style:italic; padding:11px 18px; box-shadow:var(--shadow);}
+.capture input::placeholder{color:var(--muted);}
+.capture button{font:inherit; font-weight:700; border-radius:999px; padding:0 22px; cursor:pointer;
+  border:1px solid var(--btn-bg); background:var(--btn-bg); color:var(--btn-tx);}
+section.card{background:var(--card); border:1px solid var(--border); border-radius:14px;
+  margin-bottom:22px; overflow:hidden; box-shadow:var(--shadow);}
+.sec-head{display:flex; align-items:baseline; justify-content:space-between; gap:10px;
+  padding:16px 18px 12px; border-bottom:1px solid var(--border); flex-wrap:wrap;}
+.sec-head h2{font-family:'Playfair Display','Frank Ruhl Libre',Georgia,serif;
+  font-size:22px; font-weight:600; margin:0;}
+.counts{color:var(--muted); font-size:12.5px; letter-spacing:.05em; text-transform:uppercase;
+  font-variant-numeric:tabular-nums;}
+.linky{background:none; border:none; color:var(--muted); cursor:pointer; font:inherit;
+  text-decoration:underline; text-underline-offset:3px; padding:0; text-transform:uppercase; font-size:12.5px;}
+ul.items{list-style:none; margin:0; padding:0;}
+li.item{display:grid; grid-template-columns:84px 1fr; gap:12px; align-items:start;
+  padding:12px 18px; border-bottom:1px solid var(--border);}
+li.item:last-child{border-bottom:none}
+li.item:nth-child(even){background:var(--row)}
+li.item.done .t{text-decoration:line-through; color:var(--muted);}
+li.donerow{display:none;}
+section.show-done li.donerow{display:grid;}
+.pill{border:none; cursor:pointer; font:inherit; font-size:11.5px; font-weight:700; letter-spacing:.05em;
+  text-transform:uppercase; padding:5px 0; width:76px; border-radius:999px; text-align:center; margin-top:1px;}
+.pill.open{background:var(--pill-open-bg); color:var(--pill-open-tx);}
+.pill.waiting{background:var(--pill-wait-bg); color:var(--pill-wait-tx);}
+.pill.done{background:var(--pill-done-bg); color:var(--pill-done-tx);}
+.pill:focus-visible,button:focus-visible,input:focus-visible,summary:focus-visible{
+  outline:2px solid var(--accent); outline-offset:2px;}
+.t{font-weight:700;}
+.n{font-weight:400;}
+.w{color:var(--muted); font-size:13px;}
+.w b{color:var(--accent); font-weight:700;}
+details.editbox{margin-top:2px;}
+details.editbox>summary{color:var(--muted); font-size:12px; cursor:pointer; list-style:none;
+  width:max-content; opacity:.6;}
+details.editbox>summary::-webkit-details-marker{display:none}
+details.editbox[open]>summary{opacity:1}
+.addrow{padding:12px 18px;}
+.addrow>details>summary{color:var(--muted); font-size:13.5px; cursor:pointer; list-style:none;
+  border:1px dashed var(--border); border-radius:999px; padding:7px 16px; width:max-content;
+  background:var(--card);}
+.addrow>details>summary::-webkit-details-marker{display:none}
+.addsec{padding:0 0 10px;}
+form.edit{display:grid; gap:6px; padding:8px 0 4px; max-width:520px;}
+form.edit input{background:var(--bg); border:1px solid var(--border); border-radius:8px;
+  color:var(--ink); font:inherit; padding:8px 10px; width:100%;}
+form.edit .btns button{font:inherit; font-size:13.5px; border-radius:999px; padding:6px 18px;
+  cursor:pointer; border:1px solid var(--btn-bg); background:var(--btn-bg); color:var(--btn-tx); font-weight:700;}
+.delform{margin-top:6px;}
+.del{background:none; border:1px solid var(--border); border-radius:6px; color:var(--muted);
+  cursor:pointer; font-size:12px; padding:2px 8px;}
+.del.arm{border-color:var(--danger); color:var(--danger); font-weight:700;}
+footer{color:var(--muted); font-size:12.5px; margin-top:26px; font-style:italic;}
+/* login */
+.login-wrap{min-height:100dvh; display:grid; place-items:center; padding:20px; background:var(--bg);}
+.login-card{background:var(--card); border:1px solid var(--border); border-radius:16px;
+  padding:34px 28px; width:min(360px,100%); display:grid; gap:10px; text-align:center; box-shadow:var(--shadow);}
+.login-card h1{font-size:34px; margin:0;}
+.login-card .sub{color:var(--accent); font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+  font-weight:700; margin-bottom:8px;}
+.login-card input{background:var(--bg); border:1px solid var(--border); border-radius:8px;
+  color:var(--ink); font:inherit; padding:10px 12px;}
+.login-card button{font:inherit; font-weight:700; border-radius:999px; padding:10px;
+  border:1px solid var(--btn-bg); background:var(--btn-bg); color:var(--btn-tx); cursor:pointer; margin-top:4px;}
+.error{color:var(--danger); font-size:13.5px;}
+@media (max-width:560px){ h1{font-size:34px;} li.item{grid-template-columns:72px 1fr;} .pill{width:68px;} }

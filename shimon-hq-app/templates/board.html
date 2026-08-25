@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="wrap">
+<header class="top">
+  <div>
+    <div class="eyebrow">Pinta &middot; Ohr Chaim &middot; Personal</div>
+    <h1>Shimon HQ</h1>
+  </div>
+  <div class="right">
+    <span class="totals">{{ total_active }} active</span>
+    <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
+  </div>
+</header>
+<div class="meta">{{ today }}</div>
+
+<form class="capture" method="post" action="{{ url_for('capture') }}">
+  <input name="title" placeholder="Catch a thought before it wanders off&hellip;" dir="auto" autocomplete="off">
+  <button type="submit">Add</button>
+</form>
+
+{% for sec in sections %}
+{% set items = by_sec.get(sec.id, []) %}
+{% set done = items | selectattr('status', 'equalto', 'done') | list %}
+{% set active = items | rejectattr('status', 'equalto', 'done') | list %}
+<section class="card" id="sec-{{ sec.id }}">
+  <div class="sec-head">
+    <h2>{{ sec.title }}</h2>
+    <span class="counts">{{ active | selectattr('status','equalto','open') | list | length }} open
+      · {{ active | selectattr('status','equalto','waiting') | list | length }} waiting
+      {% if done %}· <button type="button" class="linky" data-toggle-done="{{ sec.id }}">{{ done | length }} done</button>{% endif %}
+    </span>
+  </div>
+  <ul class="items">
+    {% for it in active %}{% include "_item.html" %}{% endfor %}
+    {% for it in done %}{% set hidden = true %}{% include "_item.html" %}{% endfor %}
+  </ul>
+  <div class="addrow">
+    <details>
+      <summary>+ Add item</summary>
+      <form class="edit" method="post" action="{{ url_for('add_item') }}">
+        <input type="hidden" name="section_id" value="{{ sec.id }}">
+        <input name="title" placeholder="Item" dir="auto" required>
+        <input name="note" placeholder="Next step / note" dir="auto">
+        <input name="waiting_on" placeholder="Waiting on (who)" dir="auto">
+        <div class="btns"><button type="submit">Add</button></div>
+      </form>
+    </details>
+  </div>
+</section>
+{% endfor %}
+
+<div class="addrow addsec">
+  <details>
+    <summary>+ Add section</summary>
+    <form class="edit" method="post" action="{{ url_for('add_section') }}">
+      <input name="title" placeholder="Section name" dir="auto" required>
+      <div class="btns"><button type="submit">Add</button></div>
+    </form>
+  </details>
+</div>
+
+<footer>Tap a status pill to cycle Open &rarr; Waiting &rarr; Done.</footer>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('click', function (ev) {
+  var pill = ev.target.closest('.pill');
+  if (pill) {
+    var id = pill.getAttribute('data-id');
+    fetch('/items/' + id + '/cycle', {method: 'POST'})
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        pill.className = 'pill ' + d.status;
+        pill.textContent = d.status === 'open' ? 'Open' : d.status === 'waiting' ? 'Waiting' : 'Done';
+        pill.closest('li').className = 'item ' + d.status;
+      });
+    return;
+  }
+  var tog = ev.target.closest('[data-toggle-done]');
+  if (tog) {
+    var sec = document.getElementById('sec-' + tog.getAttribute('data-toggle-done'));
+    sec.classList.toggle('show-done');
+  }
+  var del = ev.target.closest('.del');
+  if (del && !del.classList.contains('arm')) {
+    ev.preventDefault();
+    del.classList.add('arm');
+    del.textContent = 'sure?';
+    setTimeout(function () { del.classList.remove('arm'); del.textContent = '✕'; }, 2500);
+  }
+});
+</script>
+{% endblock %}

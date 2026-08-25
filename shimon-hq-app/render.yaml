@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: shimon-hq
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn wsgi:app
+    disk:
+      name: hq-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: DB_PATH
+        value: /data/hq.db
+      - key: SECRET_KEY
+        generateValue: true
+      - key: HQ_USER
+        value: shimon
+      - key: HQ_PASSWORD
+        sync: false

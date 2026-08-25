@@ -1,0 +1,21 @@
+<li class="item {{ it.status }}{% if hidden %} donerow{% endif %}">
+  <button type="button" class="pill {{ it.status }}" data-id="{{ it.id }}">
+    {{ 'Open' if it.status == 'open' else 'Waiting' if it.status == 'waiting' else 'Done' }}
+  </button>
+  <div class="body">
+    <div class="t" dir="auto">{{ it.title }}{% if it.note %} <span class="n" dir="auto">&mdash; {{ it.note }}</span>{% endif %}</div>
+    {% if it.waiting_on %}<div class="w">waiting on <b dir="auto">{{ it.waiting_on }}</b></div>{% endif %}
+    <details class="editbox">
+      <summary>edit</summary>
+      <form class="edit" method="post" action="{{ url_for('edit_item', item_id=it.id) }}">
+        <input name="title" dir="auto" value="{{ it.title }}" required>
+        <input name="note" dir="auto" value="{{ it.note }}" placeholder="Next step / note">
+        <input name="waiting_on" dir="auto" value="{{ it.waiting_on }}" placeholder="Waiting on (who)">
+        <div class="btns"><button type="submit">Save</button></div>
+      </form>
+      <form method="post" action="{{ url_for('delete_item', item_id=it.id) }}" class="delform">
+        <button type="submit" class="del" title="Remove">&#x2715;</button>
+      </form>
+    </details>
+  </div>
+</li>
