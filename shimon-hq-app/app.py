@@ -22,6 +22,15 @@ app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20 MB per upload
 _URL_RE = re.compile(r"(https?://[^\s<>\"]+)")
 
 
+@app.context_processor
+def inject_css_version():
+    try:
+        v = int(os.path.getmtime(os.path.join(BASE, "static", "style.css")))
+    except OSError:
+        v = 0
+    return {"css_v": v}
+
+
 @app.template_filter("linkify")
 def linkify(text):
     """Escape text, then turn URLs into safe links."""
