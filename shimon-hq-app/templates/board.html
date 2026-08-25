@@ -1,33 +1,49 @@
 {% extends "base.html" %}
 {% block body %}
-<div class="wrap">
+<div class="wrap wide">
 <header class="top">
   <div>
     <div class="eyebrow">Pinta &middot; Ohr Chaim &middot; Personal</div>
     <h1>Shimon HQ</h1>
   </div>
   <div class="right">
-    <span class="totals">{{ total_active }} active</span>
+    <span class="totals">{{ today }}</span>
     <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
   </div>
 </header>
-<div class="meta">{{ today }}</div>
+
+<div class="stats">
+  <div class="stat"><div class="num">{{ stats.open }}</div><div class="lbl">on me</div></div>
+  <div class="stat"><div class="num">{{ stats.waiting }}</div><div class="lbl">waiting on others</div></div>
+  <div class="stat"><div class="num">{{ stats.done }}</div><div class="lbl">done</div></div>
+</div>
 
 <form class="capture" method="post" action="{{ url_for('capture') }}">
   <input name="title" placeholder="Catch a thought before it wanders off&hellip;" dir="auto" autocomplete="off">
   <button type="submit">Add</button>
 </form>
 
+<div class="toolbar">
+  <input id="q" type="search" placeholder="Find anything&hellip;" dir="auto" autocomplete="off">
+  <div class="fpills">
+    <button type="button" class="fpill on" data-f="all">All</button>
+    <button type="button" class="fpill" data-f="open">On me</button>
+    <button type="button" class="fpill" data-f="waiting">Waiting</button>
+    <button type="button" class="fpill" data-f="done">Done</button>
+  </div>
+</div>
+
+<div class="grid">
+{% set palette = ['#B8892E', '#1F3A5F', '#3A6B3E', '#C24E2A', '#6B4A8A', '#2A6B6B'] %}
 {% for sec in sections %}
 {% set items = by_sec.get(sec.id, []) %}
 {% set done = items | selectattr('status', 'equalto', 'done') | list %}
 {% set active = items | rejectattr('status', 'equalto', 'done') | list %}
-<section class="card" id="sec-{{ sec.id }}">
+<section class="card" id="sec-{{ sec.id }}" style="--sa: {{ palette[loop.index0 % 6] }}">
   <div class="sec-head">
-    <h2>{{ sec.title }}</h2>
-    <span class="counts">{{ active | selectattr('status','equalto','open') | list | length }} open
-      · {{ active | selectattr('status','equalto','waiting') | list | length }} waiting
-      {% if done %}· <button type="button" class="linky" data-toggle-done="{{ sec.id }}">{{ done | length }} done</button>{% endif %}
+    <h2><span class="dot"></span>{{ sec.title }}</h2>
+    <span class="counts">{{ active | length }}
+      {% if done %}&middot; <button type="button" class="linky" data-toggle-done="{{ sec.id }}">{{ done | length }} done</button>{% endif %}
     </span>
   </div>
   <ul class="items">
@@ -48,6 +64,7 @@
   </div>
 </section>
 {% endfor %}
+</div>
 
 <div class="addrow addsec">
   <details>
@@ -65,6 +82,35 @@
 
 {% block scripts %}
 <script>
+var MODE = 'all';
+var q = document.getElementById('q');
+
+function applyFilter() {
+  var needle = (q.value || '').toLowerCase().trim();
+  var filtering = needle !== '' || MODE !== 'all';
+  document.querySelectorAll('li.item').forEach(function (li) {
+    var okText = !needle || li.textContent.toLowerCase().indexOf(needle) !== -1;
+    var st = li.classList.contains('open') ? 'open' : li.classList.contains('waiting') ? 'waiting' : 'done';
+    var okMode = MODE === 'all' ? (st !== 'done' || li.closest('section').classList.contains('show-done') || needle) : st === MODE;
+    li.style.display = (okText && okMode)
+      ? (li.classList.contains('donerow') ? 'grid' : '')
+      : 'none';
+  });
+  document.querySelectorAll('section.card').forEach(function (sec) {
+    var any = Array.prototype.some.call(sec.querySelectorAll('li.item'), function (li) { return li.style.display !== 'none'; });
+    sec.style.display = (any || !filtering) ? '' : 'none';
+  });
+}
+q.addEventListener('input', applyFilter);
+document.querySelectorAll('.fpill').forEach(function (b) {
+  b.addEventListener('click', function () {
+    document.querySelectorAll('.fpill').forEach(function (x) { x.classList.remove('on'); });
+    b.classList.add('on');
+    MODE = b.getAttribute('data-f');
+    applyFilter();
+  });
+});
+
 document.addEventListener('click', function (ev) {
   var pill = ev.target.closest('.pill');
   if (pill) {
@@ -74,14 +120,16 @@ document.addEventListener('click', function (ev) {
       .then(function (d) {
         pill.className = 'pill ' + d.status;
         pill.textContent = d.status === 'open' ? 'Open' : d.status === 'waiting' ? 'Waiting' : 'Done';
-        pill.closest('li').className = 'item ' + d.status;
+        var li = pill.closest('li');
+        li.className = 'item ' + d.status + (d.status === 'done' ? ' donerow' : '');
+        applyFilter();
       });
     return;
   }
   var tog = ev.target.closest('[data-toggle-done]');
   if (tog) {
-    var sec = document.getElementById('sec-' + tog.getAttribute('data-toggle-done'));
-    sec.classList.toggle('show-done');
+    document.getElementById('sec-' + tog.getAttribute('data-toggle-done')).classList.toggle('show-done');
+    applyFilter();
   }
   var del = ev.target.closest('.del');
   if (del && !del.classList.contains('arm')) {

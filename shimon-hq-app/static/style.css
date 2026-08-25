@@ -23,6 +23,28 @@ body{background:var(--bg); color:var(--ink); margin:0;
   font-family:'Assistant',-apple-system,'Segoe UI',Arial,sans-serif;
   font-size:15.5px; line-height:1.5;}
 .wrap{max-width:860px; margin:0 auto; padding:30px 18px 90px;}
+.wrap.wide{max-width:1120px;}
+.stats{display:flex; gap:14px; margin:20px 0 18px; flex-wrap:wrap;}
+.stat{background:var(--card); border:1px solid var(--border); border-radius:14px;
+  padding:14px 22px 12px; min-width:130px; box-shadow:var(--shadow);}
+.stat .num{font-family:'Playfair Display','Frank Ruhl Libre',Georgia,serif;
+  font-size:34px; font-weight:600; line-height:1; font-variant-numeric:tabular-nums;}
+.stat:nth-child(1) .num{color:var(--accent);}
+.stat .lbl{color:var(--muted); font-size:11.5px; letter-spacing:.09em; text-transform:uppercase; margin-top:6px;}
+.toolbar{display:flex; gap:10px; align-items:center; margin:0 0 22px; flex-wrap:wrap;}
+.toolbar input{flex:1; min-width:200px; background:var(--card); border:1px solid var(--border);
+  border-radius:999px; color:var(--ink); font:inherit; padding:9px 16px;}
+.fpills{display:flex; gap:6px;}
+.fpill{font:inherit; font-size:12.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
+  border:1px solid var(--border); background:var(--card); color:var(--muted);
+  border-radius:999px; padding:7px 15px; cursor:pointer;}
+.fpill.on{background:var(--btn-bg); color:var(--btn-tx); border-color:var(--btn-bg);}
+.grid{columns:1; column-gap:20px;}
+@media (min-width:900px){ .grid{columns:2;} }
+.grid section.card{break-inside:avoid; margin-bottom:20px;}
+.sec-head h2 .dot{display:inline-block; width:10px; height:10px; border-radius:50%;
+  background:var(--sa,var(--accent)); margin-right:9px; vertical-align:2px;}
+section.card{border-top:3px solid var(--sa,var(--border));}
 header.top{display:flex; align-items:flex-end; justify-content:space-between; gap:12px; flex-wrap:wrap;}
 .eyebrow{color:var(--accent); font-size:11.5px; font-weight:700; letter-spacing:.14em; text-transform:uppercase;}
 h1{font-family:'Playfair Display','Frank Ruhl Libre',Georgia,serif; font-weight:600;
@@ -64,8 +86,9 @@ section.show-done li.donerow{display:grid;}
   outline:2px solid var(--accent); outline-offset:2px;}
 .t{font-weight:700;}
 .n{font-weight:400;}
-.w{color:var(--muted); font-size:13px;}
-.w b{color:var(--accent); font-weight:700;}
+.w{color:var(--muted); font-size:13px; margin-top:2px;}
+.w b{color:var(--sa,var(--accent)); font-weight:700; border:1px solid var(--border);
+  border-radius:999px; padding:1px 9px; display:inline-block; background:var(--bg);}
 details.editbox{margin-top:2px;}
 details.editbox>summary{color:var(--muted); font-size:12px; cursor:pointer; list-style:none;
   width:max-content; opacity:.6;}

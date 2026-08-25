@@ -104,8 +104,13 @@ def board():
     for it in items:
         by_sec.setdefault(it["section_id"], []).append(it)
     total_active = sum(1 for it in items if it["status"] != "done")
+    stats = {
+        "open": sum(1 for it in items if it["status"] == "open"),
+        "waiting": sum(1 for it in items if it["status"] == "waiting"),
+        "done": sum(1 for it in items if it["status"] == "done"),
+    }
     return render_template("board.html", sections=sections, by_sec=by_sec,
-                           total_active=total_active,
+                           total_active=total_active, stats=stats,
                            today=datetime.now().strftime("%b %-d, %Y")
                            if os.name != "nt" else datetime.now().strftime("%b %d, %Y"))
 
