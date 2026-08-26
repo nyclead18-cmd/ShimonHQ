@@ -481,3 +481,34 @@ li.noterow .t{flex:1; min-width:0;}
   border-radius:999px; padding:7px 11px; cursor:pointer; min-height:34px;
   touch-action:manipulation; filter:grayscale(1); opacity:.55;}
 .geobtn.on{filter:none; opacity:1; border-color:var(--accent);}
+
+/* ---------- desktop: actually use the screen ----------
+   The whole thing was laid out for a phone and then let out a little. On a real
+   monitor that leaves two thirds of the glass empty, so past 1200px the page
+   widens and the board flows into more columns. */
+@media (min-width:1200px){
+  .wrap{max-width:1080px; padding:34px 26px 90px;}
+  .wrap.wide{max-width:1560px;}
+  .grid{columns:2; column-gap:22px;}
+  .capture, .toolbar{max-width:760px;}
+  .stats{max-width:760px;}
+  h1{font-size:40px;}
+  /* the day view reads better as two panes than one long strip */
+  .daygrid{columns:2; column-gap:22px;}
+  .daygrid > section.card{break-inside:avoid; margin-bottom:20px;}
+}
+@media (min-width:1550px){
+  .wrap.wide{max-width:1720px;}
+  .grid{columns:3;}
+}
+@media (min-width:2100px){
+  .wrap.wide{max-width:1980px;}
+  .grid{columns:4;}
+}
+/* a task row has room to breathe on a wide screen */
+@media (min-width:1200px){
+  li.item{grid-template-columns:96px 1fr; padding:14px 20px;}
+  .sec-head{padding-left:20px; padding-right:20px;}
+  .proj-head{padding-left:20px; padding-right:20px;}
+  ul.notes li > .t{line-height:1.45;}
+}
