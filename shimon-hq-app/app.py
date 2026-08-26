@@ -1581,9 +1581,8 @@ def api_washape():
         abort(401)
     out = {}
     try:
-        rows, more = wa.chats(page=1)
+        rows = wa.all_chats()
         out["chat_count"] = len(rows)
-        out["has_more"] = more
         out["chat_keys"] = sorted(rows[0].keys()) if rows else []
         stamped = [c for c in rows if c.get("last_message_timestamp")]
         out["chats_with_a_timestamp"] = len(stamped)

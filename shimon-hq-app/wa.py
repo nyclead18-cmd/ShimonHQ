@@ -64,7 +64,10 @@ def chats(page=1, ua=None, **filters):
     return _rows(payload)
 
 
-def all_chats(max_pages=6, **filters):
+MAX_PAGES = 40      # 50 chats a page; his whole list, well inside the call quota
+
+
+def all_chats(max_pages=MAX_PAGES, **filters):
     out = []
     for page in range(1, max_pages + 1):
         rows, more = chats(page=page, **filters)
@@ -86,7 +89,7 @@ def messages(chat_id, after=None, limit_pages=3, sorting_order="asc"):
     return out
 
 
-def active_since(iso, max_pages=6):
+def active_since(iso, max_pages=MAX_PAGES):
     """Chats whose newest message landed at or after `iso` - newest first.
 
     One cheap listing call tells us where to look, instead of walking every chat.
@@ -133,11 +136,16 @@ def status(ua=None):
                 "detail": "%s: HTTP %s %s" % (why, e.code, body[:200])}
     except Exception as e:
         return {"token": True, "works": False, "detail": "Could not reach TimelinesAI: %s" % e}
-    newest = ""
-    for c in rows:
-        ts = c.get("last_message_timestamp") or ""
-        if ts > newest:
-            newest = ts
-    return {"token": True, "works": True, "chats_first_page": len(rows), "ua": ua or UA,
-            "detail": "Connected. %d chats on the first page, newest message %s."
-                      % (len(rows), newest[:16].replace("T", " ") or "unknown")}
+    # the listing runs oldest first, so the live chats are on the last pages -
+    # walk the lot rather than judging by page one
+    try:
+        every = all_chats()
+    except Exception as e:
+        return {"token": True, "works": True, "chats_first_page": len(rows), "ua": ua or UA,
+                "detail": "Connected, but could not page the full chat list: %s" % e}
+    stamped = [c for c in every if c.get("last_message_timestamp")]
+    newest = max([c["last_message_timestamp"] for c in stamped], default="")
+    return {"token": True, "works": True, "ua": ua or UA,
+            "chats_total": len(every), "chats_with_messages": len(stamped),
+            "detail": "Connected. %d chats, %d with messages, newest %s."
+                      % (len(every), len(stamped), newest[:16].replace("T", " ") or "unknown")}
