@@ -55,12 +55,8 @@ def f_maplink(loc):
 
 @app.template_filter("mapdir")
 def f_mapdir(loc):
-    """Directions, starting from the address saved in Settings when there is one."""
-    try:
-        origin = _setting_ro(db(), "origin_address", "") or ""
-    except Exception:
-        origin = ""
-    return maps.directions(loc, origin)
+    """Directions with no origin - Maps starts from where the phone actually is."""
+    return maps.directions(loc)
 
 
 @app.template_filter("mapembed")
@@ -600,7 +596,8 @@ def calendar_view():
                            overdue=overdue, upcoming=upcoming,
                            month_label=first.strftime("%B %Y"),
                            prev_m=prev_m, next_m=next_m,
-                           origin=_setting_ro(con, "origin_address", "") or "",
+                           home=_setting_ro(con, "origin_home", "") or "",
+                           work=_setting_ro(con, "origin_work", "") or "",
                            maps_key=bool(maps.KEY),
                            today_iso=t_iso, cur_month=mo)
 
@@ -741,6 +738,33 @@ def brief_dismiss(bid):
 BUFFER_MIN = 10          # padding either side of a drive so you are not sprinting
 
 
+def _origins(con):
+    home = _setting_ro(con, "origin_home", "") or _setting_ro(con, "origin_address", "") or ""
+    work = _setting_ro(con, "origin_work", "") or ""
+    return home, work
+
+
+def origin_for(evs, idx, home, work):
+    """Where you will actually be coming from for evs[idx].
+
+    A single saved address is wrong by lunchtime, so: the last real place you were
+    that day wins; failing that, home early and the office once the day is running.
+    Returns (address, label) - the label is shown so it is never a mystery."""
+    ev = evs[idx]
+    for j in range(idx - 1, -1, -1):
+        if evs[j]["day"] == ev["day"] and maps.is_place(evs[j]["location"]):
+            subj = (evs[j]["subject"] or "your last stop").strip()
+            if len(subj) > 26:
+                subj = subj[:26].rsplit(" ", 1)[0] + "\u2026"
+            return evs[j]["location"], "after " + subj
+    hhmm = (ev["start_time"] or "")[:5]
+    if hhmm and hhmm >= "11:00" and work:
+        return work, "from the office"
+    if home:
+        return home, "from home"
+    return (work, "from the office") if work else ("", "")
+
+
 def _depart_utc(day, hhmm):
     """The event start as a UTC datetime, for a traffic-aware estimate."""
     if not hhmm:
@@ -769,11 +793,13 @@ def _leave_by(hhmm, secs):
 @app.route("/settings/origin", methods=["POST"])
 @login_required
 def set_origin():
-    """The address travel times are measured from - home, or the office."""
-    val = (request.form.get("origin_address") or "").strip()
+    """The two addresses travel times are measured from."""
     con = db()
-    con.execute("INSERT INTO settings(k, v) VALUES('origin_address', ?)"
-                " ON CONFLICT(k) DO UPDATE SET v=excluded.v", (val,))
+    for field, key in (("origin_home", "origin_home"), ("origin_work", "origin_work")):
+        if field in request.form:
+            con.execute("INSERT INTO settings(k, v) VALUES(?, ?)"
+                        " ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+                        (key, (request.form.get(field) or "").strip()))
     con.commit()
     return redirect(request.form.get("back") or url_for("calendar_view"))
 
@@ -808,19 +834,23 @@ def day_view(day):
         " JOIN sections ON items.section_id = sections.id"
         " WHERE items.due_date = ? ORDER BY items.status='done', items.id", (day,)).fetchall()
     sections = con.execute("SELECT * FROM sections ORDER BY pos, id").fetchall()
-    origin = _setting_ro(con, "origin_address", "") or ""
+    home, work = _origins(con)
     travel = {}
-    if origin and maps.KEY and day >= _now_local().strftime("%Y-%m-%d"):
-        for e in evs:
+    if (home or work) and maps.KEY and day >= _now_local().strftime("%Y-%m-%d"):
+        for i, e in enumerate(evs):
             if not maps.is_place(e["location"]):
                 continue
-            secs = maps.drive_seconds(origin, e["location"],
+            src, label = origin_for(evs, i, home, work)
+            if not src:
+                continue
+            secs = maps.drive_seconds(src, e["location"],
                                       _depart_utc(e["day"], e["start_time"]))
             if secs:
                 travel[e["id"]] = {"pretty": maps.pretty_minutes(secs),
-                                   "leave": _leave_by(e["start_time"], secs)}
+                                   "leave": _leave_by(e["start_time"], secs),
+                                   "from": label}
     return render_template("day.html", d=d, day=day, evs=evs, tasks=tasks,
-                           sections=sections, origin=origin, travel=travel,
+                           sections=sections, home=home, work=work, travel=travel,
                            maps_key=bool(maps.KEY),
                            pretty=d.strftime("%A, %B %d, %Y"),
                            prev_day=(d - timedelta(days=1)).isoformat(),
@@ -1629,19 +1659,26 @@ def reminder_tick():
         _mark_sent(con, ref)
 
     # 2b. "leave now" - only when there is a key and a from-address to measure from
-    origin = _setting(con, "origin_address", "") or ""
-    if maps.KEY and origin:
+    home = _setting(con, "origin_home", "") or _setting(con, "origin_address", "") or ""
+    work = _setting(con, "origin_work", "") or ""
+    if maps.KEY and (home or work):
         ahead = (now + _td(minutes=120)).strftime("%H:%M")
-        for e in con.execute(
-                "SELECT * FROM events WHERE day=? AND start_time IS NOT NULL"
-                " AND start_time > ? AND start_time <= ?",
-                (today, now.strftime("%H:%M"), ahead)):
+        day_evs = con.execute(
+            "SELECT * FROM events WHERE day=? ORDER BY COALESCE(start_time,'99:99'), id",
+            (today,)).fetchall()
+        for i, e in enumerate(day_evs):
+            hhmm = (e["start_time"] or "")[:5]
+            if not hhmm or hhmm <= now.strftime("%H:%M") or hhmm > ahead:
+                continue
             if not maps.is_place(e["location"]):
                 continue
             ref = "leave:%s:%s" % (e["ext_key"] or e["id"], e["day"])
             if _already_sent(con, ref):
                 continue
-            secs = maps.drive_seconds(origin, e["location"],
+            src, _label = origin_for(day_evs, i, home, work)
+            if not src:
+                continue
+            secs = maps.drive_seconds(src, e["location"],
                                       _depart_utc(e["day"], e["start_time"]))
             if not secs:
                 continue

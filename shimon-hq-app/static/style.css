@@ -474,3 +474,6 @@ li.noterow .t{flex:1; min-width:0;}
   background:var(--card); min-height:38px; touch-action:manipulation;
   max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .filebtn:hover{background:#7A5C2E; color:#fff;}
+.originbar .olab{display:flex; align-items:center; gap:7px; flex:1; min-width:190px;
+  font-size:12px; letter-spacing:.05em; text-transform:uppercase; color:var(--muted);}
+.originbar .olab input{flex:1; min-width:0;}

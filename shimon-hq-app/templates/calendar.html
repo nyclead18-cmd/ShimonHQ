@@ -41,10 +41,12 @@
 {% if maps_key %}
 <form class="originbar" method="post" action="{{ url_for('set_origin') }}">
   <input type="hidden" name="back" value="{{ url_for('calendar_view') }}">
-  <span>Travel times from</span>
-  <input name="origin_address" value="{{ origin }}" placeholder="Your home or office address" dir="auto">
-  <button type="submit">{{ 'Update' if origin else 'Save' }}</button>
+  <label class="olab">Home <input name="origin_home" value="{{ home }}" placeholder="Home address" dir="auto"></label>
+  <label class="olab">Office <input name="origin_work" value="{{ work }}" placeholder="Office address" dir="auto"></label>
+  <button type="submit">{{ 'Update' if home or work else 'Save' }}</button>
 </form>
+<p class="hint">Drive times start from wherever your last stop of the day was. Before your first
+  one, it uses Home in the morning and the Office once the day is running.</p>
 {% endif %}
 
 <div class="cal-scroll">
