@@ -14,8 +14,55 @@
 
   function rowKind(li) {
     if (li.classList.contains('brief')) return 'brief';
+    if (li.classList.contains('noterow')) return 'note';
     if (li.id && li.id.indexOf('item-') === 0) return 'item';
     return '';
+  }
+
+  var ROWS = 'li.item, li.brief, li.noterow';
+
+  function noteText(li) {
+    var t = q(li, '.t');
+    return t ? t.textContent.trim() : '';
+  }
+
+  function copyText(txt) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(flashCopied, function () { legacyCopy(txt); });
+    } else {
+      legacyCopy(txt);
+    }
+  }
+
+  function legacyCopy(txt) {
+    var ta = document.createElement('textarea');
+    ta.value = txt;
+    ta.style.cssText = 'position:fixed;left:-9999px;top:0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); flashCopied(); } catch (e) {}
+    ta.remove();
+  }
+
+  function flashCopied() {
+    var t = document.getElementById('copytoast');
+    if (!t) {
+      t = document.createElement('div');
+      t.id = 'copytoast';
+      t.className = 'copytoast';
+      t.textContent = 'Copied';
+      document.body.appendChild(t);
+    }
+    t.classList.add('on');
+    clearTimeout(flashCopied._t);
+    flashCopied._t = setTimeout(function () { t.classList.remove('on'); }, 1200);
+  }
+
+  function removeNoteInPlace(li, form) {
+    fetch(form.action, {method: 'POST', headers: {'X-Requested-With': 'fetch'}});
+    var list = li.parentElement;
+    li.remove();
+    if (list && !list.querySelector('li')) { list.remove(); }
   }
 
   function q(li, sel) { return li.querySelector(sel); }
@@ -36,6 +83,10 @@
       return {label: 'Done', icon: '✓', color: '#3A6B3E',
               run: function () { setStatus(li, 'done'); }};
     }
+    if (k === 'note') {
+      return {label: 'Copy', icon: '⧉', color: '#1F3A5F',
+              run: function () { copyText(noteText(li)); }};
+    }
     return null;
   }
 
@@ -52,6 +103,12 @@
       if (!df) return null;
       return {label: 'Delete', icon: '✕', color: '#A33B2E',
               confirm: true, run: function () { df.submit(); }};
+    }
+    if (k === 'note') {
+      var nf = q(li, '.ndelform');
+      if (!nf) return null;
+      return {label: 'Delete', icon: '✕', color: '#A33B2E',
+              run: function () { removeNoteInPlace(li, nf); }};
     }
     return null;
   }
@@ -130,6 +187,22 @@
           edit.open = true; scrollTo(edit);
         }});
       }
+    }
+
+    if (k === 'note') {
+      var when = q(li, '.nd');
+      out.push({label: 'Copy this response', run: function () { copyText(noteText(li)); }});
+      if (when) {
+        out.push({label: 'Copy with the date', run: function () {
+          copyText(when.textContent.trim() + ' - ' + noteText(li));
+        }});
+      }
+      var nf2 = q(li, '.ndelform');
+      if (nf2) {
+        out.push({label: 'Delete this response', danger: true,
+                  run: function () { removeNoteInPlace(li, nf2); }});
+      }
+      return out;
     }
 
     // anything on the row that points at a map or an email
@@ -307,7 +380,7 @@
 
   function onStart(ev) {
     if (ev.touches && ev.touches.length > 1) return;
-    var li = ev.target.closest('li.item, li.brief');
+    var li = ev.target.closest(ROWS);
     if (!li || !rowKind(li)) return;
     // never hijack a real control; a text box is fair game to swipe from
     // unless the cursor is actually in it
@@ -393,7 +466,7 @@
 
   // mouse equivalent so the same thing works at a desk: right-click = the sheet
   document.addEventListener('contextmenu', function (ev) {
-    var li = ev.target.closest('li.item, li.brief');
+    var li = ev.target.closest(ROWS);
     if (!li || !rowKind(li)) return;
     if (ev.target.closest('a, input, textarea, select')) return;
     ev.preventDefault();

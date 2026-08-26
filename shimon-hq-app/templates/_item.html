@@ -15,8 +15,8 @@
     {% if inotes %}
     <ul class="notes">
       {% for n in inotes %}
-      <li><span class="nd">{{ n.created_at[5:7]|int }}/{{ n.created_at[8:10]|int }}</span>
-        <span dir="auto">{{ n.body|linkify }}</span>
+      <li class="noterow" id="note-{{ n.id }}"><span class="nd">{{ n.created_at|stamp }}</span>
+        <span class="t" dir="auto">{{ n.body|linkify }}</span>
         <form method="post" action="{{ url_for('delete_note', note_id=n.id) }}" class="ndelform"><button type="submit" class="del ndel" title="Remove response">&#x2715;</button></form>
       </li>
       {% endfor %}

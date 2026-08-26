@@ -73,6 +73,25 @@ def f_isplace(loc):
     return maps.is_place(loc)
 
 
+@app.template_filter("stamp")
+def f_stamp(iso):
+    """8/26 - 9:34 AM, in New York time, from whatever we stored."""
+    t = (iso or "").strip()
+    if len(t) < 16:
+        return t[:10]
+    try:
+        d = datetime.fromisoformat(t)
+    except ValueError:
+        return t[:10]
+    if d.tzinfo is not None:
+        try:
+            from zoneinfo import ZoneInfo
+            d = d.astimezone(ZoneInfo(TZ_NAME))
+        except Exception:
+            pass
+    return "%d/%d \u00b7 %s" % (d.month, d.day, fmt12(d.strftime("%H:%M")))
+
+
 @app.template_filter("linkify")
 def linkify(text):
     """Escape text, then turn URLs into safe links."""
@@ -111,6 +130,35 @@ def close_db(e=None):
         d.close()
 
 
+def _stamp_responses_in_new_york(con):
+    """Responses used to be stamped in the server's UTC clock, which reads four
+    hours wrong once you show the time as well as the date. Convert the old rows
+    once; anything already carrying a UTC offset is left alone."""
+    try:
+        from datetime import timezone
+        from zoneinfo import ZoneInfo
+        ny = ZoneInfo(TZ_NAME)
+    except Exception:
+        return
+    for table in ("item_notes", "item_files"):
+        try:
+            rows = con.execute(
+                "SELECT id, created_at FROM %s"
+                " WHERE created_at IS NOT NULL AND created_at != ''" % table).fetchall()
+        except sqlite3.Error:
+            continue
+        for rid, raw in rows:
+            try:
+                d = datetime.fromisoformat(raw)
+            except ValueError:
+                continue
+            if d.tzinfo is not None:
+                continue          # already carries an offset - never touch it twice
+            con.execute("UPDATE %s SET created_at=? WHERE id=?" % table,
+                        (d.replace(tzinfo=timezone.utc).astimezone(ny)
+                         .isoformat(timespec="seconds"), rid))
+
+
 def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True) if os.path.dirname(DB_PATH) else None
     con = sqlite3.connect(DB_PATH)
@@ -129,6 +177,7 @@ def init_db():
     if ecols and "note" not in ecols:
         con.execute("ALTER TABLE events ADD COLUMN note TEXT DEFAULT ''")
     os.makedirs(FILES_DIR, exist_ok=True)
+    _stamp_responses_in_new_york(con)
     n = con.execute("SELECT COUNT(*) FROM sections").fetchone()[0]
     if n == 0:
         with open(os.path.join(BASE, "seed_data.json"), encoding="utf-8") as f:
@@ -287,7 +336,7 @@ def add_note(item_id):
     note_id, created = None, None
     if body:
         con = db()
-        created = datetime.now().isoformat(timespec="seconds")
+        created = _now_local().isoformat(timespec="seconds")
         cur = con.execute("INSERT INTO item_notes(item_id, body, created_at) VALUES(?,?,?)",
                           (item_id, body, created))
         note_id = cur.lastrowid

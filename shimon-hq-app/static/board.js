@@ -138,6 +138,15 @@ document.addEventListener('change', function (ev) {
     .catch(function () { label.classList.remove('busy'); });
 });
 
+// matches the server's `stamp` filter: 8/26 - 9:34 AM
+function stampOf(iso) {
+  if (!iso || iso.length < 16) { return (iso || '').slice(0, 10); }
+  var mo = parseInt(iso.slice(5, 7), 10), da = parseInt(iso.slice(8, 10), 10);
+  var h = parseInt(iso.slice(11, 13), 10), mi = iso.slice(14, 16);
+  var ap = h < 12 ? 'AM' : 'PM';
+  return mo + '/' + da + ' \u00b7 ' + ((h % 12) || 12) + ':' + mi + ' ' + ap;
+}
+
 // responses save in place — no page reload
 document.addEventListener('submit', function (ev) {
   var form = ev.target.closest('form.respond');
@@ -159,10 +168,11 @@ document.addEventListener('submit', function (ev) {
       list.className = 'notes';
       itemBody.insertBefore(list, itemBody.querySelector('.files'));
     }
-    var dt = d.created_at ? (parseInt(d.created_at.slice(5, 7), 10) + '/' + parseInt(d.created_at.slice(8, 10), 10)) : '';
     var li = document.createElement('li');
-    var nd = document.createElement('span'); nd.className = 'nd'; nd.textContent = dt;
-    var tx = document.createElement('span'); tx.setAttribute('dir', 'auto'); tx.textContent = d.body;
+    li.className = 'noterow';
+    li.id = 'note-' + d.id;
+    var nd = document.createElement('span'); nd.className = 'nd'; nd.textContent = stampOf(d.created_at);
+    var tx = document.createElement('span'); tx.className = 't'; tx.setAttribute('dir', 'auto'); tx.textContent = d.body;
     var df = document.createElement('form');
     df.className = 'ndelform'; df.method = 'post'; df.action = '/notes/' + d.id + '/delete';
     df.innerHTML = '<button type="submit" class="del ndel" title="Remove response">✕</button>';
