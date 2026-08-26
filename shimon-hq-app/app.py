@@ -501,6 +501,108 @@ def calendar_view():
                            today_iso=t_iso, cur_month=mo)
 
 
+# ---------- daily briefing ----------
+
+def _unread_count(con):
+    row = con.execute("SELECT COUNT(*) c FROM brief_items WHERE is_read=0").fetchone()
+    return row["c"] if row else 0
+
+
+@app.context_processor
+def inject_unread():
+    try:
+        return {"brief_unread": _unread_count(db())}
+    except Exception:
+        return {"brief_unread": 0}
+
+
+@app.route("/briefing")
+@app.route("/briefing/<day>")
+@login_required
+def briefing_view(day=None):
+    from datetime import date, timedelta
+    today = _now_local().date()
+    try:
+        d = date.fromisoformat(day) if day else today
+    except ValueError:
+        d = today
+    iso = d.isoformat()
+    con = db()
+    lines = con.execute(
+        "SELECT * FROM brief_items WHERE day=? ORDER BY"
+        " CASE kind WHEN 'due' THEN 0 WHEN 'meeting' THEN 1 WHEN 'email' THEN 2"
+        " WHEN 'added' THEN 3 ELSE 4 END, id", (iso,)).fetchall()
+    days = [r["day"] for r in con.execute(
+        "SELECT DISTINCT day FROM brief_items ORDER BY day DESC LIMIT 14")]
+    sections = con.execute("SELECT * FROM sections ORDER BY pos, id").fetchall()
+    return render_template("briefing.html", d=d, day=iso, lines=lines, days=days,
+                           sections=sections, is_today=(iso == today.isoformat()),
+                           pretty=d.strftime("%A, %B %d"),
+                           prev_day=(d - timedelta(days=1)).isoformat(),
+                           next_day=(d + timedelta(days=1)).isoformat())
+
+
+@app.route("/brief/<int:bid>/read", methods=["POST"])
+@login_required
+def brief_read(bid):
+    con = db()
+    row = con.execute("SELECT is_read, day FROM brief_items WHERE id=?", (bid,)).fetchone()
+    if not row:
+        abort(404)
+    new = 0 if row["is_read"] else 1
+    con.execute("UPDATE brief_items SET is_read=? WHERE id=?", (new, bid))
+    con.commit()
+    if request.headers.get("X-Requested-With") == "fetch":
+        return jsonify(is_read=new)
+    return redirect(url_for("briefing_view", day=row["day"]))
+
+
+@app.route("/brief/readall/<day>", methods=["POST"])
+@login_required
+def brief_read_all(day):
+    con = db()
+    con.execute("UPDATE brief_items SET is_read=1 WHERE day=?", (day,))
+    con.commit()
+    return redirect(url_for("briefing_view", day=day))
+
+
+@app.route("/brief/<int:bid>/task", methods=["POST"])
+@login_required
+def brief_to_task(bid):
+    con = db()
+    row = con.execute("SELECT * FROM brief_items WHERE id=?", (bid,)).fetchone()
+    if not row:
+        abort(404)
+    title = (request.form.get("title") or row["text"]).strip()[:120]
+    sid = request.form.get("section_id", type=int)
+    if not sid:
+        sec = con.execute("SELECT id FROM sections WHERE title='Inbox'").fetchone()
+        sid = sec["id"] if sec else con.execute(
+            "INSERT INTO sections(title, pos) VALUES('Inbox', 99)").lastrowid
+    note = (request.form.get("note") or row["detail"] or "").strip()[:200]
+    pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM items WHERE section_id=?",
+                      (sid,)).fetchone()[0]
+    iid = con.execute(
+        "INSERT INTO items(section_id, title, note, waiting_on, status, pos,"
+        " due_date, updated_at) VALUES(?,?,?,?,?,?,?,?)",
+        (sid, title, note, (request.form.get("waiting_on") or "").strip(), "open", pos,
+         (request.form.get("due_date") or "").strip() or None,
+         datetime.now().isoformat(timespec="seconds"))).lastrowid
+    con.execute("UPDATE brief_items SET item_id=?, is_read=1 WHERE id=?", (iid, bid))
+    con.commit()
+    return redirect(url_for("briefing_view", day=row["day"]))
+
+
+@app.route("/brief/<int:bid>/dismiss", methods=["POST"])
+@login_required
+def brief_dismiss(bid):
+    con = db()
+    row = con.execute("SELECT day FROM brief_items WHERE id=?", (bid,)).fetchone()
+    con.execute("DELETE FROM brief_items WHERE id=?", (bid,))
+    con.commit()
+    return redirect(url_for("briefing_view", day=row["day"] if row else None))
+
+
 # ---------- day view: open and edit a single day ----------
 
 @app.route("/day/<day>")
@@ -857,6 +959,45 @@ def api_notify():
         return "ERROR: body required", 400, {"Content-Type": "text/plain; charset=utf-8"}
     n = send_push(title, body, request.args.get("url") or "/")
     return "PUSHED to %d device(s)" % n, 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+
+@app.route("/api/brief")
+def api_brief():
+    """Post one line into the day's briefing (the sweep calls this per line)."""
+    if not _api_auth():
+        abort(401)
+    text = (request.args.get("text") or "").strip()
+    if not text:
+        return "ERROR: text required", 400, {"Content-Type": "text/plain; charset=utf-8"}
+    day = (request.args.get("day") or _now_local().strftime("%Y-%m-%d")).strip()
+    kind = (request.args.get("kind") or "note").strip().lower()
+    if kind not in ("meeting", "email", "due", "added", "note"):
+        kind = "note"
+    con = db()
+    dup = con.execute("SELECT 1 FROM brief_items WHERE day=? AND lower(text)=lower(?)",
+                      (day, text)).fetchone()
+    if dup:
+        return "SKIPPED (duplicate): " + text, 200, {"Content-Type": "text/plain; charset=utf-8"}
+    con.execute("INSERT INTO brief_items(day, kind, text, detail, link, created_at)"
+                " VALUES(?,?,?,?,?,?)",
+                (day, kind, text, (request.args.get("detail") or "").strip(),
+                 (request.args.get("link") or "").strip(),
+                 datetime.now().isoformat(timespec="seconds")))
+    con.commit()
+    return "BRIEFED: " + text, 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+
+@app.route("/api/briefclear")
+def api_brief_clear():
+    """Wipe a day's briefing before re-posting it."""
+    if not _api_auth():
+        abort(401)
+    day = (request.args.get("day") or _now_local().strftime("%Y-%m-%d")).strip()
+    con = db()
+    cur = con.execute("DELETE FROM brief_items WHERE day=? AND item_id IS NULL", (day,))
+    con.commit()
+    return "CLEARED %d from %s" % (cur.rowcount, day), 200, \
+        {"Content-Type": "text/plain; charset=utf-8"}
 
 
 @app.route("/api/digest")

@@ -10,6 +10,7 @@
   <div class="right">
     <nav class="tabs">
       <a class="tab" href="{{ url_for('board') }}">Board</a>
+      <a class="tab" href="{{ url_for('briefing_view') }}">Brief{% if brief_unread %} <span class="badge">{{ brief_unread }}</span>{% endif %}</a>
       <a class="tab on" href="{{ url_for('calendar_view') }}">Calendar</a>
       <a class="tab" href="{{ url_for('people_view') }}">People</a>
       <a class="tab" href="{{ url_for('joel_view') }}">Joel</a>

@@ -349,3 +349,23 @@ li.item.flash .t{font-weight:700;}
 .outlookbtn{font-size:12.5px; font-weight:700; color:var(--sa,var(--accent)); text-decoration:none;
   border:1px solid var(--border); border-radius:999px; padding:4px 12px; background:var(--card);}
 .outlookbtn:hover{border-color:var(--accent);}
+/* daily briefing */
+.badge{background:var(--accent); color:#fff; border-radius:999px; padding:0 6px;
+  font-size:10.5px; font-weight:700; margin-left:3px; vertical-align:1px;}
+.tab.on .badge{background:var(--btn-tx); color:var(--btn-bg);}
+li.item.brief{grid-template-columns:26px 1fr;}
+.dotbtn{width:13px; height:13px; border-radius:50%; border:2px solid var(--accent);
+  background:var(--accent); cursor:pointer; padding:0; margin-top:5px;}
+.dotbtn.read{background:transparent; border-color:var(--border);}
+li.readrow .t{color:var(--muted); font-weight:400;}
+.briefacts{display:flex; gap:8px; align-items:center; margin-top:6px; flex-wrap:wrap;}
+.outlookbtn.done{color:var(--pill-done-tx); border-color:var(--pill-done-bg);}
+.pushbox>summary{color:var(--muted); font-size:12.5px; cursor:pointer; list-style:none;
+  border:1px solid var(--border); border-radius:999px; padding:4px 12px; background:var(--card);
+  width:max-content;}
+.pushbox>summary::-webkit-details-marker{display:none}
+.readallform{margin-left:auto;}
+.emptybrief{padding:18px;}
+.pastdays{color:var(--muted); font-size:13px; margin-top:8px; display:flex; gap:10px; flex-wrap:wrap;}
+.pastdays a{color:var(--accent); text-decoration:none;}
+.pastdays .lbl{letter-spacing:.06em; text-transform:uppercase; font-size:11.5px;}

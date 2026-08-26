@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}Briefing · Shimon HQ{% endblock %}
+{% block body %}
+<div class="wrap">
+<header class="top">
+  <div>
+    <div class="eyebrow">{{ 'Today' if is_today else d.strftime('%A') }}</div>
+    <h1>Briefing</h1>
+  </div>
+  <div class="right">
+    <nav class="tabs">
+      <a class="tab" href="{{ url_for('board') }}">Board</a>
+      <a class="tab on" href="{{ url_for('briefing_view') }}">Brief{% if brief_unread %} <span class="badge">{{ brief_unread }}</span>{% endif %}</a>
+      <a class="tab" href="{{ url_for('calendar_view') }}">Calendar</a>
+      <a class="tab" href="{{ url_for('people_view') }}">People</a>
+      <a class="tab" href="{{ url_for('joel_view') }}">Joel</a>
+    </nav>
+    <button type="button" class="notifbtn" id="notifbtn" title="Reminders on this device">&#9200;</button>
+    <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
+  </div>
+</header>
+
+<div class="cal-nav">
+  <a class="cal-arrow" href="{{ url_for('briefing_view', day=prev_day) }}">&larr;</a>
+  <h2 class="cal-month">{{ pretty }}</h2>
+  <a class="cal-arrow" href="{{ url_for('briefing_view', day=next_day) }}">&rarr;</a>
+  {% if lines %}
+  <form method="post" action="{{ url_for('brief_read_all', day=day) }}" class="readallform">
+    <button type="submit" class="linky">mark all read</button>
+  </form>
+  {% endif %}
+</div>
+
+{% if not lines %}
+<section class="card" style="--sa:#8A8377">
+  <div class="emptybrief">
+    <p class="quiet">No briefing for this day yet.</p>
+    <p class="hint">The morning sweep posts here every weekday around 8am — today's meetings, what came in overnight, what's due, and what it added to the board.</p>
+  </div>
+</section>
+{% endif %}
+
+{% set kinds = [('due','Needs you today','#A33B2E'), ('meeting','Schedule','#1F3A5F'), ('email','From your inbox','#B8892E'), ('added','Added to the board','#3A6B3E'), ('note','Notes','#6B4A8A')] %}
+{% for key, label, color in kinds %}
+{% set group = lines | selectattr('kind','equalto',key) | list %}
+{% if group %}
+<section class="card" style="--sa:{{ color }}">
+  <div class="sec-head">
+    <h2><span class="dot"></span>{{ label }}</h2>
+    <span class="counts">{{ group | rejectattr('is_read') | list | length }} unread</span>
+  </div>
+  <ul class="items brieflist">
+    {% for b in group %}
+    <li class="item brief{% if b.is_read %} readrow{% endif %}" id="brief-{{ b.id }}">
+      <button type="button" class="dotbtn{% if b.is_read %} read{% endif %}" data-brief="{{ b.id }}"
+              title="{{ 'Mark unread' if b.is_read else 'Mark read' }}"></button>
+      <div class="body">
+        <div class="t" dir="auto">{{ b.text }}</div>
+        {% if b.detail %}<div class="w" dir="auto">{{ b.detail|linkify }}</div>{% endif %}
+        <div class="briefacts">
+          {% if b.link %}<a class="outlookbtn" href="{{ b.link }}" target="_blank" rel="noopener">Open</a>{% endif %}
+          {% if b.item_id %}
+          <a class="outlookbtn done" href="{{ url_for('board', _anchor='item-' ~ b.item_id) }}">On the board &rarr;</a>
+          {% else %}
+          <details class="pushbox">
+            <summary>&rarr; Make a task</summary>
+            <form class="edit" method="post" action="{{ url_for('brief_to_task', bid=b.id) }}">
+              <input name="title" dir="auto" value="{{ b.text }}" required>
+              <input name="note" dir="auto" value="{{ b.detail }}" placeholder="Next step / note">
+              <input name="waiting_on" dir="auto" placeholder="Waiting on (who)">
+              <label class="taglabel">Section
+                <select name="section_id">
+                  {% for s in sections %}<option value="{{ s.id }}"{% if s.title == 'Inbox' %} selected{% endif %}>{{ s.title }}</option>{% endfor %}
+                </select>
+              </label>
+              <label class="duelabel">Due <input type="date" name="due_date"></label>
+              <div class="btns"><button type="submit">Add to board</button></div>
+            </form>
+          </details>
+          {% endif %}
+          <form method="post" action="{{ url_for('brief_dismiss', bid=b.id) }}" class="delform">
+            <button type="submit" class="del" title="Dismiss">&#x2715;</button>
+          </form>
+        </div>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% endfor %}
+
+{% if days %}
+<div class="pastdays">
+  <span class="lbl">Earlier:</span>
+  {% for dd in days %}{% if dd != day %}<a href="{{ url_for('briefing_view', day=dd) }}">{{ dd[5:7]|int }}/{{ dd[8:10]|int }}</a>{% endif %}{% endfor %}
+</div>
+{% endif %}
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='board.js') }}?v={{ css_v }}"></script>
+<script>
+document.addEventListener('click', function (ev) {
+  var b = ev.target.closest('.dotbtn');
+  if (!b) return;
+  var id = b.getAttribute('data-brief');
+  fetch('/brief/' + id + '/read', {method: 'POST', headers: {'X-Requested-With': 'fetch'}})
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      b.classList.toggle('read', !!d.is_read);
+      b.closest('li').classList.toggle('readrow', !!d.is_read);
+      b.title = d.is_read ? 'Mark unread' : 'Mark read';
+      var sec = b.closest('section');
+      var un = sec.querySelectorAll('li.brief:not(.readrow)').length;
+      sec.querySelector('.counts').textContent = un + ' unread';
+    });
+});
+</script>
+{% endblock %}

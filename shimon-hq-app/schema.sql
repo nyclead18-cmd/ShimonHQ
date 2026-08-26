@@ -73,3 +73,15 @@ CREATE TABLE IF NOT EXISTS reminders_sent (
   ref TEXT PRIMARY KEY,     -- e.g. item:12:2026-08-26T14:00  |  ev:key  |  digest:2026-08-26
   sent_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS brief_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  day TEXT NOT NULL,              -- YYYY-MM-DD
+  kind TEXT NOT NULL DEFAULT 'note',  -- meeting | email | due | added | note
+  text TEXT NOT NULL,
+  detail TEXT DEFAULT '',
+  link TEXT DEFAULT '',
+  is_read INTEGER NOT NULL DEFAULT 0,
+  item_id INTEGER,                -- set once pushed to a task
+  created_at TEXT
+);
