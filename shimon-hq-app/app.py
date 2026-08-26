@@ -112,11 +112,23 @@ STATUSES = ("open", "waiting", "done")
 
 # ---------- db ----------
 
+def _tune(con):
+    """WAL lets the reminder thread and the web workers share the file without
+    tripping over each other; busy_timeout waits for a lock instead of failing."""
+    con.execute("PRAGMA busy_timeout = 8000")
+    try:
+        con.execute("PRAGMA journal_mode = WAL")
+    except sqlite3.Error:
+        pass
+    con.execute("PRAGMA foreign_keys = ON")
+    return con
+
+
 def db():
     if "db" not in g:
-        g.db = sqlite3.connect(DB_PATH)
+        g.db = sqlite3.connect(DB_PATH, timeout=8)
         g.db.row_factory = sqlite3.Row
-        g.db.execute("PRAGMA foreign_keys = ON")
+        _tune(g.db)
     return g.db
 
 
@@ -158,7 +170,8 @@ def _stamp_responses_in_new_york(con):
 
 def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True) if os.path.dirname(DB_PATH) else None
-    con = sqlite3.connect(DB_PATH)
+    con = sqlite3.connect(DB_PATH, timeout=15)
+    _tune(con)
     with open(os.path.join(BASE, "schema.sql"), encoding="utf-8") as f:
         con.executescript(f.read())
     cols = [r[1] for r in con.execute("PRAGMA table_info(items)")]
@@ -192,6 +205,10 @@ def init_db():
     if ecols and "note" not in ecols:
         con.execute("ALTER TABLE events ADD COLUMN note TEXT DEFAULT ''")
     os.makedirs(FILES_DIR, exist_ok=True)
+    if not con.execute("SELECT 1 FROM settings WHERE k='wa_hook_secret'").fetchone():
+        con.execute("INSERT INTO settings(k, v) VALUES('wa_hook_secret', ?)",
+                    (uuid.uuid4().hex,))
+        con.commit()
     _stamp_responses_in_new_york(con)
     n = con.execute("SELECT COUNT(*) FROM sections").fetchone()[0]
     if n == 0:
@@ -1975,8 +1992,9 @@ def _mark_sent(con, ref):
 
 def reminder_tick():
     """One pass: task reminders due, meetings starting soon, the morning digest."""
-    con = sqlite3.connect(DB_PATH)
+    con = sqlite3.connect(DB_PATH, timeout=15)
     con.row_factory = sqlite3.Row
+    _tune(con)
     now = _now_local()
     now_s = now.strftime("%Y-%m-%dT%H:%M")
     today = now.strftime("%Y-%m-%d")
