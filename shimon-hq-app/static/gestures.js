@@ -69,7 +69,9 @@
       pill.className = 'pill ' + d.status;
       pill.textContent = d.status === 'open' ? 'Open'
         : d.status === 'waiting' ? 'Waiting' : 'Done';
-      li.className = 'item ' + d.status + (d.status === 'done' ? ' donerow' : '');
+      li.classList.remove('open', 'waiting', 'done', 'donerow');
+      li.classList.add(d.status);
+      if (d.status === 'done') { li.classList.add('donerow'); }
       if (window.applyFilter) { window.applyFilter(); }
     });
   }
@@ -231,6 +233,18 @@
   // .swipe-bg = the coloured action panel that stays put (absolute, so it never
   // becomes a grid track).  .swipe-fg = an opaque curtain in the row's own colour
   // that travels with the content, so the panel only shows through the gap.
+  // rows alternate between a colour and no colour at all, and the list behind
+  // them is see-through too - keep climbing until something is actually painted
+  function opaqueBg(el) {
+    for (var n = el; n && n !== document.documentElement; n = n.parentElement) {
+      var c = getComputedStyle(n).backgroundColor;
+      if (c && c !== 'transparent' && !/rgba\(\s*0,\s*0,\s*0,\s*0\s*\)/.test(c)) {
+        return c;
+      }
+    }
+    return getComputedStyle(document.body).backgroundColor || '#FFFEFB';
+  }
+
   function ensureBg(li) {
     var bg = li.querySelector(':scope > .swipe-bg');
     if (!bg) {
@@ -239,16 +253,26 @@
       bg.innerHTML = '<span class="sb-left"></span><span class="sb-right"></span>';
       var fg = document.createElement('div');
       fg.className = 'swipe-fg';
-      var bgc = getComputedStyle(li).backgroundColor;
-      if (!bgc || bgc === 'rgba(0, 0, 0, 0)' || bgc === 'transparent') {
-        bgc = getComputedStyle(li.parentElement).backgroundColor || '#FFFDF8';
-      }
-      fg.style.background = bgc;
+      fg.style.background = opaqueBg(li);
       li.insertBefore(fg, li.firstChild);
       li.insertBefore(bg, li.firstChild);
       li.classList.add('swipeable');
     }
+    li.classList.add('swiping');
     return bg;
+  }
+
+  // put the row back exactly as it was: no leftover colour band, no stray nodes
+  function clearSwipe(li) {
+    li.classList.remove('swiping');
+    setTimeout(function () {
+      if (li.classList.contains('swiping')) return;   // a new swipe started
+      li.classList.remove('swipeable');
+      var n = li.querySelector(':scope > .swipe-bg');
+      if (n) { n.remove(); }
+      n = li.querySelector(':scope > .swipe-fg');
+      if (n) { n.remove(); }
+    }, 260);
   }
 
   function shift(li, dx) {
@@ -345,6 +369,7 @@
     release(c.li, true);
     var bg = c.li.querySelector(':scope > .swipe-bg');
     if (bg) { bg.classList.remove('armed'); }
+    clearSwipe(c.li);
     if (!fired) return;
     if (act.confirm) {
       if (!window.confirm('Delete this?')) { return; }
@@ -357,6 +382,7 @@
     if (!cur) return;
     clearTimeout(cur.hold);
     release(cur.li, false);
+    clearSwipe(cur.li);
     cur = null;
   }
 

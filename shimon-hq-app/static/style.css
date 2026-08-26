@@ -383,10 +383,11 @@ li.readrow .t{color:var(--muted); font-weight:400;}
 
 /* ---------- swipe + press-and-hold ---------- */
 li.swipeable{position:relative; overflow:hidden;}
-li.swipeable > .swipe-bg{position:absolute; inset:0; z-index:0; display:flex;
+li.swipeable > .swipe-bg{position:absolute; inset:0; z-index:0; display:none;
   align-items:center; padding:0 20px; background:var(--sw,#1F3A5F); color:#fff;
   font-weight:700; font-size:13.5px; letter-spacing:.03em; opacity:.86;
   transition:opacity .12s ease;}
+li.swipeable.swiping > .swipe-bg{display:flex;}
 li.swipeable > .swipe-bg.armed{opacity:1;}
 li.swipeable > .swipe-bg.from-left{justify-content:flex-start;}
 li.swipeable > .swipe-bg.from-right{justify-content:flex-end;}

@@ -63,7 +63,9 @@ document.addEventListener('click', function (ev) {
         pill.className = 'pill ' + d.status;
         pill.textContent = d.status === 'open' ? 'Open' : d.status === 'waiting' ? 'Waiting' : 'Done';
         var li = pill.closest('li');
-        li.className = 'item ' + d.status + (d.status === 'done' ? ' donerow' : '');
+        li.classList.remove('open', 'waiting', 'done', 'donerow');
+        li.classList.add(d.status);
+        if (d.status === 'done') { li.classList.add('donerow'); }
         applyFilter();
       });
     return;
