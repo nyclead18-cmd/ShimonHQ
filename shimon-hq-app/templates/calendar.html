@@ -45,7 +45,7 @@
   <div class="cal-day{% if d.month != cur_month %} dim{% endif %}{% if iso == today_iso %} today{% endif %}">
     <a class="cal-num" href="{{ url_for('day_view', day=iso) }}" title="Open this day">{{ d.day }}</a>
     {% for e in ev_by_day.get(iso, []) %}
-    <a class="cal-ev{% if e.source == 'manual' %} mine{% endif %}" href="{{ url_for('day_view', day=iso) }}" dir="auto" title="{{ e.subject }}{% if e.location %} — {{ e.location }}{% endif %}">{% if e.start_time %}<b>{{ e.start_time }}</b> {% endif %}{{ e.subject }}</a>
+    <a class="cal-ev{% if e.source == 'manual' %} mine{% endif %}" href="{{ url_for('day_view', day=iso) }}" dir="auto" title="{{ e.subject }}{% if e.location %} — {{ e.location }}{% endif %}">{% if e.start_time %}<b>{{ e.start_time|fmt12 }}</b> {% endif %}{{ e.subject }}</a>
     {% endfor %}
     {% for it in by_day.get(iso, []) %}
     <a class="cal-item {{ it.status }}{% if it.status != 'done' and iso < today_iso %} late{% endif %}"
@@ -63,7 +63,7 @@
   <ul class="up-list evlist">
     {% for e in upcoming_events %}
     <li><span class="nd">{{ e.day[5:7]|int }}/{{ e.day[8:10]|int }}</span>
-      {% if e.start_time %}<span class="evtime">{{ e.start_time }}</span>{% endif %}
+      {% if e.start_time %}<span class="evtime">{{ e.start_time|fmt12 }}</span>{% endif %}
       <a class="plain" href="{{ url_for('day_view', day=e.day) }}" dir="auto">{{ e.subject }}</a>
       {% if e.location %}<span class="w">{{ e.location }}</span>{% endif %}
       <span class="evtag">Outlook</span></li>

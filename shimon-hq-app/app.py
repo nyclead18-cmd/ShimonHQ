@@ -33,6 +33,19 @@ def inject_css_version():
     return {"css_v": v}
 
 
+@app.template_filter("fmt12")
+def fmt12(hhmm):
+    """24h stored -> 1:30 PM for display (all times are New York time)."""
+    t = (hhmm or "").strip()
+    if len(t) < 4 or ":" not in t:
+        return t
+    try:
+        h = int(t[:2]); m = t[3:5]
+    except ValueError:
+        return t
+    return "%d:%s %s" % (h % 12 or 12, m, "AM" if h < 12 else "PM")
+
+
 @app.template_filter("linkify")
 def linkify(text):
     """Escape text, then turn URLs into safe links."""
@@ -756,9 +769,9 @@ def api_event():
     """Upsert one Outlook calendar event (short params, proxy friendly)."""
     if not _api_auth():
         abort(401)
-    key = (request.args.get("k") or "").strip()
-    subj = (request.args.get("s") or "").strip()
-    day = (request.args.get("d") or "").strip()
+    key = (request.args.get("key") or request.args.get("k") or "").strip()
+    subj = (request.args.get("subject") or request.args.get("s") or "").strip()
+    day = (request.args.get("day") or request.args.get("d") or "").strip()
     if not (key and subj and day):
         return "ERROR: k, s and d required", 400, {"Content-Type": "text/plain; charset=utf-8"}
     con = db()
@@ -771,8 +784,9 @@ def api_event():
         " VALUES(?,?,?,?,?,?)"
         " ON CONFLICT(ext_key) DO UPDATE SET subject=excluded.subject, day=excluded.day,"
         " start_time=excluded.start_time, location=excluded.location, synced_at=excluded.synced_at",
-        (key, subj, day, (request.args.get("t") or "").strip() or None,
-         (request.args.get("l") or "").strip(),
+        (key, subj, day,
+         (request.args.get("time") or request.args.get("t") or "").strip() or None,
+         (request.args.get("loc") or request.args.get("l") or "").strip(),
          datetime.now().isoformat(timespec="seconds")))
     con.commit()
     return "SYNCED: " + subj, 200, {"Content-Type": "text/plain; charset=utf-8"}

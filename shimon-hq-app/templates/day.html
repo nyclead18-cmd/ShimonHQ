@@ -32,7 +32,7 @@
   <ul class="items">
     {% for e in evs %}
     <li class="item">
-      <span class="pill {{ 'waiting' if e.source == 'manual' else 'done' }}">{{ e.start_time or '—' }}</span>
+      <span class="pill {{ 'waiting' if e.source == 'manual' else 'done' }}">{{ e.start_time|fmt12 or '—' }}</span>
       <div class="body">
         <div class="t" dir="auto">{{ e.subject }}</div>
         <div class="metaline">
