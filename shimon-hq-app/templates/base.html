@@ -18,5 +18,6 @@
 if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/sw.js'); }
 </script>
 {% block scripts %}{% endblock %}
+<script src="{{ url_for('static', filename='gestures.js') }}?v={{ css_v }}"></script>
 </body>
 </html>

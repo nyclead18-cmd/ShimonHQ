@@ -42,6 +42,7 @@ function applyFilter() {
     sec.style.display = (any || !filtering) ? '' : 'none';
   });
 }
+window.applyFilter = applyFilter;   // the gesture layer re-runs it after a swipe
 if (q) { q.addEventListener('input', applyFilter); }
 document.querySelectorAll('.fpill').forEach(function (b) {
   b.addEventListener('click', function () {

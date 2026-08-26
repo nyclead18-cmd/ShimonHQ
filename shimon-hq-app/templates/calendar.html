@@ -38,6 +38,15 @@
   <a class="backlink" href="{{ url_for('feed_info') }}">show in Outlook</a>
 </div>
 
+{% if maps_key %}
+<form class="originbar" method="post" action="{{ url_for('set_origin') }}">
+  <input type="hidden" name="back" value="{{ url_for('calendar_view') }}">
+  <span>Travel times from</span>
+  <input name="origin_address" value="{{ origin }}" placeholder="Your home or office address" dir="auto">
+  <button type="submit">{{ 'Update' if origin else 'Save' }}</button>
+</form>
+{% endif %}
+
 <div class="cal-scroll">
 <div class="cal">
   {% for w in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'] %}<div class="cal-wd">{{ w }}</div>{% endfor %}
@@ -67,6 +76,7 @@
       {% if e.start_time %}<span class="evtime">{{ e.start_time|fmt12 }}</span>{% endif %}
       <a class="plain" href="{{ url_for('day_view', day=e.day) }}" dir="auto">{{ e.subject }}</a>
       {% if e.location %}<span class="w">{{ e.location }}</span>{% endif %}
+      {% if e.location|isplace %}<a class="maplink" href="{{ e.location|mapdir }}" target="_blank" rel="noopener">Directions</a>{% endif %}
       <span class="evtag">Outlook</span></li>
     {% endfor %}
   </ul>

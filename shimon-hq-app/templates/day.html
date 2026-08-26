@@ -27,6 +27,15 @@
   <a class="backlink" href="{{ url_for('calendar_view', m=day[:7]) }}">month view</a>
 </div>
 
+{% if maps_key and not origin %}
+<form class="originbar" method="post" action="{{ url_for('set_origin') }}">
+  <input type="hidden" name="back" value="{{ url_for('day_view', day=day) }}">
+  <span>Travel times from</span>
+  <input name="origin_address" placeholder="Your home or office address" dir="auto">
+  <button type="submit">Save</button>
+</form>
+{% endif %}
+
 <section class="card" style="--sa:#1F3A5F">
   <div class="sec-head"><h2><span class="dot"></span>Schedule</h2>
     <span class="counts">{{ evs | length }}</span></div>
@@ -39,8 +48,17 @@
         <div class="metaline">
           {% if e.location %}<span class="w">{{ e.location }}</span>{% endif %}
           <span class="evtag">{{ 'Yours' if e.source == 'manual' else 'Outlook' }}</span>
+          {% if travel.get(e.id) %}<span class="travel">{{ travel[e.id].pretty }} drive{% if travel[e.id].leave %} &middot; leave by {{ travel[e.id].leave }}{% endif %}</span>{% endif %}
         </div>
         {% if e.note %}<div class="w" dir="auto">{{ e.note }}</div>{% endif %}
+        {% if e.location|isplace %}
+        <div class="evactions">
+          <a class="dirlink" data-sheet="Directions" href="{{ e.location|mapdir }}" target="_blank" rel="noopener">Directions</a>
+          <a class="maplink" data-sheet="Open in Maps" href="{{ e.location|maplink }}" target="_blank" rel="noopener">Open in Maps</a>
+        </div>
+        {% set emb = e.location|mapembed %}
+        {% if emb %}<div class="mapbox"><iframe loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="{{ emb }}" title="Map of {{ e.location }}"></iframe></div>{% endif %}
+        {% endif %}
         <details class="editbox">
           <summary>edit</summary>
           <form class="edit" method="post" action="{{ url_for('edit_event', ev_id=e.id) }}">

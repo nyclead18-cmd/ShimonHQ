@@ -380,3 +380,63 @@ li.readrow .t{color:var(--muted); font-weight:400;}
 .pastdays{color:var(--muted); font-size:13px; margin-top:8px; display:flex; gap:10px; flex-wrap:wrap;}
 .pastdays a{color:var(--accent); text-decoration:none;}
 .pastdays .lbl{letter-spacing:.06em; text-transform:uppercase; font-size:11.5px;}
+
+/* ---------- swipe + press-and-hold ---------- */
+li.swipeable{position:relative; overflow:hidden;}
+li.swipeable > .swipe-bg{position:absolute; inset:0; z-index:0; display:flex;
+  align-items:center; padding:0 20px; background:var(--sw,#1F3A5F); color:#fff;
+  font-weight:700; font-size:13.5px; letter-spacing:.03em; opacity:.86;
+  transition:opacity .12s ease;}
+li.swipeable > .swipe-bg.armed{opacity:1;}
+li.swipeable > .swipe-bg.from-left{justify-content:flex-start;}
+li.swipeable > .swipe-bg.from-right{justify-content:flex-end;}
+li.swipeable > .swipe-bg.from-left .sb-right,
+li.swipeable > .swipe-bg.from-right .sb-left{display:none;}
+li.swipeable > .swipe-fg{position:absolute; inset:0; z-index:1;}
+li.swipeable > *:not(.swipe-bg):not(.swipe-fg){position:relative; z-index:2;}
+
+/* the sheet that slides up on a long press */
+.sheet-wrap{position:fixed; inset:0; z-index:80; visibility:hidden;}
+.sheet-wrap.on{visibility:visible;}
+.sheet-scrim{position:absolute; inset:0; background:rgba(20,17,12,.42);
+  opacity:0; transition:opacity .18s ease;}
+.sheet-wrap.on .sheet-scrim{opacity:1;}
+.sheet{position:absolute; left:0; right:0; bottom:0; background:var(--card);
+  border-top-left-radius:18px; border-top-right-radius:18px;
+  padding:8px 14px calc(14px + env(safe-area-inset-bottom)); display:grid; gap:6px;
+  box-shadow:0 -10px 40px rgba(20,17,12,.28);
+  transform:translateY(102%); transition:transform .22s cubic-bezier(.32,.72,0,1);
+  max-height:82vh; overflow:auto;}
+.sheet-wrap.on .sheet{transform:none;}
+.sheet-grab{width:38px; height:4px; border-radius:999px; background:var(--border);
+  margin:4px auto 6px;}
+.sheet-title{font-family:'Playfair Display',Georgia,serif; font-size:16px; line-height:1.3;
+  padding:0 6px 8px; border-bottom:1px solid var(--border); margin-bottom:2px;}
+.sheet-list{display:grid; gap:2px;}
+.sheet-act{font:inherit; font-size:15.5px; text-align:left; background:transparent;
+  border:none; border-radius:11px; padding:14px 12px; color:var(--ink); cursor:pointer;
+  text-decoration:none; display:block; touch-action:manipulation;}
+.sheet-act:hover,.sheet-act:active{background:var(--row);}
+.sheet-act.danger{color:var(--danger);}
+.sheet-cancel{font:inherit; font-size:15.5px; font-weight:700; margin-top:4px;
+  background:var(--row); border:1px solid var(--border); border-radius:12px;
+  padding:14px; color:var(--ink); cursor:pointer; touch-action:manipulation;}
+body.sheet-open{overflow:hidden;}
+
+/* ---------- maps ---------- */
+.maplink,.dirlink{font-size:12.5px; font-weight:700; text-decoration:none;
+  color:var(--navy,#1F3A5F); border:1px solid var(--border); border-radius:999px;
+  padding:5px 12px; background:var(--card); white-space:nowrap;}
+.maplink:hover,.dirlink:hover{border-color:var(--accent); color:var(--accent);}
+.mapbox{margin-top:8px; border:1px solid var(--border); border-radius:12px;
+  overflow:hidden; background:var(--row); line-height:0;}
+.mapbox iframe{width:100%; height:180px; border:0; display:block;}
+.travel{font-size:12.5px; color:var(--accent); font-weight:700;}
+.originbar{display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+  margin:10px 0 2px; font-size:13px; color:var(--muted);}
+.originbar input{flex:1; min-width:180px; background:var(--card);
+  border:1px solid var(--border); border-radius:9px; color:var(--ink);
+  font:inherit; font-size:13.5px; padding:8px 11px;}
+.originbar button{font:inherit; font-size:13px; font-weight:700; border-radius:999px;
+  padding:8px 15px; border:1px solid var(--btn-bg); background:var(--btn-bg);
+  color:var(--btn-tx); cursor:pointer;}

@@ -1,0 +1,376 @@
+/* Outlook-style gestures for Shimon HQ.
+   Swipe right  -> the friendly action (mark read / mark done)
+   Swipe left   -> the destructive one (dismiss / delete)
+   Press & hold -> a sheet slides up with everything that row can do
+   Works on the briefing, the board, the day view and the Joel board. */
+(function () {
+  'use strict';
+
+  var THRESHOLD = 72;      // how far you have to pull before it fires
+  var SLOP = 12;           // finger wobble we forgive before deciding the direction
+  var HOLD_MS = 480;
+
+  // ---------- what each kind of row can do ----------
+
+  function rowKind(li) {
+    if (li.classList.contains('brief')) return 'brief';
+    if (li.id && li.id.indexOf('item-') === 0) return 'item';
+    return '';
+  }
+
+  function q(li, sel) { return li.querySelector(sel); }
+
+  // the two swipe actions, or null where a row has none
+  function swipeRight(li) {
+    var k = rowKind(li);
+    if (k === 'brief') {
+      var dot = q(li, '.dotbtn');
+      if (!dot) return null;
+      var read = li.classList.contains('readrow');
+      return {label: read ? 'Unread' : 'Read', icon: read ? '●' : '✓',
+              color: '#1F3A5F', run: function () { dot.click(); }};
+    }
+    if (k === 'item') {
+      var pill = q(li, '.pill');
+      if (!pill || li.classList.contains('done')) return null;
+      return {label: 'Done', icon: '✓', color: '#3A6B3E',
+              run: function () { setStatus(li, 'done'); }};
+    }
+    return null;
+  }
+
+  function swipeLeft(li) {
+    var k = rowKind(li);
+    if (k === 'brief') {
+      var f = q(li, '.delform');
+      if (!f) return null;
+      return {label: 'Dismiss', icon: '✕', color: '#8A8377',
+              color2: true, run: function () { dismissInPlace(li, f); }};
+    }
+    if (k === 'item') {
+      var df = q(li, '.editbox .delform');
+      if (!df) return null;
+      return {label: 'Delete', icon: '✕', color: '#A33B2E',
+              confirm: true, run: function () { df.submit(); }};
+    }
+    return null;
+  }
+
+  function setStatus(li, st) {
+    var pill = q(li, '.pill');
+    var id = pill && pill.getAttribute('data-id');
+    if (!id) return;
+    fetch('/items/' + id + '/status', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/x-www-form-urlencoded',
+                'X-Requested-With': 'fetch'},
+      body: 'status=' + encodeURIComponent(st)
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      pill.className = 'pill ' + d.status;
+      pill.textContent = d.status === 'open' ? 'Open'
+        : d.status === 'waiting' ? 'Waiting' : 'Done';
+      li.className = 'item ' + d.status + (d.status === 'done' ? ' donerow' : '');
+      if (window.applyFilter) { window.applyFilter(); }
+    });
+  }
+
+  function dismissInPlace(li, form) {
+    fetch(form.action, {method: 'POST', headers: {'X-Requested-With': 'fetch'}});
+    var sec = li.closest('section');
+    li.style.transition = 'height .18s ease, opacity .18s ease, margin .18s ease';
+    li.style.height = li.offsetHeight + 'px';
+    requestAnimationFrame(function () {
+      li.style.height = '0'; li.style.opacity = '0'; li.style.paddingTop = '0';
+      li.style.paddingBottom = '0'; li.style.overflow = 'hidden';
+    });
+    setTimeout(function () {
+      li.remove();
+      if (sec) {
+        var c = sec.querySelector('.counts');
+        if (c) { c.textContent = sec.querySelectorAll('li.brief:not(.readrow)').length + ' unread'; }
+        if (!sec.querySelector('li.item')) { sec.remove(); }
+      }
+    }, 190);
+  }
+
+  // ---------- the hold-to-open sheet ----------
+  // built from the row's own controls, so it can never drift out of step with the page
+
+  function sheetActions(li) {
+    var out = [];
+    var k = rowKind(li);
+
+    if (k === 'brief') {
+      var dot = q(li, '.dotbtn');
+      if (dot) {
+        out.push({label: li.classList.contains('readrow') ? 'Mark unread' : 'Mark read',
+                  run: function () { dot.click(); }});
+      }
+      var push = q(li, '.pushbtn');
+      if (push) { out.push({label: 'Make a task', run: function () { push.click(); scrollTo(push); }}); }
+      var onboard = q(li, '.outlookbtn.done');
+      if (onboard) { out.push({label: 'Open it on the board', href: onboard.href}); }
+    }
+
+    if (k === 'item') {
+      var st = li.classList.contains('done') ? 'done'
+        : li.classList.contains('waiting') ? 'waiting' : 'open';
+      if (st !== 'done') { out.push({label: 'Mark done', run: function () { setStatus(li, 'done'); }}); }
+      if (st !== 'waiting') { out.push({label: 'Mark waiting', run: function () { setStatus(li, 'waiting'); }}); }
+      if (st !== 'open') { out.push({label: 'Reopen', run: function () { setStatus(li, 'open'); }}); }
+      var resp = q(li, '.respond input[name=body]');
+      if (resp) { out.push({label: 'Add a response', run: function () { scrollTo(resp); resp.focus(); }}); }
+      var fadd = q(li, '.fileinput');
+      if (fadd) { out.push({label: 'Attach a file', run: function () { fadd.click(); }}); }
+      var edit = q(li, 'details.editbox');
+      if (edit) {
+        out.push({label: 'Edit / due date / reminder', run: function () {
+          edit.open = true; scrollTo(edit);
+        }});
+      }
+    }
+
+    // anything on the row that points at a map or an email
+    Array.prototype.forEach.call(li.querySelectorAll('a.maplink, a.dirlink, a.outlookbtn:not(.done)'),
+      function (a) {
+        var t = (a.getAttribute('data-sheet') || a.textContent || '').trim();
+        if (t) { out.push({label: t, href: a.href, external: a.target === '_blank'}); }
+      });
+
+    var del = k === 'brief' ? q(li, '.delform') : q(li, '.editbox .delform');
+    if (del) {
+      out.push({label: k === 'brief' ? 'Dismiss' : 'Delete', danger: true,
+                run: function () {
+                  if (k === 'brief') { dismissInPlace(li, del); } else { del.submit(); }
+                }});
+    }
+    return out;
+  }
+
+  function scrollTo(el) {
+    setTimeout(function () { el.scrollIntoView({block: 'center', behavior: 'smooth'}); }, 60);
+  }
+
+  var sheet, sheetList, sheetTitle, sheetOpenedAt = 0;
+
+  function buildSheet() {
+    sheet = document.createElement('div');
+    sheet.className = 'sheet-wrap';
+    sheet.innerHTML =
+      '<div class="sheet-scrim"></div>' +
+      '<div class="sheet" role="dialog" aria-modal="true">' +
+      '<div class="sheet-grab"></div>' +
+      '<div class="sheet-title"></div>' +
+      '<div class="sheet-list"></div>' +
+      '<button type="button" class="sheet-cancel">Cancel</button>' +
+      '</div>';
+    document.body.appendChild(sheet);
+    sheetList = sheet.querySelector('.sheet-list');
+    sheetTitle = sheet.querySelector('.sheet-title');
+    sheet.querySelector('.sheet-scrim').addEventListener('click', guardedClose);
+    sheet.querySelector('.sheet-cancel').addEventListener('click', guardedClose);
+  }
+
+  function openSheet(li) {
+    var acts = sheetActions(li);
+    if (!acts.length) return;
+    if (!sheet) { buildSheet(); }
+    var t = q(li, '.t');
+    sheetTitle.textContent = t ? t.textContent.trim().slice(0, 90) : '';
+    sheetList.innerHTML = '';
+    acts.forEach(function (a) {
+      var b = document.createElement(a.href ? 'a' : 'button');
+      b.className = 'sheet-act' + (a.danger ? ' danger' : '');
+      b.textContent = a.label;
+      if (a.href) {
+        b.href = a.href;
+        if (a.external) { b.target = '_blank'; b.rel = 'noopener'; }
+        b.addEventListener('click', function (ev) {
+          if (new Date().getTime() - sheetOpenedAt < 500) { ev.preventDefault(); return; }
+          closeSheet();
+        });
+      } else {
+        b.type = 'button';
+        b.addEventListener('click', function () {
+          if (new Date().getTime() - sheetOpenedAt < 500) { return; }
+          closeSheet(); a.run();
+        });
+      }
+      sheetList.appendChild(b);
+    });
+    sheetOpenedAt = new Date().getTime();
+    sheet.classList.add('on');
+    document.body.classList.add('sheet-open');
+  }
+
+  // lifting your finger after a long press fires a click right where the sheet
+  // just appeared - ignore anything that lands in the first moments
+  function guardedClose() {
+    if (new Date().getTime() - sheetOpenedAt < 500) { return; }
+    closeSheet();
+  }
+
+  function closeSheet() {
+    if (!sheet) return;
+    sheet.classList.remove('on');
+    document.body.classList.remove('sheet-open');
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') { closeSheet(); }
+  });
+
+  // ---------- the swipe itself ----------
+
+  function movers(li) {
+    return Array.prototype.filter.call(li.children, function (c) {
+      return !c.classList.contains('swipe-bg');
+    });
+  }
+
+  // .swipe-bg = the coloured action panel that stays put (absolute, so it never
+  // becomes a grid track).  .swipe-fg = an opaque curtain in the row's own colour
+  // that travels with the content, so the panel only shows through the gap.
+  function ensureBg(li) {
+    var bg = li.querySelector(':scope > .swipe-bg');
+    if (!bg) {
+      bg = document.createElement('div');
+      bg.className = 'swipe-bg';
+      bg.innerHTML = '<span class="sb-left"></span><span class="sb-right"></span>';
+      var fg = document.createElement('div');
+      fg.className = 'swipe-fg';
+      var bgc = getComputedStyle(li).backgroundColor;
+      if (!bgc || bgc === 'rgba(0, 0, 0, 0)' || bgc === 'transparent') {
+        bgc = getComputedStyle(li.parentElement).backgroundColor || '#FFFDF8';
+      }
+      fg.style.background = bgc;
+      li.insertBefore(fg, li.firstChild);
+      li.insertBefore(bg, li.firstChild);
+      li.classList.add('swipeable');
+    }
+    return bg;
+  }
+
+  function shift(li, dx) {
+    movers(li).forEach(function (c) {
+      c.style.transform = dx ? 'translateX(' + dx + 'px)' : '';
+    });
+  }
+
+  function release(li, animate) {
+    movers(li).forEach(function (c) {
+      c.style.transition = animate ? 'transform .18s ease' : '';
+      c.style.transform = '';
+      if (animate) {
+        setTimeout(function () { c.style.transition = ''; }, 200);
+      }
+    });
+  }
+
+  var cur = null;
+  var swallowClick = false;
+
+  // Lifting your finger after a long press fires a click at that spot - and by
+  // then the sheet has slid up underneath it, so the click would land on
+  // whichever row of the menu happens to be there. Eat that one click whatever
+  // it hits; the real tap comes afterwards.
+  document.addEventListener('click', function (ev) {
+    if (!swallowClick) return;
+    swallowClick = false;
+    ev.stopPropagation();
+    ev.preventDefault();
+  }, true);
+
+  function onStart(ev) {
+    if (ev.touches && ev.touches.length > 1) return;
+    var li = ev.target.closest('li.item, li.brief');
+    if (!li || !rowKind(li)) return;
+    // never hijack a real control; a text box is fair game to swipe from
+    // unless the cursor is actually in it
+    if (ev.target.closest('button, a, select, textarea, label, summary,'
+        + ' input[type=file], input[type=date], input[type=time], input[type=datetime-local]')) return;
+    var fld = ev.target.closest('input');
+    if (fld && document.activeElement === fld) return;
+    var t = ev.touches ? ev.touches[0] : ev;
+    cur = {li: li, x0: t.clientX, y0: t.clientY, dir: 0, dx: 0,
+           right: swipeRight(li), left: swipeLeft(li), held: false};
+    cur.hold = setTimeout(function () {
+      if (!cur || cur.dir) return;
+      cur.held = true;
+      swallowClick = true;
+      if (navigator.vibrate) { try { navigator.vibrate(12); } catch (e) {} }
+      openSheet(li);
+      cancel();
+    }, HOLD_MS);
+  }
+
+  function onMove(ev) {
+    if (!cur) return;
+    var t = ev.touches ? ev.touches[0] : ev;
+    var dx = t.clientX - cur.x0, dy = t.clientY - cur.y0;
+
+    if (!cur.dir) {
+      if (Math.abs(dy) > SLOP && Math.abs(dy) > Math.abs(dx)) { cancel(); return; }  // scrolling
+      if (Math.abs(dx) < SLOP) return;
+      cur.dir = dx > 0 ? 1 : -1;
+      clearTimeout(cur.hold);
+      var act = cur.dir > 0 ? cur.right : cur.left;
+      if (!act) { cancel(); return; }
+      var bg = ensureBg(cur.li);
+      bg.style.setProperty('--sw', act.color);
+      bg.querySelector(cur.dir > 0 ? '.sb-left' : '.sb-right').textContent =
+        act.icon + '  ' + act.label;
+      bg.classList.toggle('from-left', cur.dir > 0);
+      bg.classList.toggle('from-right', cur.dir < 0);
+    }
+
+    if (ev.cancelable) { ev.preventDefault(); }
+    // a little resistance past the trigger point so it feels like Outlook
+    var raw = dx - (cur.dir > 0 ? SLOP : -SLOP);
+    cur.dx = Math.abs(raw) > THRESHOLD
+      ? cur.dir * (THRESHOLD + (Math.abs(raw) - THRESHOLD) * 0.35)
+      : raw;
+    shift(cur.li, cur.dx);
+    var bg2 = cur.li.querySelector(':scope > .swipe-bg');
+    if (bg2) { bg2.classList.toggle('armed', Math.abs(cur.dx) >= THRESHOLD); }
+  }
+
+  function onEnd() {
+    if (!cur) return;
+    clearTimeout(cur.hold);
+    var c = cur; cur = null;
+    if (!c.dir) return;
+    var act = c.dir > 0 ? c.right : c.left;
+    var fired = Math.abs(c.dx) >= THRESHOLD && act;
+    release(c.li, true);
+    var bg = c.li.querySelector(':scope > .swipe-bg');
+    if (bg) { bg.classList.remove('armed'); }
+    if (!fired) return;
+    if (act.confirm) {
+      if (!window.confirm('Delete this?')) { return; }
+    }
+    if (navigator.vibrate) { try { navigator.vibrate(8); } catch (e) {} }
+    act.run();
+  }
+
+  function cancel() {
+    if (!cur) return;
+    clearTimeout(cur.hold);
+    release(cur.li, false);
+    cur = null;
+  }
+
+  document.addEventListener('touchstart', onStart, {passive: true});
+  document.addEventListener('touchmove', onMove, {passive: false});
+  document.addEventListener('touchend', onEnd);
+  document.addEventListener('touchcancel', cancel);
+
+  // mouse equivalent so the same thing works at a desk: right-click = the sheet
+  document.addEventListener('contextmenu', function (ev) {
+    var li = ev.target.closest('li.item, li.brief');
+    if (!li || !rowKind(li)) return;
+    if (ev.target.closest('a, input, textarea, select')) return;
+    ev.preventDefault();
+    openSheet(li);
+  });
+})();

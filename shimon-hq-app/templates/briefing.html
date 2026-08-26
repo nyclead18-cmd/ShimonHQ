@@ -57,6 +57,9 @@
       <div class="body">
         <div class="t tapread" dir="auto" data-brief="{{ b.id }}">{{ b.text }}</div>
         {% if b.detail %}<div class="w" dir="auto">{{ b.detail|linkify }}</div>{% endif %}
+        {% if b.kind == 'meeting' and b.detail|isplace %}
+        <a class="dirlink" data-sheet="Directions" href="{{ b.detail|mapdir }}" target="_blank" rel="noopener">Directions</a>
+        {% endif %}
         <div class="briefacts">
           {% if b.link %}<a class="outlookbtn" href="{{ b.link }}" target="_blank" rel="noopener">Open</a>{% endif %}
           {% if b.item_id %}

@@ -10,6 +10,8 @@ from flask import (Flask, g, render_template, request, redirect,
                    url_for, session, jsonify, send_from_directory, abort)
 from markupsafe import Markup, escape
 
+import maps
+
 BASE = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(BASE, "hq.db"))
 FILES_DIR = os.environ.get("FILES_DIR",
@@ -25,7 +27,7 @@ _URL_RE = re.compile(r"(https?://[^\s<>\"]+)")
 @app.context_processor
 def inject_css_version():
     v = 0
-    for name in ("style.css", "board.js", "icon-512.png"):
+    for name in ("style.css", "board.js", "gestures.js", "icon-512.png"):
         try:
             v = max(v, int(os.path.getmtime(os.path.join(BASE, "static", name))))
         except OSError:
@@ -44,6 +46,31 @@ def fmt12(hhmm):
     except ValueError:
         return t
     return "%d:%s %s" % (h % 12 or 12, m, "AM" if h < 12 else "PM")
+
+
+@app.template_filter("maplink")
+def f_maplink(loc):
+    return maps.link(loc)
+
+
+@app.template_filter("mapdir")
+def f_mapdir(loc):
+    """Directions, starting from the address saved in Settings when there is one."""
+    try:
+        origin = _setting_ro(db(), "origin_address", "") or ""
+    except Exception:
+        origin = ""
+    return maps.directions(loc, origin)
+
+
+@app.template_filter("mapembed")
+def f_mapembed(loc):
+    return maps.embed(loc)
+
+
+@app.template_filter("isplace")
+def f_isplace(loc):
+    return maps.is_place(loc)
 
 
 @app.template_filter("linkify")
@@ -297,6 +324,22 @@ def cycle_item(item_id):
     return jsonify(status=nxt)
 
 
+@app.route("/items/<int:item_id>/status", methods=["POST"])
+@login_required
+def set_item_status(item_id):
+    """Set a status outright - what a swipe uses, instead of cycling through all three."""
+    st = (request.form.get("status") or "").strip()
+    if st not in STATUSES:
+        abort(400)
+    con = db()
+    if not con.execute("SELECT 1 FROM items WHERE id=?", (item_id,)).fetchone():
+        abort(404)
+    con.execute("UPDATE items SET status=?, updated_at=? WHERE id=?",
+                (st, datetime.now().isoformat(timespec="seconds"), item_id))
+    con.commit()
+    return jsonify(status=st)
+
+
 @app.route("/items/<int:item_id>/delete", methods=["POST"])
 @login_required
 def delete_item(item_id):
@@ -498,6 +541,8 @@ def calendar_view():
                            overdue=overdue, upcoming=upcoming,
                            month_label=first.strftime("%B %Y"),
                            prev_m=prev_m, next_m=next_m,
+                           origin=_setting_ro(con, "origin_address", "") or "",
+                           maps_key=bool(maps.KEY),
                            today_iso=t_iso, cur_month=mo)
 
 
@@ -600,7 +645,58 @@ def brief_dismiss(bid):
     row = con.execute("SELECT day FROM brief_items WHERE id=?", (bid,)).fetchone()
     con.execute("DELETE FROM brief_items WHERE id=?", (bid,))
     con.commit()
+    if request.headers.get("X-Requested-With") == "fetch":
+        return jsonify(ok=True)
     return redirect(url_for("briefing_view", day=row["day"] if row else None))
+
+
+# ---------- maps: where you are leaving from, and how long it takes ----------
+
+BUFFER_MIN = 10          # padding either side of a drive so you are not sprinting
+
+
+def _depart_utc(day, hhmm):
+    """The event start as a UTC datetime, for a traffic-aware estimate."""
+    if not hhmm:
+        return None
+    try:
+        from datetime import timezone
+        from zoneinfo import ZoneInfo
+        local = datetime.strptime(day + " " + hhmm[:5], "%Y-%m-%d %H:%M")
+        return local.replace(tzinfo=ZoneInfo(TZ_NAME)).astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _leave_by(hhmm, secs):
+    """'1:05 PM' - when to walk out the door to make a start time."""
+    if not (hhmm and secs):
+        return ""
+    try:
+        from datetime import timedelta as _td
+        t = datetime.strptime(hhmm[:5], "%H:%M") - _td(seconds=secs) - _td(minutes=BUFFER_MIN)
+        return fmt12(t.strftime("%H:%M"))
+    except Exception:
+        return ""
+
+
+@app.route("/settings/origin", methods=["POST"])
+@login_required
+def set_origin():
+    """The address travel times are measured from - home, or the office."""
+    val = (request.form.get("origin_address") or "").strip()
+    con = db()
+    con.execute("INSERT INTO settings(k, v) VALUES('origin_address', ?)"
+                " ON CONFLICT(k) DO UPDATE SET v=excluded.v", (val,))
+    con.commit()
+    return redirect(request.form.get("back") or url_for("calendar_view"))
+
+
+@app.route("/maps/check")
+@login_required
+def maps_check():
+    st = maps.status()
+    return jsonify(st)
 
 
 # ---------- day view: open and edit a single day ----------
@@ -622,8 +718,20 @@ def day_view(day):
         " JOIN sections ON items.section_id = sections.id"
         " WHERE items.due_date = ? ORDER BY items.status='done', items.id", (day,)).fetchall()
     sections = con.execute("SELECT * FROM sections ORDER BY pos, id").fetchall()
+    origin = _setting_ro(con, "origin_address", "") or ""
+    travel = {}
+    if origin and maps.KEY and day >= _now_local().strftime("%Y-%m-%d"):
+        for e in evs:
+            if not maps.is_place(e["location"]):
+                continue
+            secs = maps.drive_seconds(origin, e["location"],
+                                      _depart_utc(e["day"], e["start_time"]))
+            if secs:
+                travel[e["id"]] = {"pretty": maps.pretty_minutes(secs),
+                                   "leave": _leave_by(e["start_time"], secs)}
     return render_template("day.html", d=d, day=day, evs=evs, tasks=tasks,
-                           sections=sections,
+                           sections=sections, origin=origin, travel=travel,
+                           maps_key=bool(maps.KEY),
                            pretty=d.strftime("%A, %B %d, %Y"),
                            prev_day=(d - timedelta(days=1)).isoformat(),
                            next_day=(d + timedelta(days=1)).isoformat(),
@@ -1314,6 +1422,34 @@ def reminder_tick():
             body += "  ·  " + e["location"]
         send_push("Coming up", body, "/calendar")
         _mark_sent(con, ref)
+
+    # 2b. "leave now" - only when there is a key and a from-address to measure from
+    origin = _setting(con, "origin_address", "") or ""
+    if maps.KEY and origin:
+        ahead = (now + _td(minutes=120)).strftime("%H:%M")
+        for e in con.execute(
+                "SELECT * FROM events WHERE day=? AND start_time IS NOT NULL"
+                " AND start_time > ? AND start_time <= ?",
+                (today, now.strftime("%H:%M"), ahead)):
+            if not maps.is_place(e["location"]):
+                continue
+            ref = "leave:%s:%s" % (e["ext_key"] or e["id"], e["day"])
+            if _already_sent(con, ref):
+                continue
+            secs = maps.drive_seconds(origin, e["location"],
+                                      _depart_utc(e["day"], e["start_time"]))
+            if not secs:
+                continue
+            leave = (datetime.strptime(e["start_time"][:5], "%H:%M")
+                     - _td(seconds=secs) - _td(minutes=BUFFER_MIN)).strftime("%H:%M")
+            # fire in the two minutes around leave time, or straight away if we are late
+            if now.strftime("%H:%M") < leave:
+                continue
+            send_push("Leave now",
+                      "%s at %s  -  %s drive" % (e["subject"], fmt12(e["start_time"]),
+                                                 maps.pretty_minutes(secs)),
+                      "/day/" + e["day"])
+            _mark_sent(con, ref)
 
     # 3. one morning digest at 8am on weekdays
     if now.weekday() < 5 and now.strftime("%H:%M") >= "08:00" and now.strftime("%H:%M") < "09:00":
