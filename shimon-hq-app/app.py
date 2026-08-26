@@ -1562,6 +1562,38 @@ def api_walink():
         {"Content-Type": "text/plain; charset=utf-8"}
 
 
+@app.route("/api/washape")
+def api_washape():
+    """Field NAMES only, never values - so the payload shape can be checked
+    without any of Shimon's WhatsApp content leaving the server."""
+    if not (session.get("user") or _api_auth()):
+        abort(401)
+    out = {}
+    try:
+        rows, more = wa.chats(page=1)
+        out["chat_count"] = len(rows)
+        out["has_more"] = more
+        out["chat_keys"] = sorted(rows[0].keys()) if rows else []
+        cid = None
+        for cand in ("id", "chat_id", "uid", "pk"):
+            if rows and rows[0].get(cand) is not None:
+                cid = rows[0][cand]
+                out["id_field"] = cand
+                break
+        if cid is None:
+            out["id_field"] = None
+            return jsonify(out)
+        try:
+            msgs = wa.messages(str(cid), after=None, limit_pages=1)
+            out["message_count"] = len(msgs)
+            out["message_keys"] = sorted(msgs[0].keys()) if msgs else []
+        except Exception as e:
+            out["messages_error"] = "%s: %s" % (type(e).__name__, e)
+    except Exception as e:
+        out["chats_error"] = "%s: %s" % (type(e).__name__, e)
+    return jsonify(out)
+
+
 @app.route("/api/wafeed")
 def api_wafeed():
     """Everything said on WhatsApp since the watermark, as plain text for the sweep.
