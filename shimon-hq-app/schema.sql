@@ -89,3 +89,16 @@ CREATE TABLE IF NOT EXISTS brief_items (
   target_item_id INTEGER,         -- the task this update is offering to file onto
   created_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS wa_inbox (
+  uid TEXT PRIMARY KEY,           -- TimelinesAI message uid, so a retry never doubles
+  chat_id TEXT,
+  chat_name TEXT,
+  sender TEXT,
+  from_me INTEGER NOT NULL DEFAULT 0,
+  text TEXT,
+  ts TEXT,                        -- when WhatsApp says it was sent
+  received_at TEXT,               -- when the webhook reached us
+  handled INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS wa_inbox_open ON wa_inbox(handled, ts);

@@ -149,3 +149,50 @@ def status(ua=None):
             "chats_total": len(every), "chats_with_messages": len(stamped),
             "detail": "Connected. %d chats, %d with messages, newest %s."
                       % (len(every), len(stamped), newest[:16].replace("T", " ") or "unknown")}
+
+
+# ---------- webhook payloads ----------
+# TimelinesAI posts a message event; the wrapper has varied over time, so dig for
+# the message object rather than trusting one shape.
+
+def _dig(obj, depth=0):
+    if depth > 4 or not isinstance(obj, dict):
+        return None
+    if ("text" in obj or "has_attachment" in obj) and \
+       ("uid" in obj or "message_uid" in obj or "id" in obj):
+        return obj
+    for v in obj.values():
+        if isinstance(v, dict):
+            hit = _dig(v, depth + 1)
+            if hit:
+                return hit
+        elif isinstance(v, list):
+            for item in v[:5]:
+                hit = _dig(item, depth + 1) if isinstance(item, dict) else None
+                if hit:
+                    return hit
+    return None
+
+
+def parse_hook(payload):
+    """Flatten a webhook body into the row we store, or None if it is not a message."""
+    if not isinstance(payload, dict):
+        return None
+    m = _dig(payload) or {}
+    uid = m.get("uid") or m.get("message_uid") or m.get("id")
+    if not uid:
+        return None
+    chat = payload.get("chat") if isinstance(payload.get("chat"), dict) else {}
+    text = m.get("text") or ""
+    if not text and m.get("has_attachment"):
+        text = "[%s]" % (m.get("attachment_filename") or "attachment")
+    return {
+        "uid": str(uid),
+        "chat_id": str(m.get("chat_id") or chat.get("id") or payload.get("chat_id") or ""),
+        "chat_name": (chat.get("name") or payload.get("chat_name")
+                      or m.get("sender_name") or m.get("sender_phone") or ""),
+        "sender": m.get("sender_name") or m.get("sender_phone") or "",
+        "from_me": 1 if m.get("from_me") else 0,
+        "text": text.replace("\r", " ").strip(),
+        "ts": m.get("timestamp") or m.get("received_timestamp") or "",
+    }
