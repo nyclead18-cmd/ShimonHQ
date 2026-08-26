@@ -1336,8 +1336,10 @@ def api_pulse():
     for r in p["waiting"][:15]:
         L.append("WAITING\t%s\t%s\t%s" % (
             r["who"], r["title"],
-            ("at least %d days" % r["days"]) if (r["days"] and r["approx"])
-            else ("%d days" % r["days"]) if r["days"] is not None
+            ("at least %d day%s" % (r["days"], "" if r["days"] == 1 else "s"))
+            if (r["days"] and r["approx"])
+            else ("%d day%s" % (r["days"], "" if r["days"] == 1 else "s"))
+            if r["days"] is not None
             else "unknown (was waiting before tracking began)"))
     for r in p["stalled"][:15]:
         L.append("STALLED\t%s\t%s\t%d days quiet" % (r["title"], r["section"], r["quiet_days"]))
