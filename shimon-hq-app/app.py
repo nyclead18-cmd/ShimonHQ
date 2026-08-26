@@ -813,7 +813,7 @@ def api_set():
     """Update one task by its current title (t), setting any of: title, note, waiting_on."""
     if not _api_auth():
         abort(401)
-    find = (request.args.get("t") or "").strip()
+    find = (request.args.get("find") or request.args.get("t") or "").strip()
     if not find:
         return "ERROR: t required", 400, {"Content-Type": "text/plain; charset=utf-8"}
     con = db()
