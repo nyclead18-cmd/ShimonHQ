@@ -832,6 +832,19 @@ def api_set():
     return "UPDATED: " + (title or row["title"]), 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
+@app.route("/api/notify")
+def api_notify():
+    """Send a push to Shimon's devices (used when email capture lands something new)."""
+    if not _api_auth():
+        abort(401)
+    title = (request.args.get("title") or "Shimon HQ").strip()
+    body = (request.args.get("body") or "").strip()
+    if not body:
+        return "ERROR: body required", 400, {"Content-Type": "text/plain; charset=utf-8"}
+    n = send_push(title, body, request.args.get("url") or "/")
+    return "PUSHED to %d device(s)" % n, 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+
 @app.route("/api/digest")
 def api_digest():
     """Plain-text overdue / due-today digest for the morning sweep."""
@@ -874,16 +887,31 @@ def api_quickadd():
     dup = con.execute("SELECT 1 FROM items WHERE lower(title)=lower(?)", (title,)).fetchone()
     if dup:
         return "SKIPPED (duplicate): " + title, 200, {"Content-Type": "text/plain; charset=utf-8"}
+    pid = None
+    proj = (request.args.get("project") or "").strip()
+    if proj:
+        prow = con.execute("SELECT id FROM projects WHERE section_id=? AND lower(title)=lower(?)",
+                           (sid, proj)).fetchone()
+        if prow:
+            pid = prow["id"]
+        else:
+            ppos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM projects WHERE section_id=?",
+                               (sid,)).fetchone()[0]
+            pid = con.execute("INSERT INTO projects(section_id, title, pos, created_at)"
+                              " VALUES(?,?,?,?)",
+                              (sid, proj, ppos,
+                               datetime.now().isoformat(timespec="seconds"))).lastrowid
     pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM items WHERE section_id=?",
                       (sid,)).fetchone()[0]
     con.execute(
-        "INSERT INTO items(section_id, title, note, waiting_on, status, pos, due_date, updated_at)"
-        " VALUES(?,?,?,?,?,?,?,?)",
-        (sid, title, request.args.get("note", ""), request.args.get("waiting_on", ""),
+        "INSERT INTO items(section_id, project_id, title, note, waiting_on, status, pos,"
+        " due_date, updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+        (sid, pid, title, request.args.get("note", ""), request.args.get("waiting_on", ""),
          "open", pos, request.args.get("due") or None,
          datetime.now().isoformat(timespec="seconds")))
     con.commit()
-    return "ADDED: " + title, 200, {"Content-Type": "text/plain; charset=utf-8"}
+    return "ADDED: " + title + (" [%s]" % proj if proj else ""), 200, \
+        {"Content-Type": "text/plain; charset=utf-8"}
 
 
 @app.route("/api/board")
