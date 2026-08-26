@@ -1562,6 +1562,17 @@ def api_walink():
         {"Content-Type": "text/plain; charset=utf-8"}
 
 
+def _shape(v, depth=0):
+    """Structure only - key names and types, never a single value."""
+    if depth > 3:
+        return "..."
+    if isinstance(v, dict):
+        return dict((k, _shape(val, depth + 1)) for k, val in list(v.items())[:25])
+    if isinstance(v, list):
+        return ["list[%d]" % len(v)] + ([_shape(v[0], depth + 1)] if v else [])
+    return type(v).__name__
+
+
 @app.route("/api/washape")
 def api_washape():
     """Field NAMES only, never values - so the payload shape can be checked
@@ -1584,11 +1595,17 @@ def api_washape():
             out["id_field"] = None
             return jsonify(out)
         try:
-            msgs = wa.messages(str(cid), after=None, limit_pages=1)
+            raw = wa._get("/chats/%s/messages" % cid, {"sorting_order": "desc"})
+            out["msg_envelope"] = _shape(raw)
+            msgs, _m = wa._rows(raw)
             out["message_count"] = len(msgs)
             out["message_keys"] = sorted(msgs[0].keys()) if msgs else []
         except Exception as e:
             out["messages_error"] = "%s: %s" % (type(e).__name__, e)
+        try:
+            out["chat_envelope"] = _shape(wa._get("/chats", {"page": 1}))
+        except Exception as e:
+            out["chat_envelope_error"] = str(e)
     except Exception as e:
         out["chats_error"] = "%s: %s" % (type(e).__name__, e)
     return jsonify(out)
