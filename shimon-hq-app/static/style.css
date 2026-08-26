@@ -227,11 +227,22 @@ form.edit select{background:var(--bg); border:1px solid var(--border); border-ra
 .jstat.done{background:#E4EEE2; color:#3A6B3E;}
 .jnote{color:#68727F; font-size:12.5px; margin-top:2px; padding-left:10px; border-left:2px solid #E4E0D6;}
 .joelpage{max-width:900px;}
+.printhead{display:flex; justify-content:space-between; align-items:baseline; gap:12px;
+  border-bottom:3px double #B8892E; padding-bottom:12px; margin:20px 0 18px; flex-wrap:wrap;}
 @media print{
   .noprint{display:none !important;}
-  body{background:#FFFFFF;}
+  body{background:#FFFFFF; color:#1E1B16; padding:0;}
   .wrap{padding:0; max-width:none;}
-  .joel-sheet{border:none; box-shadow:none; border-radius:0; padding:0; margin:0;}
+  section.card{border:none; box-shadow:none; border-radius:0; background:#FFFFFF;}
+  li.item{break-inside:avoid; background:#FFFFFF !important; padding:8px 0;
+    grid-template-columns:70px 1fr;}
+  li.donerow{display:none !important;}
+  .sec-head{border-bottom:1px solid #1F3A5F; padding:0 0 6px;}
+  .proj-head{padding:10px 0 4px;}
+  .respondrow, .editbox, .addrow, .fadd, .files{display:none !important;}
+  ul.notes{border-left:2px solid #E4E0D6;}
+  .pill{border:1px solid #999; background:#FFF !important; color:#1E1B16 !important;}
+  a{color:#1E1B16; text-decoration:none;}
 }
 /* login */
 .login-wrap{min-height:100dvh; display:grid; place-items:center; padding:20px; background:var(--bg);}

@@ -24,10 +24,12 @@ _URL_RE = re.compile(r"(https?://[^\s<>\"]+)")
 
 @app.context_processor
 def inject_css_version():
-    try:
-        v = int(os.path.getmtime(os.path.join(BASE, "static", "style.css")))
-    except OSError:
-        v = 0
+    v = 0
+    for name in ("style.css", "board.js"):
+        try:
+            v = max(v, int(os.path.getmtime(os.path.join(BASE, "static", name))))
+        except OSError:
+            pass
     return {"css_v": v}
 
 
@@ -400,21 +402,31 @@ def people_view():
 @app.route("/joel")
 @login_required
 def joel_view():
+    """The Joel section as a live board (same controls as everywhere) + a print sheet."""
+    from datetime import timedelta
     con = db()
+    sections = con.execute("SELECT * FROM sections ORDER BY pos, id").fetchall()
     sec = con.execute("SELECT * FROM sections WHERE title LIKE '%Joel%' ORDER BY id LIMIT 1").fetchone()
-    items, notes_by_item = [], {}
+    projects = con.execute("SELECT * FROM projects ORDER BY pos, id").fetchall()
+    projects_by_sec = {}
+    for p in projects:
+        projects_by_sec.setdefault(p["section_id"], []).append(p)
+    items, notes_by_item, files_by_item = [], {}, {}
     if sec:
         items = con.execute(
-            "SELECT * FROM items WHERE section_id=? ORDER BY status='done', pos, id",
-            (sec["id"],)).fetchall()
+            "SELECT * FROM items WHERE section_id=? ORDER BY pos, id", (sec["id"],)).fetchall()
         ids = [str(it["id"]) for it in items]
         if ids:
-            for n in con.execute(
-                    "SELECT * FROM item_notes WHERE item_id IN (%s) ORDER BY id"
-                    % ",".join(ids)):
+            joined = ",".join(ids)
+            for n in con.execute("SELECT * FROM item_notes WHERE item_id IN (%s) ORDER BY id" % joined):
                 notes_by_item.setdefault(n["item_id"], []).append(n)
-    return render_template("joel.html", sec=sec, items=items,
-                           notes_by_item=notes_by_item,
+            for f in con.execute("SELECT * FROM item_files WHERE item_id IN (%s) ORDER BY id" % joined):
+                files_by_item.setdefault(f["item_id"], []).append(f)
+    return render_template("joel.html", sec=sec, items=items, sections=sections,
+                           projects_by_sec=projects_by_sec,
+                           notes_by_item=notes_by_item, files_by_item=files_by_item,
+                           today_iso=datetime.now().date().isoformat(),
+                           soon_iso=(datetime.now().date() + timedelta(days=3)).isoformat(),
                            today=datetime.now().strftime("%B %d, %Y"))
 
 

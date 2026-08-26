@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Joel Review · Shimon HQ{% endblock %}
+{% block title %}Joel · Shimon HQ{% endblock %}
 {% block body %}
-<div class="wrap joelpage">
+<div class="wrap">
 <header class="top noprint">
   <div>
-    <div class="eyebrow">Meeting mode</div>
+    <div class="eyebrow">Joel &middot; Shimon</div>
     <h1>Shimon HQ</h1>
   </div>
   <div class="right">
@@ -19,46 +19,91 @@
   </div>
 </header>
 
-<div class="joel-sheet">
-  <div class="joel-head">
-    <div>
-      <div class="joel-eyebrow">Joel / Shimon Review</div>
-      <div class="joel-date">{{ today }}</div>
-    </div>
-    <div class="joel-brand">Pinta Capital Partners</div>
+<div class="printhead">
+  <div>
+    <div class="joel-eyebrow">Joel / Shimon Review</div>
+    <div class="joel-date">{{ today }}</div>
+  </div>
+  <div class="joel-brand">Pinta Capital Partners</div>
+</div>
+
+{% if not sec %}
+<p class="quiet">No Joel section on the board yet.</p>
+{% else %}
+{% set sec_projects = projects_by_sec.get(sec.id, []) %}
+{% set done = items | selectattr('status', 'equalto', 'done') | list %}
+{% set active = items | rejectattr('status', 'equalto', 'done') | list %}
+
+<section class="card" id="sec-{{ sec.id }}" style="--sa: #B8892E">
+  <div class="sec-head">
+    <h2><span class="dot"></span>{{ sec.title }}</h2>
+    <span class="counts">{{ active | length }} open
+      {% if done %}&middot; <button type="button" class="linky" data-toggle-done="{{ sec.id }}">{{ done | length }} done</button>{% endif %}
+    </span>
   </div>
 
-  {% if not sec %}<p class="quiet">No Joel section found on the board.</p>{% endif %}
+  {% for p in sec_projects %}
+  {% set pitems = items | selectattr('project_id', 'equalto', p.id) | list %}
+  {% set pdone = pitems | selectattr('status', 'equalto', 'done') | list %}
+  {% set pactive = pitems | rejectattr('status', 'equalto', 'done') | list %}
+  <div class="project">
+    <div class="proj-head">
+      <h3 dir="auto">{{ p.title }}</h3>
+      <span class="pcount">{{ pdone | length }}/{{ pitems | length }}</span>
+    </div>
+    <ul class="items">
+      {% for it in pactive %}{% include "_item.html" %}{% endfor %}
+      {% for it in pdone %}{% set hidden = true %}{% include "_item.html" %}{% endfor %}
+    </ul>
+  </div>
+  {% endfor %}
 
-  {% set open_items = items | rejectattr('status', 'equalto', 'done') | list %}
-  {% set done_items = items | selectattr('status', 'equalto', 'done') | list %}
-
-  <h2 class="joel-h2">Open items ({{ open_items | length }})</h2>
-  <table class="joel-table">
-    <tr><th class="jw1">Status</th><th>Item</th><th class="jw3">Waiting on</th><th class="jw4">Due</th></tr>
-    {% for it in open_items %}
-    <tr>
-      <td><span class="jstat {{ it.status }}">{{ 'Open' if it.status == 'open' else 'Waiting' }}</span></td>
-      <td dir="auto"><a class="jlink" href="{{ url_for('board', _anchor='item-' ~ it.id) }}"><b>{{ it.title }}</b></a>{% if it.note %} &mdash; {{ it.note }}{% endif %}
-        {% for n in notes_by_item.get(it.id, []) %}
-        <div class="jnote">{{ n.created_at[5:7]|int }}/{{ n.created_at[8:10]|int }} &mdash; <span dir="auto">{{ n.body }}</span></div>
-        {% endfor %}
-      </td>
-      <td dir="auto">{{ it.waiting_on or '&mdash;'|safe }}</td>
-      <td>{% if it.due_date %}{{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}{% else %}&mdash;{% endif %}</td>
-    </tr>
-    {% endfor %}
-  </table>
-
-  {% if done_items %}
-  <h2 class="joel-h2">Recently closed ({{ done_items | length }})</h2>
-  <table class="joel-table">
-    {% for it in done_items %}
-    <tr><td class="jw1"><span class="jstat done">Done</span></td>
-      <td dir="auto"><a class="jlink" href="{{ url_for('board', _anchor='item-' ~ it.id) }}">{{ it.title }}</a>{% if it.note %} &mdash; {{ it.note }}{% endif %}</td></tr>
-    {% endfor %}
-  </table>
+  {% set loose_active = active | selectattr('project_id', 'none') | list %}
+  {% set loose_done = done | selectattr('project_id', 'none') | list %}
+  {% if loose_active or loose_done %}
+  {% if sec_projects %}<div class="proj-head loose"><h3>Single items</h3></div>{% endif %}
+  <ul class="items">
+    {% for it in loose_active %}{% include "_item.html" %}{% endfor %}
+    {% for it in loose_done %}{% set hidden = true %}{% include "_item.html" %}{% endfor %}
+  </ul>
   {% endif %}
+
+  <div class="addrow noprint">
+    <details>
+      <summary>+ Add item</summary>
+      <form class="edit" method="post" action="{{ url_for('add_item') }}">
+        <input type="hidden" name="section_id" value="{{ sec.id }}">
+        <input name="title" placeholder="Item" dir="auto" required>
+        <input name="note" placeholder="Next step / note" dir="auto">
+        <input name="waiting_on" placeholder="Waiting on (who)" dir="auto">
+        {% if sec_projects %}
+        <label class="taglabel">Project
+          <select name="project_id">
+            <option value="">&mdash; none &mdash;</option>
+            {% for p in sec_projects %}<option value="{{ p.id }}">{{ p.title }}</option>{% endfor %}
+          </select>
+        </label>
+        {% endif %}
+        <label class="duelabel">Due <input type="date" name="due_date"></label>
+        <div class="btns"><button type="submit">Add</button></div>
+      </form>
+    </details>
+    <details>
+      <summary>+ Add project</summary>
+      <form class="edit" method="post" action="{{ url_for('add_project') }}">
+        <input type="hidden" name="section_id" value="{{ sec.id }}">
+        <input name="title" placeholder="Project name" dir="auto" required>
+        <div class="btns"><button type="submit">Add</button></div>
+      </form>
+    </details>
+  </div>
+</section>
+{% endif %}
+
+<footer class="noprint">Same controls as the board. Print gives you the clean one-pager for the meeting.</footer>
 </div>
-</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='board.js') }}?v={{ css_v }}"></script>
 {% endblock %}
