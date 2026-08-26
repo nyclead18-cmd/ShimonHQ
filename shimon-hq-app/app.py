@@ -791,6 +791,47 @@ def api_events_clear():
     return "CLEARED %d from %s" % (cur.rowcount, frm), 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
+@app.route("/api/retag")
+def api_retag():
+    """Merge one 'waiting on' name into another (same person, two spellings)."""
+    if not _api_auth():
+        abort(401)
+    frm = (request.args.get("from") or "").strip()
+    to = (request.args.get("to") or "").strip()
+    if not (frm and to):
+        return "ERROR: from and to required", 400, {"Content-Type": "text/plain; charset=utf-8"}
+    con = db()
+    cur = con.execute("UPDATE items SET waiting_on=? WHERE lower(trim(waiting_on))=lower(?)",
+                      (to, frm))
+    con.commit()
+    return "RETAGGED %d: %s -> %s" % (cur.rowcount, frm, to), 200, \
+        {"Content-Type": "text/plain; charset=utf-8"}
+
+
+@app.route("/api/set")
+def api_set():
+    """Update one task by its current title (t), setting any of: title, note, waiting_on."""
+    if not _api_auth():
+        abort(401)
+    find = (request.args.get("t") or "").strip()
+    if not find:
+        return "ERROR: t required", 400, {"Content-Type": "text/plain; charset=utf-8"}
+    con = db()
+    row = con.execute("SELECT * FROM items WHERE lower(title)=lower(?)", (find,)).fetchone()
+    if not row:
+        return "NOT FOUND: " + find, 200, {"Content-Type": "text/plain; charset=utf-8"}
+    title = request.args.get("title")
+    note = request.args.get("note")
+    wait = request.args.get("waiting_on")
+    con.execute("UPDATE items SET title=?, note=?, waiting_on=?, updated_at=? WHERE id=?",
+                (title if title is not None else row["title"],
+                 note if note is not None else row["note"],
+                 wait if wait is not None else row["waiting_on"],
+                 datetime.now().isoformat(timespec="seconds"), row["id"]))
+    con.commit()
+    return "UPDATED: " + (title or row["title"]), 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+
 @app.route("/api/digest")
 def api_digest():
     """Plain-text overdue / due-today digest for the morning sweep."""
