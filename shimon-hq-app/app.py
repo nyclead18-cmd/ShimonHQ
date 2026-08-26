@@ -467,6 +467,23 @@ def api_titles():
     return body, 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
+@app.route("/api/rm")
+def api_rm():
+    """Delete a task by exact title (cleanup helper for the sweep)."""
+    if not _api_auth():
+        abort(401)
+    title = (request.args.get("title") or "").strip()
+    if not title:
+        return "ERROR: title required", 400, {"Content-Type": "text/plain; charset=utf-8"}
+    con = db()
+    cur = con.execute("DELETE FROM items WHERE lower(title)=lower(?)", (title,))
+    con.execute("DELETE FROM sections WHERE id NOT IN (SELECT DISTINCT section_id FROM items)"
+                " AND title NOT IN ('Joel / Shimon Tracker','Pinta / Office','Shul + Tzedaka',"
+                "'Personal / Family','Inbox')")
+    con.commit()
+    return "REMOVED %d: %s" % (cur.rowcount, title), 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+
 @app.route("/api/digest")
 def api_digest():
     """Plain-text overdue / due-today digest for the morning sweep."""
@@ -499,7 +516,11 @@ def api_quickadd():
         return "ERROR: title required", 400, {"Content-Type": "text/plain; charset=utf-8"}
     con = db()
     sec_title = request.args.get("section", "Inbox")
+    # exact match first, then a forgiving prefix/substring match ("Joel" -> "Joel / Shimon Tracker")
     sec = con.execute("SELECT id FROM sections WHERE title=?", (sec_title,)).fetchone()
+    if not sec and sec_title:
+        sec = con.execute("SELECT id FROM sections WHERE title LIKE ? ORDER BY id LIMIT 1",
+                          ("%" + sec_title + "%",)).fetchone()
     sid = sec["id"] if sec else con.execute(
         "INSERT INTO sections(title, pos) VALUES(?, 99)", (sec_title,)).lastrowid
     dup = con.execute("SELECT 1 FROM items WHERE lower(title)=lower(?)", (title,)).fetchone()

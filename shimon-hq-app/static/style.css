@@ -245,4 +245,39 @@ form.edit select{background:var(--bg); border:1px solid var(--border); border-ra
 .login-card button{font:inherit; font-weight:700; border-radius:999px; padding:10px;
   border:1px solid var(--btn-bg); background:var(--btn-bg); color:var(--btn-tx); cursor:pointer; margin-top:4px;}
 .error{color:var(--danger); font-size:13.5px;}
-@media (max-width:560px){ h1{font-size:34px;} li.item{grid-template-columns:72px 1fr;} .pill{width:68px;} }
+@media (max-width:640px){
+  .wrap{padding:18px 12px 70px;}
+  h1{font-size:30px;}
+  header.top{align-items:flex-start; gap:10px;}
+  header.top .right{width:100%; flex-wrap:wrap; gap:10px; padding-bottom:0; align-items:center;}
+  .tabs{flex:1; min-width:0; justify-content:space-between;}
+  .tab{flex:1; text-align:center; padding:7px 4px; font-size:11px; letter-spacing:.03em;}
+  .printbtn{padding:7px 14px;}
+  .stats{gap:8px;}
+  .stat{flex:1; min-width:0; padding:11px 12px 10px;}
+  .stat .num{font-size:26px;}
+  .stat .lbl{font-size:10px; letter-spacing:.05em;}
+  .capture{gap:6px;} .capture input{padding:10px 14px;} .capture button{padding:0 16px;}
+  .toolbar{gap:8px;} .fpills{width:100%;} .fpill{flex:1; padding:7px 4px; font-size:11px;}
+  li.item{grid-template-columns:66px 1fr; gap:9px; padding:11px 12px;}
+  .pill{width:62px; font-size:10.5px; padding:4px 0;}
+  .sec-head{padding:12px 12px 10px;} .proj-head{padding:9px 12px 7px;}
+  .addrow{padding:10px 12px;} .addrow.slim{padding:6px 12px 10px;}
+  form.respond input{font-size:16px;}          /* stops iOS zoom-on-focus */
+  form.edit input, form.edit select{font-size:16px;}
+  .capture input, .toolbar input{font-size:16px;}
+  .respondrow{flex-wrap:wrap;}
+  .fchip a{max-width:150px;}
+  /* Joel sheet: stack each row as a card instead of a cramped table */
+  .joel-sheet{padding:20px 16px;}
+  .joel-eyebrow{font-size:21px;}
+  .joel-table, .joel-table tr, .joel-table td{display:block; width:100%;}
+  .joel-table th{display:none;}
+  .joel-table tr{border-bottom:1px solid #E4E0D6; padding:10px 0;}
+  .joel-table td{border:none; padding:1px 0;}
+  .joel-table .jw1{width:auto; margin-bottom:4px;}
+  .joel-table td:nth-child(3):not(:empty)::before{content:"Waiting on: "; color:#68727F; font-size:12px;}
+  .joel-table td:nth-child(4):not(:empty)::before{content:"Due: "; color:#68727F; font-size:12px;}
+  .cal{min-width:560px;}
+  .cal-day{min-height:70px;}
+}
