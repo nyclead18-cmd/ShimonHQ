@@ -477,3 +477,7 @@ li.noterow .t{flex:1; min-width:0;}
 .originbar .olab{display:flex; align-items:center; gap:7px; flex:1; min-width:190px;
   font-size:12px; letter-spacing:.05em; text-transform:uppercase; color:var(--muted);}
 .originbar .olab input{flex:1; min-width:0;}
+.geobtn{font-size:15px; line-height:1; background:var(--card); border:1px solid var(--border);
+  border-radius:999px; padding:7px 11px; cursor:pointer; min-height:34px;
+  touch-action:manipulation; filter:grayscale(1); opacity:.55;}
+.geobtn.on{filter:none; opacity:1; border-color:var(--accent);}

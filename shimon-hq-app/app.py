@@ -27,7 +27,7 @@ _URL_RE = re.compile(r"(https?://[^\s<>\"]+)")
 @app.context_processor
 def inject_css_version():
     v = 0
-    for name in ("style.css", "board.js", "gestures.js", "icon-512.png"):
+    for name in ("style.css", "board.js", "gestures.js", "geo.js", "icon-512.png"):
         try:
             v = max(v, int(os.path.getmtime(os.path.join(BASE, "static", name))))
         except OSError:
@@ -738,19 +738,57 @@ def brief_dismiss(bid):
 BUFFER_MIN = 10          # padding either side of a drive so you are not sprinting
 
 
+FIX_MAX_AGE_MIN = 25     # a location fix older than this is not where you are any more
+
+
 def _origins(con):
     home = _setting_ro(con, "origin_home", "") or _setting_ro(con, "origin_address", "") or ""
     work = _setting_ro(con, "origin_work", "") or ""
     return home, work
 
 
-def origin_for(evs, idx, home, work):
+def live_fix(con, max_age_min=FIX_MAX_AGE_MIN):
+    """Where the phone last said you were, if that was recent enough to trust."""
+    pos = _setting_ro(con, "last_pos", "") or ""
+    at = _setting_ro(con, "last_pos_at", "") or ""
+    if not (pos and at):
+        return ""
+    try:
+        when = datetime.fromisoformat(at)
+    except ValueError:
+        return ""
+    now = _now_local()
+    if when.tzinfo is None:
+        now = now.replace(tzinfo=None)
+    from datetime import timedelta as _td2
+    if now - when > _td2(minutes=max_age_min):
+        return ""
+    return pos
+
+
+FIX_HORIZON_MIN = 180    # a fix says where you are now, not where you will be tonight
+
+
+def origin_for(evs, idx, home, work, fix="", now_hhmm=""):
     """Where you will actually be coming from for evs[idx].
 
-    A single saved address is wrong by lunchtime, so: the last real place you were
-    that day wins; failing that, home early and the office once the day is running.
+    Best answer first: where your phone says you are right now - but only for
+    something starting in the next few hours, since by tonight you will have moved.
+    Then the last real place you were today. Then home early / the office later.
     Returns (address, label) - the label is shown so it is never a mystery."""
     ev = evs[idx]
+    if fix:
+        near = True
+        start = (ev["start_time"] or "")[:5]
+        if now_hhmm and start:
+            try:
+                a = int(now_hhmm[:2]) * 60 + int(now_hhmm[3:5])
+                b = int(start[:2]) * 60 + int(start[3:5])
+                near = 0 <= (b - a) <= FIX_HORIZON_MIN
+            except ValueError:
+                near = True
+        if near:
+            return fix, "from where you are"
     for j in range(idx - 1, -1, -1):
         if evs[j]["day"] == ev["day"] and maps.is_place(evs[j]["location"]):
             subj = (evs[j]["subject"] or "your last stop").strip()
@@ -802,6 +840,37 @@ def set_origin():
                         (key, (request.form.get(field) or "").strip()))
     con.commit()
     return redirect(request.form.get("back") or url_for("calendar_view"))
+
+
+@app.route("/where", methods=["POST"])
+@login_required
+def set_where():
+    """The phone telling us where it is, so travel times start from you, not an address.
+
+    Only the latest fix is kept - this is not a location history."""
+    try:
+        lat = float(request.form.get("lat"))
+        lng = float(request.form.get("lng"))
+    except (TypeError, ValueError):
+        return jsonify(ok=False), 400
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return jsonify(ok=False), 400
+    con = db()
+    for k, v in (("last_pos", "%.5f,%.5f" % (lat, lng)),
+                 ("last_pos_at", _now_local().isoformat(timespec="seconds"))):
+        con.execute("INSERT INTO settings(k, v) VALUES(?, ?)"
+                    " ON CONFLICT(k) DO UPDATE SET v=excluded.v", (k, v))
+    con.commit()
+    return jsonify(ok=True)
+
+
+@app.route("/where/forget", methods=["POST"])
+@login_required
+def forget_where():
+    con = db()
+    con.execute("DELETE FROM settings WHERE k IN ('last_pos','last_pos_at')")
+    con.commit()
+    return jsonify(ok=True)
 
 
 @app.route("/api/origin")
@@ -864,12 +933,13 @@ def day_view(day):
         " WHERE items.due_date = ? ORDER BY items.status='done', items.id", (day,)).fetchall()
     sections = con.execute("SELECT * FROM sections ORDER BY pos, id").fetchall()
     home, work = _origins(con)
+    fix = live_fix(con) if day == _now_local().strftime("%Y-%m-%d") else ""
     travel = {}
     if (home or work) and maps.KEY and day >= _now_local().strftime("%Y-%m-%d"):
         for i, e in enumerate(evs):
             if not maps.is_place(e["location"]):
                 continue
-            src, label = origin_for(evs, i, home, work)
+            src, label = origin_for(evs, i, home, work, fix, _now_local().strftime("%H:%M"))
             if not src:
                 continue
             secs = maps.drive_seconds(src, e["location"],
@@ -1704,7 +1774,7 @@ def reminder_tick():
             ref = "leave:%s:%s" % (e["ext_key"] or e["id"], e["day"])
             if _already_sent(con, ref):
                 continue
-            src, _label = origin_for(day_evs, i, home, work)
+            src, _label = origin_for(day_evs, i, home, work, live_fix(con), now.strftime("%H:%M"))
             if not src:
                 continue
             secs = maps.drive_seconds(src, e["location"],

@@ -85,13 +85,29 @@ def _cache_put(k, v):
                 _cache.pop(old, None)
 
 
+_COORD = re.compile(r"^\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*$")
+
+
+def as_waypoint(place):
+    """Routes API waypoint - a real lat,lng when we have one, else a plain address."""
+    m = _COORD.match(place or "")
+    if m:
+        return {"location": {"latLng": {"latitude": float(m.group(1)),
+                                        "longitude": float(m.group(2))}}}
+    return {"address": (place or "").strip()}
+
+
+def is_coord(place):
+    return bool(_COORD.match(place or ""))
+
+
 def drive_seconds(origin, dest, depart_utc=None, timeout=8):
     """Traffic-aware drive time in seconds, or None if we cannot work it out.
 
     depart_utc: a datetime in UTC. Google rejects a departure in the past, so
     anything not in the future is simply dropped and we get the typical time.
     """
-    if not (KEY and origin and is_place(dest)):
+    if not (KEY and origin and (is_place(dest) or is_coord(dest))):
         return None
     ck = (origin.strip().lower(), dest.strip().lower(),
           depart_utc.strftime("%Y%m%d%H%M")[:-1] if depart_utc else "now")
@@ -100,8 +116,8 @@ def drive_seconds(origin, dest, depart_utc=None, timeout=8):
         return hit or None
 
     body = {
-        "origin": {"address": origin.strip()},
-        "destination": {"address": dest.strip()},
+        "origin": as_waypoint(origin),
+        "destination": as_waypoint(dest),
         "travelMode": "DRIVE",
         "routingPreference": "TRAFFIC_AWARE",
     }
