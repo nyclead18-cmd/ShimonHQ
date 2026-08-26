@@ -1,4 +1,4 @@
-const CACHE = 'hq-v3';
+const CACHE = 'hq-v4';
 const SHELL = ['/static/style.css', '/static/board.js', '/static/icon-192.png', '/static/icon-512.png'];
 
 self.addEventListener('install', function (e) {

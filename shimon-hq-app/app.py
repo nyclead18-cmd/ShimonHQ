@@ -25,7 +25,7 @@ _URL_RE = re.compile(r"(https?://[^\s<>\"]+)")
 @app.context_processor
 def inject_css_version():
     v = 0
-    for name in ("style.css", "board.js"):
+    for name in ("style.css", "board.js", "icon-512.png"):
         try:
             v = max(v, int(os.path.getmtime(os.path.join(BASE, "static", name))))
         except OSError:
