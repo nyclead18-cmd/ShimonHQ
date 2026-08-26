@@ -569,6 +569,150 @@ def delete_event(ev_id):
     return redirect(url_for("day_view", day=row["day"]))
 
 
+# ---------- outbound: publish HQ to Outlook (ICS) ----------
+
+def _feed_token(con):
+    tok = _setting_ro(con, "feed_token")
+    if not tok:
+        tok = uuid.uuid4().hex
+        con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES('feed_token', ?)", (tok,))
+        con.commit()
+    return tok
+
+
+def _setting_ro(con, key, default=None):
+    row = con.execute("SELECT v FROM settings WHERE k=?", (key,)).fetchone()
+    return row["v"] if row else default
+
+
+def _ics_escape(t):
+    return (str(t or "").replace("\\", "\\\\").replace(";", "\\;")
+            .replace(",", "\\,").replace("\n", "\\n"))
+
+
+def _fold(line):
+    """ICS lines must be <=75 octets."""
+    out, cur = [], line
+    while len(cur.encode("utf-8")) > 73:
+        cut = 73
+        while len(cur[:cut].encode("utf-8")) > 73:
+            cut -= 1
+        out.append(cur[:cut])
+        cur = " " + cur[cut:]
+    out.append(cur)
+    return "\r\n".join(out)
+
+
+def _to_utc_stamp(day, hhmm):
+    """Local wall-clock -> UTC stamp, so Outlook never mis-shifts the time."""
+    from datetime import datetime as _dt
+    try:
+        from zoneinfo import ZoneInfo
+        local = _dt.strptime("%s %s" % (day, hhmm), "%Y-%m-%d %H:%M").replace(
+            tzinfo=ZoneInfo(TZ_NAME))
+        from datetime import timezone
+        return local.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    except Exception:
+        return _dt.strptime("%s %s" % (day, hhmm), "%Y-%m-%d %H:%M").strftime("%Y%m%dT%H%M%SZ")
+
+
+def build_ics(con):
+    from datetime import timedelta as _td
+    now = datetime.now()
+    stamp = now.strftime("%Y%m%dT%H%M%SZ")
+    horizon = (now.date() - _td(days=60)).isoformat()
+    L = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Shimon HQ//EN",
+         "CALSCALE:GREGORIAN", "METHOD:PUBLISH",
+         "X-WR-CALNAME:Shimon HQ", "X-WR-TIMEZONE:" + TZ_NAME,
+         "X-PUBLISHED-TTL:PT1H", "REFRESH-INTERVAL;VALUE=DURATION:PT1H"]
+
+    # your own events (Outlook ones are skipped - they already live in Outlook)
+    for e in con.execute("SELECT * FROM events WHERE COALESCE(source,'outlook')='manual'"
+                         " AND day >= ?", (horizon,)):
+        L += ["BEGIN:VEVENT", "UID:hq-ev-%s@shimonhq" % e["ext_key"], "DTSTAMP:" + stamp]
+        if e["start_time"]:
+            start = _to_utc_stamp(e["day"], e["start_time"])
+            end_h = (int(e["start_time"][:2]) + 1) % 24
+            end = _to_utc_stamp(e["day"], "%02d:%s" % (end_h, e["start_time"][3:5]))
+            L += ["DTSTART:" + start, "DTEND:" + end]
+        else:
+            d = e["day"].replace("-", "")
+            L += ["DTSTART;VALUE=DATE:" + d, "DTEND;VALUE=DATE:" + d]
+        L.append(_fold("SUMMARY:" + _ics_escape(e["subject"])))
+        if e["location"]:
+            L.append(_fold("LOCATION:" + _ics_escape(e["location"])))
+        if e["note"]:
+            L.append(_fold("DESCRIPTION:" + _ics_escape(e["note"])))
+        L.append("END:VEVENT")
+
+    # task deadlines as all-day entries
+    for it in con.execute(
+            "SELECT items.*, sections.title AS sec FROM items"
+            " JOIN sections ON items.section_id = sections.id"
+            " WHERE COALESCE(items.due_date,'') != '' AND items.due_date >= ?"
+            " AND items.status != 'done'", (horizon,)):
+        d = it["due_date"].replace("-", "")
+        desc = it["note"] or ""
+        if it["waiting_on"]:
+            desc = (desc + "  |  waiting on " + it["waiting_on"]).strip()
+        L += ["BEGIN:VEVENT", "UID:hq-task-%d@shimonhq" % it["id"], "DTSTAMP:" + stamp,
+              "DTSTART;VALUE=DATE:" + d, "DTEND;VALUE=DATE:" + d,
+              _fold("SUMMARY:DUE: " + _ics_escape(it["title"])),
+              _fold("DESCRIPTION:" + _ics_escape(desc + "  |  " + it["sec"])),
+              "TRANSP:TRANSPARENT", "END:VEVENT"]
+
+    L.append("END:VCALENDAR")
+    return "\r\n".join(L) + "\r\n"
+
+
+@app.route("/feed/<token>.ics")
+def ics_feed(token):
+    """Subscribe to this URL in Outlook - no login, so the token is the key."""
+    con = db()
+    if not token or token != _setting_ro(con, "feed_token"):
+        abort(404)
+    return build_ics(con), 200, {"Content-Type": "text/calendar; charset=utf-8"}
+
+
+@app.route("/feed")
+@login_required
+def feed_info():
+    con = db()
+    tok = _feed_token(con)
+    url = request.url_root.rstrip("/") + url_for("ics_feed", token=tok)
+    return render_template("feed.html", feed_url=url)
+
+
+@app.route("/events/<int:ev_id>.ics")
+@login_required
+def event_ics(ev_id):
+    """One event as a file - open it and Outlook adds it to your real calendar."""
+    con = db()
+    e = con.execute("SELECT * FROM events WHERE id=?", (ev_id,)).fetchone()
+    if not e:
+        abort(404)
+    stamp = datetime.now().strftime("%Y%m%dT%H%M%SZ")
+    L = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Shimon HQ//EN", "METHOD:PUBLISH",
+         "BEGIN:VEVENT", "UID:hq-ev-%s@shimonhq" % e["ext_key"], "DTSTAMP:" + stamp]
+    if e["start_time"]:
+        end_h = (int(e["start_time"][:2]) + 1) % 24
+        L += ["DTSTART:" + _to_utc_stamp(e["day"], e["start_time"]),
+              "DTEND:" + _to_utc_stamp(e["day"], "%02d:%s" % (end_h, e["start_time"][3:5]))]
+    else:
+        d = e["day"].replace("-", "")
+        L += ["DTSTART;VALUE=DATE:" + d, "DTEND;VALUE=DATE:" + d]
+    L.append(_fold("SUMMARY:" + _ics_escape(e["subject"])))
+    if e["location"]:
+        L.append(_fold("LOCATION:" + _ics_escape(e["location"])))
+    if e["note"]:
+        L.append(_fold("DESCRIPTION:" + _ics_escape(e["note"])))
+    L += ["END:VEVENT", "END:VCALENDAR"]
+    body = "\r\n".join(L) + "\r\n"
+    safe = re.sub(r"[^A-Za-z0-9]+", "_", e["subject"])[:40] or "event"
+    return body, 200, {"Content-Type": "text/calendar; charset=utf-8",
+                       "Content-Disposition": 'attachment; filename="%s.ics"' % safe}
+
+
 # ---------- api (for CRM integration) ----------
 
 def _api_auth():

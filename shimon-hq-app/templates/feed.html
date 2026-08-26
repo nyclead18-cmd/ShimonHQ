@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Outlook sync · Shimon HQ{% endblock %}
+{% block body %}
+<div class="wrap">
+<header class="top">
+  <div>
+    <div class="eyebrow">Push to Outlook</div>
+    <h1>Shimon HQ</h1>
+  </div>
+  <div class="right">
+    <nav class="tabs">
+      <a class="tab" href="{{ url_for('board') }}">Board</a>
+      <a class="tab on" href="{{ url_for('calendar_view') }}">Calendar</a>
+      <a class="tab" href="{{ url_for('people_view') }}">People</a>
+      <a class="tab" href="{{ url_for('joel_view') }}">Joel</a>
+    </nav>
+    <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
+  </div>
+</header>
+
+<section class="card" style="--sa:#1F3A5F">
+  <div class="sec-head"><h2><span class="dot"></span>Show HQ inside Outlook</h2></div>
+  <div class="feedbody">
+    <p>Your own events and every task deadline, as a calendar Outlook keeps refreshing on its own.</p>
+    <div class="feedurl" id="feedurl">{{ feed_url }}</div>
+    <button type="button" class="printbtn" id="copyfeed">Copy link</button>
+
+    <h3>Outlook on the web</h3>
+    <ol>
+      <li>outlook.office.com &rarr; Calendar</li>
+      <li>Add calendar &rarr; <b>Subscribe from web</b></li>
+      <li>Paste the link, name it <b>Shimon HQ</b>, pick a color &rarr; Import</li>
+    </ol>
+
+    <h3>Outlook on the desktop</h3>
+    <ol>
+      <li>Calendar &rarr; right-click <b>Other calendars</b> &rarr; Add calendar &rarr; <b>From Internet</b></li>
+      <li>Paste the link &rarr; OK</li>
+    </ol>
+
+    <h3>iPhone</h3>
+    <ol>
+      <li>Settings &rarr; Apps &rarr; Calendar &rarr; Accounts &rarr; Add Account &rarr; Other</li>
+      <li><b>Add Subscribed Calendar</b> &rarr; paste the link</li>
+    </ol>
+
+    <p class="hint">Outlook decides how often to refresh a subscribed calendar &mdash; usually a few hours, not instant.
+      For something you need in Outlook right now, open the day and use <b>Add to Outlook</b> on the event.
+      Keep this link private: anyone who has it can read your calendar.</p>
+  </div>
+</section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('copyfeed').addEventListener('click', function () {
+  var t = document.getElementById('feedurl').textContent.trim();
+  navigator.clipboard.writeText(t).then(function () {
+    var b = document.getElementById('copyfeed');
+    b.textContent = 'Copied';
+    setTimeout(function () { b.textContent = 'Copy link'; }, 1800);
+  });
+});
+</script>
+{% endblock %}

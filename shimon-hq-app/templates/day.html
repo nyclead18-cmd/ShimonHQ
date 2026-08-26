@@ -51,9 +51,12 @@
             <div class="btns"><button type="submit">Save</button></div>
           </form>
           {% if e.source != 'manual' %}<div class="hint">Saving keeps your version — the daily Outlook sync stops overwriting it.</div>{% endif %}
-          <form method="post" action="{{ url_for('delete_event', ev_id=e.id) }}" class="delform">
-            <button type="submit" class="del" title="Remove">&#x2715;</button>
-          </form>
+          <div class="evactions">
+            <a class="outlookbtn" href="{{ url_for('event_ics', ev_id=e.id) }}">Add to Outlook</a>
+            <form method="post" action="{{ url_for('delete_event', ev_id=e.id) }}" class="delform">
+              <button type="submit" class="del" title="Remove">&#x2715;</button>
+            </form>
+          </div>
         </details>
       </div>
     </li>
