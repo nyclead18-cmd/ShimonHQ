@@ -49,3 +49,21 @@ CREATE TABLE IF NOT EXISTS events (
   location TEXT DEFAULT '',
   synced_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS push_subs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  endpoint TEXT UNIQUE NOT NULL,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  created_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+  k TEXT PRIMARY KEY,
+  v TEXT
+);
+
+CREATE TABLE IF NOT EXISTS reminders_sent (
+  ref TEXT PRIMARY KEY,     -- e.g. item:12:2026-08-26T14:00  |  ev:key  |  digest:2026-08-26
+  sent_at TEXT
+);

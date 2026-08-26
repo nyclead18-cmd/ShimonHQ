@@ -14,6 +14,7 @@
       <a class="tab on" href="{{ url_for('people_view') }}">People</a>
       <a class="tab" href="{{ url_for('joel_view') }}">Joel</a>
     </nav>
+    <button type="button" class="notifbtn" id="notifbtn" title="Reminders on this device">&#9200;</button>
     <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
   </div>
 </header>
@@ -48,4 +49,8 @@
 </div>
 {% if not people %}<p class="quiet">Nothing is waiting on anyone. Add a "waiting on" name to tasks and they group here.</p>{% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='board.js') }}?v={{ css_v }}"></script>
 {% endblock %}

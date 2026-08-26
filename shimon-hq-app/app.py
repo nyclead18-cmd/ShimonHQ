@@ -81,6 +81,8 @@ def init_db():
         con.execute("ALTER TABLE items ADD COLUMN due_date TEXT")
     if "project_id" not in cols:
         con.execute("ALTER TABLE items ADD COLUMN project_id INTEGER REFERENCES projects(id)")
+    if "remind_at" not in cols:
+        con.execute("ALTER TABLE items ADD COLUMN remind_at TEXT")
     os.makedirs(FILES_DIR, exist_ok=True)
     n = con.execute("SELECT COUNT(*) FROM sections").fetchone()[0]
     if n == 0:
@@ -225,6 +227,8 @@ def edit_item(item_id):
          (request.form.get("due_date") or "").strip() or None,
          sid, pid,
          datetime.now().isoformat(timespec="seconds"), item_id))
+    con.execute("UPDATE items SET remind_at=? WHERE id=?",
+                ((request.form.get("remind_at") or "").strip() or None, item_id))
     con.commit()
     return redirect(url_for("board"))
 
@@ -690,7 +694,212 @@ def sw():
                                mimetype="application/javascript")
 
 
+# ---------- push notifications ----------
+
+import base64
+import threading
+import time as _time
+
+TZ_NAME = os.environ.get("TZ_NAME", "America/New_York")
+VAPID_PEM = os.path.join(os.path.dirname(DB_PATH) or BASE, "vapid_private.pem")
+
+
+def _now_local():
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo(TZ_NAME))
+    except Exception:
+        return datetime.now()
+
+
+def _setting(con, key, default=None):
+    row = con.execute("SELECT v FROM settings WHERE k=?", (key,)).fetchone()
+    return row["v"] if row else default
+
+
+def ensure_vapid():
+    """Create the push signing keys once; they live on the persistent disk."""
+    con = sqlite3.connect(DB_PATH)
+    con.row_factory = sqlite3.Row
+    pub = _setting(con, "vapid_public")
+    if pub and os.path.exists(VAPID_PEM):
+        con.close()
+        return pub
+    try:
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.hazmat.primitives import serialization
+        key = ec.generate_private_key(ec.SECP256R1())
+        with open(VAPID_PEM, "wb") as f:
+            f.write(key.private_bytes(serialization.Encoding.PEM,
+                                      serialization.PrivateFormat.PKCS8,
+                                      serialization.NoEncryption()))
+        raw = key.public_key().public_bytes(serialization.Encoding.X962,
+                                            serialization.PublicFormat.UncompressedPoint)
+        pub = base64.urlsafe_b64encode(raw).decode().rstrip("=")
+        con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES('vapid_public', ?)", (pub,))
+        con.commit()
+    except Exception as e:
+        app.logger.warning("VAPID setup failed: %s", e)
+        pub = None
+    con.close()
+    return pub
+
+
+@app.route("/push/key")
+@login_required
+def push_key():
+    con = db()
+    return jsonify(key=_setting(con, "vapid_public"))
+
+
+@app.route("/push/subscribe", methods=["POST"])
+@login_required
+def push_subscribe():
+    d = request.get_json(silent=True) or {}
+    keys = d.get("keys") or {}
+    if not d.get("endpoint") or not keys.get("p256dh"):
+        return jsonify(error="bad subscription"), 400
+    con = db()
+    con.execute("INSERT OR REPLACE INTO push_subs(endpoint, p256dh, auth, created_at)"
+                " VALUES(?,?,?,?)",
+                (d["endpoint"], keys["p256dh"], keys.get("auth", ""),
+                 datetime.now().isoformat(timespec="seconds")))
+    con.commit()
+    return jsonify(ok=True)
+
+
+@app.route("/push/test", methods=["POST"])
+@login_required
+def push_test():
+    n = send_push("Shimon HQ", "Notifications are on. This is what a reminder looks like.")
+    return jsonify(sent=n)
+
+
+def send_push(title, body, url="/"):
+    """Fire one notification to every subscribed device. Returns how many got it."""
+    try:
+        import webpush_lite
+    except Exception as e:
+        app.logger.warning("push module missing: %s", e)
+        return 0
+    con = sqlite3.connect(DB_PATH)
+    con.row_factory = sqlite3.Row
+    subs = con.execute("SELECT * FROM push_subs").fetchall()
+    payload = json.dumps({"title": title, "body": body, "url": url})
+    sent = 0
+    for sub in subs:
+        try:
+            status = webpush_lite.send(
+                {"endpoint": sub["endpoint"],
+                 "keys": {"p256dh": sub["p256dh"], "auth": sub["auth"]}},
+                payload, VAPID_PEM, "mailto:sdeutsch@pintapartners.com")
+            if status in (404, 410):           # device unsubscribed
+                con.execute("DELETE FROM push_subs WHERE id=?", (sub["id"],))
+                con.commit()
+            elif 200 <= status < 300:
+                sent += 1
+            else:
+                app.logger.warning("push endpoint returned %s", status)
+        except Exception as e:
+            app.logger.warning("push failed: %s", e)
+    con.close()
+    return sent
+
+
+def _already_sent(con, ref):
+    return con.execute("SELECT 1 FROM reminders_sent WHERE ref=?", (ref,)).fetchone() is not None
+
+
+def _mark_sent(con, ref):
+    con.execute("INSERT OR REPLACE INTO reminders_sent(ref, sent_at) VALUES(?,?)",
+                (ref, datetime.now().isoformat(timespec="seconds")))
+    con.commit()
+
+
+def reminder_tick():
+    """One pass: task reminders due, meetings starting soon, the morning digest."""
+    con = sqlite3.connect(DB_PATH)
+    con.row_factory = sqlite3.Row
+    now = _now_local()
+    now_s = now.strftime("%Y-%m-%dT%H:%M")
+    today = now.strftime("%Y-%m-%d")
+
+    # 1. per-task reminders that have come due (within the last 2 hours, so a restart never misses one)
+    from datetime import timedelta as _td
+    back = (now - _td(hours=2)).strftime("%Y-%m-%dT%H:%M")
+    for it in con.execute(
+            "SELECT * FROM items WHERE remind_at IS NOT NULL AND remind_at != ''"
+            " AND remind_at <= ? AND remind_at >= ? AND status != 'done'", (now_s, back)):
+        ref = "item:%d:%s" % (it["id"], it["remind_at"])
+        if _already_sent(con, ref):
+            continue
+        body = it["title"]
+        if it["waiting_on"]:
+            body += "  (waiting on %s)" % it["waiting_on"]
+        send_push("Reminder", body, "/#item-%d" % it["id"])
+        _mark_sent(con, ref)
+
+    # 2. meetings starting in the next 15 minutes
+    soon = (now + _td(minutes=15)).strftime("%H:%M")
+    for e in con.execute(
+            "SELECT * FROM events WHERE day=? AND start_time IS NOT NULL"
+            " AND start_time > ? AND start_time <= ?",
+            (today, now.strftime("%H:%M"), soon)):
+        ref = "ev:%s:%s" % (e["ext_key"], e["day"])
+        if _already_sent(con, ref):
+            continue
+        body = "%s starts %s" % (e["subject"], e["start_time"])
+        if e["location"]:
+            body += "  ·  " + e["location"]
+        send_push("Coming up", body, "/calendar")
+        _mark_sent(con, ref)
+
+    # 3. one morning digest at 8am on weekdays
+    if now.weekday() < 5 and now.strftime("%H:%M") >= "08:00" and now.strftime("%H:%M") < "09:00":
+        ref = "digest:" + today
+        if not _already_sent(con, ref):
+            due = con.execute(
+                "SELECT COUNT(*) c FROM items WHERE status != 'done' AND due_date = ?",
+                (today,)).fetchone()["c"]
+            over = con.execute(
+                "SELECT COUNT(*) c FROM items WHERE status != 'done'"
+                " AND COALESCE(due_date,'') != '' AND due_date < ?", (today,)).fetchone()["c"]
+            meetings = con.execute(
+                "SELECT COUNT(*) c FROM events WHERE day = ?", (today,)).fetchone()["c"]
+            bits = []
+            if meetings:
+                bits.append("%d meeting%s" % (meetings, "" if meetings == 1 else "s"))
+            if due:
+                bits.append("%d due today" % due)
+            if over:
+                bits.append("%d overdue" % over)
+            if bits:
+                send_push("Today", "  ·  ".join(bits), "/calendar")
+            _mark_sent(con, ref)
+
+    con.execute("DELETE FROM reminders_sent WHERE sent_at < ?",
+                ((now - _td(days=14)).isoformat(timespec="seconds"),))
+    con.commit()
+    con.close()
+
+
+def _reminder_loop():
+    while True:
+        try:
+            reminder_tick()
+        except Exception as e:
+            app.logger.warning("reminder tick failed: %s", e)
+        _time.sleep(60)
+
+
+def start_reminders():
+    t = threading.Thread(target=_reminder_loop, daemon=True, name="hq-reminders")
+    t.start()
+
+
 init_db()
+ensure_vapid()
+start_reminders()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)

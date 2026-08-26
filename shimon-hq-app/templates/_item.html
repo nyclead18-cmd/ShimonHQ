@@ -8,6 +8,7 @@
       {% if it.due_date %}
         <span class="due{% if it.status != 'done' %}{% if it.due_date < today_iso %} over{% elif it.due_date <= soon_iso %} soon{% endif %}{% endif %}">due {{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}</span>
       {% endif %}
+      {% if it.remind_at %}<span class="rem" title="Reminder set">&#9200; {{ it.remind_at[5:7]|int }}/{{ it.remind_at[8:10]|int }} {{ it.remind_at[11:16] }}</span>{% endif %}
       {% if it.waiting_on %}<span class="w">waiting on <b dir="auto">{{ it.waiting_on }}</b></span>{% endif %}
     </div>
     {% set inotes = notes_by_item.get(it.id, []) %}
@@ -56,6 +57,7 @@
           </select>
         </label>
         <label class="duelabel">Due <input type="date" name="due_date" value="{{ it.due_date or '' }}"></label>
+        <label class="duelabel">Remind <input type="datetime-local" name="remind_at" value="{{ it.remind_at or '' }}"></label>
         <div class="btns"><button type="submit">Save</button></div>
       </form>
       <form method="post" action="{{ url_for('delete_item', item_id=it.id) }}" class="delform">

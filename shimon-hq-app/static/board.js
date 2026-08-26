@@ -170,3 +170,68 @@ document.addEventListener('submit', function (ev) {
 });
 
 jumpToLinkedItem();
+
+/* ---------- push notifications ---------- */
+(function () {
+  var btn = document.getElementById('notifbtn');
+  if (!btn) return;
+
+  function setLabel(state) {
+    btn.textContent = state === 'on' ? '⏰ On'
+                    : state === 'busy' ? '…'
+                    : state === 'blocked' ? '⏰ Blocked'
+                    : '⏰ Notify me';
+    btn.classList.toggle('on', state === 'on');
+  }
+
+  function b64ToUint8(base64) {
+    var pad = '='.repeat((4 - base64.length % 4) % 4);
+    var raw = atob((base64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+    var out = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) { out[i] = raw.charCodeAt(i); }
+    return out;
+  }
+
+  var supported = ('serviceWorker' in navigator) && ('PushManager' in window) && ('Notification' in window);
+  if (!supported) { setLabel('off'); btn.title = 'This browser cannot do push notifications'; }
+
+  navigator.serviceWorker && navigator.serviceWorker.ready.then(function (reg) {
+    return reg.pushManager.getSubscription();
+  }).then(function (sub) {
+    setLabel(sub ? 'on' : (Notification.permission === 'denied' ? 'blocked' : 'off'));
+  }).catch(function () { setLabel('off'); });
+
+  btn.addEventListener('click', function () {
+    if (!supported) {
+      alert('Open the site from your Home Screen app (Add to Home Screen) to turn on notifications.');
+      return;
+    }
+    if (btn.classList.contains('on')) {
+      fetch('/push/test', {method: 'POST'}).then(function (r) { return r.json(); })
+        .then(function (d) { if (!d.sent) { alert('No device is subscribed yet.'); } });
+      return;
+    }
+    setLabel('busy');
+    Notification.requestPermission().then(function (perm) {
+      if (perm !== 'granted') { setLabel(perm === 'denied' ? 'blocked' : 'off'); return; }
+      return fetch('/push/key').then(function (r) { return r.json(); }).then(function (d) {
+        if (!d.key) { setLabel('off'); alert('Push keys are not ready on the server yet.'); return; }
+        return navigator.serviceWorker.ready.then(function (reg) {
+          return reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: b64ToUint8(d.key)
+          });
+        }).then(function (sub) {
+          return fetch('/push/subscribe', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(sub)
+          });
+        }).then(function () {
+          setLabel('on');
+          return fetch('/push/test', {method: 'POST'});
+        });
+      });
+    }).catch(function () { setLabel('off'); });
+  });
+})();

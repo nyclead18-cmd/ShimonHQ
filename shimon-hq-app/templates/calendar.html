@@ -14,6 +14,7 @@
       <a class="tab" href="{{ url_for('people_view') }}">People</a>
       <a class="tab" href="{{ url_for('joel_view') }}">Joel</a>
     </nav>
+    <button type="button" class="notifbtn" id="notifbtn" title="Reminders on this device">&#9200;</button>
     <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
   </div>
 </header>
@@ -82,4 +83,8 @@
 </div>
 
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='board.js') }}?v={{ css_v }}"></script>
 {% endblock %}

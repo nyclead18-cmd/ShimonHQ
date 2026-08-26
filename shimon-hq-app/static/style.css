@@ -319,3 +319,8 @@ li.item.flash .t{font-weight:700;}
 .evtime{color:var(--ink); font-weight:700; font-variant-numeric:tabular-nums; font-size:13px;}
 .evtag{margin-left:auto; color:var(--muted); font-size:10.5px; font-weight:700;
   letter-spacing:.08em; text-transform:uppercase;}
+.notifbtn{font:inherit; font-size:13px; border:1px solid var(--border); background:var(--card);
+  color:var(--muted); border-radius:999px; padding:6px 13px; cursor:pointer; white-space:nowrap;}
+.notifbtn.on{background:var(--pill-done-bg); color:var(--pill-done-tx); border-color:transparent; font-weight:700;}
+.rem{font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums;}
+@media print{ .notifbtn{display:none !important;} }
