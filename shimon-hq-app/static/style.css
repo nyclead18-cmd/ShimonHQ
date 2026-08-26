@@ -310,3 +310,12 @@ body{padding-top:env(safe-area-inset-top); padding-bottom:env(safe-area-inset-bo
 li.item{scroll-margin-top:22vh; scroll-margin-bottom:22vh;}
 li.item.flash{animation:flash 2.2s ease-out;}
 li.item.flash .t{font-weight:700;}
+/* Outlook meetings on the calendar */
+.cal-ev{display:block; font-size:11px; line-height:1.25; padding:2px 7px; border-radius:6px;
+  background:var(--bg); color:var(--muted); border-left:3px solid var(--muted);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.cal-ev b{color:var(--ink); font-variant-numeric:tabular-nums;}
+.evlist li{border-style:dashed;}
+.evtime{color:var(--ink); font-weight:700; font-variant-numeric:tabular-nums; font-size:13px;}
+.evtag{margin-left:auto; color:var(--muted); font-size:10.5px; font-weight:700;
+  letter-spacing:.08em; text-transform:uppercase;}

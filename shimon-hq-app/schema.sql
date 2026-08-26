@@ -39,3 +39,13 @@ CREATE TABLE IF NOT EXISTS item_files (
   size INTEGER NOT NULL DEFAULT 0,
   created_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ext_key TEXT UNIQUE,
+  subject TEXT NOT NULL,
+  day TEXT NOT NULL,          -- YYYY-MM-DD
+  start_time TEXT,            -- HH:MM (24h, local)
+  location TEXT DEFAULT '',
+  synced_at TEXT
+);

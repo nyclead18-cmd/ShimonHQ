@@ -42,6 +42,9 @@
   {% set iso = d.isoformat() %}
   <div class="cal-day{% if d.month != cur_month %} dim{% endif %}{% if iso == today_iso %} today{% endif %}">
     <div class="cal-num">{{ d.day }}</div>
+    {% for e in ev_by_day.get(iso, []) %}
+    <span class="cal-ev" dir="auto" title="{{ e.subject }}{% if e.location %} — {{ e.location }}{% endif %}">{% if e.start_time %}<b>{{ e.start_time }}</b> {% endif %}{{ e.subject }}</span>
+    {% endfor %}
     {% for it in by_day.get(iso, []) %}
     <a class="cal-item {{ it.status }}{% if it.status != 'done' and iso < today_iso %} late{% endif %}"
        href="{{ url_for('board', _anchor='item-' ~ it.id) }}" dir="auto" title="{{ it.title }}">{{ it.title }}</a>
@@ -53,6 +56,17 @@
 
 <div class="upcoming">
   <h2>Next two weeks</h2>
+  {% if upcoming_events %}
+  <ul class="up-list evlist">
+    {% for e in upcoming_events %}
+    <li><span class="nd">{{ e.day[5:7]|int }}/{{ e.day[8:10]|int }}</span>
+      {% if e.start_time %}<span class="evtime">{{ e.start_time }}</span>{% endif %}
+      <span dir="auto">{{ e.subject }}</span>
+      {% if e.location %}<span class="w">{{ e.location }}</span>{% endif %}
+      <span class="evtag">Outlook</span></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
   {% if upcoming %}
   <ul class="up-list">
     {% for it in upcoming %}
@@ -62,7 +76,7 @@
       <a class="os-link" href="{{ url_for('board', _anchor='item-' ~ it.id) }}">{{ it.sec_title }}</a></li>
     {% endfor %}
   </ul>
-  {% else %}
+  {% elif not upcoming_events %}
   <p class="quiet">Nothing due in the next two weeks. Set due dates on the board and they show up here.</p>
   {% endif %}
 </div>

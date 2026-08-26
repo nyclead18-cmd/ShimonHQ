@@ -461,9 +461,16 @@ def calendar_view():
                 overdue.append(r)
             elif r["due_date"] <= horizon:
                 upcoming.append(r)
+    evs = con.execute("SELECT * FROM events ORDER BY day, COALESCE(start_time,'')").fetchall()
+    ev_by_day = {}
+    for e in evs:
+        ev_by_day.setdefault(e["day"], []).append(e)
+    horizon14 = (today + timedelta(days=14)).isoformat()
+    upcoming_events = [e for e in evs if t_iso <= e["day"] <= horizon14]
     prev_m = (first - timedelta(days=1)).strftime("%Y-%m")
     next_m = date(y + (1 if mo == 12 else 0), 1 if mo == 12 else mo + 1, 1).strftime("%Y-%m")
     return render_template("calendar.html", days=days, by_day=by_day,
+                           ev_by_day=ev_by_day, upcoming_events=upcoming_events,
                            overdue=overdue, upcoming=upcoming,
                            month_label=first.strftime("%B %Y"),
                            prev_m=prev_m, next_m=next_m,
@@ -506,6 +513,41 @@ def api_rm():
                 "'Personal / Family','Inbox')")
     con.commit()
     return "REMOVED %d: %s" % (cur.rowcount, title), 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+
+@app.route("/api/ev")
+def api_event():
+    """Upsert one Outlook calendar event (short params, proxy friendly)."""
+    if not _api_auth():
+        abort(401)
+    key = (request.args.get("k") or "").strip()
+    subj = (request.args.get("s") or "").strip()
+    day = (request.args.get("d") or "").strip()
+    if not (key and subj and day):
+        return "ERROR: k, s and d required", 400, {"Content-Type": "text/plain; charset=utf-8"}
+    con = db()
+    con.execute(
+        "INSERT INTO events(ext_key, subject, day, start_time, location, synced_at)"
+        " VALUES(?,?,?,?,?,?)"
+        " ON CONFLICT(ext_key) DO UPDATE SET subject=excluded.subject, day=excluded.day,"
+        " start_time=excluded.start_time, location=excluded.location, synced_at=excluded.synced_at",
+        (key, subj, day, (request.args.get("t") or "").strip() or None,
+         (request.args.get("l") or "").strip(),
+         datetime.now().isoformat(timespec="seconds")))
+    con.commit()
+    return "SYNCED: " + subj, 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+
+@app.route("/api/evclear")
+def api_events_clear():
+    """Drop synced events from a date forward, so a re-sync never duplicates or keeps cancellations."""
+    if not _api_auth():
+        abort(401)
+    frm = (request.args.get("from") or datetime.now().date().isoformat()).strip()
+    con = db()
+    cur = con.execute("DELETE FROM events WHERE day >= ?", (frm,))
+    con.commit()
+    return "CLEARED %d from %s" % (cur.rowcount, frm), 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
 @app.route("/api/digest")
