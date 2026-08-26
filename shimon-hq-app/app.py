@@ -83,6 +83,11 @@ def init_db():
         con.execute("ALTER TABLE items ADD COLUMN project_id INTEGER REFERENCES projects(id)")
     if "remind_at" not in cols:
         con.execute("ALTER TABLE items ADD COLUMN remind_at TEXT")
+    ecols = [r[1] for r in con.execute("PRAGMA table_info(events)")]
+    if ecols and "source" not in ecols:
+        con.execute("ALTER TABLE events ADD COLUMN source TEXT DEFAULT 'outlook'")
+    if ecols and "note" not in ecols:
+        con.execute("ALTER TABLE events ADD COLUMN note TEXT DEFAULT ''")
     os.makedirs(FILES_DIR, exist_ok=True)
     n = con.execute("SELECT COUNT(*) FROM sections").fetchone()[0]
     if n == 0:
@@ -197,6 +202,8 @@ def add_item():
          request.form.get("project_id", type=int) or None,
          datetime.now().isoformat(timespec="seconds")))
     con.commit()
+    if (request.form.get("due_date") or "").strip():
+        return redirect(url_for("day_view", day=request.form["due_date"].strip()))
     return redirect(url_for("board", _anchor="sec-%d" % sid))
 
 
@@ -481,6 +488,87 @@ def calendar_view():
                            today_iso=t_iso, cur_month=mo)
 
 
+# ---------- day view: open and edit a single day ----------
+
+@app.route("/day/<day>")
+@login_required
+def day_view(day):
+    from datetime import date, timedelta
+    try:
+        d = date.fromisoformat(day)
+    except ValueError:
+        return redirect(url_for("calendar_view"))
+    con = db()
+    evs = con.execute(
+        "SELECT * FROM events WHERE day=? ORDER BY COALESCE(start_time,'99:99'), id",
+        (day,)).fetchall()
+    tasks = con.execute(
+        "SELECT items.*, sections.title AS sec_title FROM items"
+        " JOIN sections ON items.section_id = sections.id"
+        " WHERE items.due_date = ? ORDER BY items.status='done', items.id", (day,)).fetchall()
+    sections = con.execute("SELECT * FROM sections ORDER BY pos, id").fetchall()
+    return render_template("day.html", d=d, day=day, evs=evs, tasks=tasks,
+                           sections=sections,
+                           pretty=d.strftime("%A, %B %d, %Y"),
+                           prev_day=(d - timedelta(days=1)).isoformat(),
+                           next_day=(d + timedelta(days=1)).isoformat(),
+                           today_iso=datetime.now().date().isoformat())
+
+
+@app.route("/events/add", methods=["POST"])
+@login_required
+def add_event():
+    day = (request.form.get("day") or "").strip()
+    subj = (request.form.get("subject") or "").strip()
+    if not (day and subj):
+        return redirect(url_for("calendar_view"))
+    con = db()
+    con.execute(
+        "INSERT INTO events(ext_key, subject, day, start_time, location, note, source, synced_at)"
+        " VALUES(?,?,?,?,?,?,'manual',?)",
+        ("m-" + uuid.uuid4().hex[:12], subj, day,
+         (request.form.get("start_time") or "").strip() or None,
+         (request.form.get("location") or "").strip(),
+         (request.form.get("note") or "").strip(),
+         datetime.now().isoformat(timespec="seconds")))
+    con.commit()
+    return redirect(url_for("day_view", day=day))
+
+
+@app.route("/events/<int:ev_id>/edit", methods=["POST"])
+@login_required
+def edit_event(ev_id):
+    subj = (request.form.get("subject") or "").strip()
+    day = (request.form.get("day") or "").strip()
+    if not (subj and day):
+        return redirect(url_for("calendar_view"))
+    con = db()
+    # editing an Outlook event pins it: the daily sync stops overwriting your version
+    con.execute(
+        "UPDATE events SET subject=?, day=?, start_time=?, location=?, note=?, source='manual'"
+        " WHERE id=?",
+        (subj, day, (request.form.get("start_time") or "").strip() or None,
+         (request.form.get("location") or "").strip(),
+         (request.form.get("note") or "").strip(), ev_id))
+    con.commit()
+    return redirect(url_for("day_view", day=day))
+
+
+@app.route("/events/<int:ev_id>/delete", methods=["POST"])
+@login_required
+def delete_event(ev_id):
+    con = db()
+    row = con.execute("SELECT * FROM events WHERE id=?", (ev_id,)).fetchone()
+    if not row:
+        return redirect(url_for("calendar_view"))
+    if (row["source"] or "outlook") == "outlook" and row["ext_key"]:
+        # remember it so tomorrow's sync does not bring it back
+        con.execute("INSERT OR IGNORE INTO hidden_events(ext_key) VALUES(?)", (row["ext_key"],))
+    con.execute("DELETE FROM events WHERE id=?", (ev_id,))
+    con.commit()
+    return redirect(url_for("day_view", day=row["day"]))
+
+
 # ---------- api (for CRM integration) ----------
 
 def _api_auth():
@@ -530,6 +618,10 @@ def api_event():
     if not (key and subj and day):
         return "ERROR: k, s and d required", 400, {"Content-Type": "text/plain; charset=utf-8"}
     con = db()
+    if con.execute("SELECT 1 FROM hidden_events WHERE ext_key=?", (key,)).fetchone():
+        return "SKIPPED (deleted here): " + subj, 200, {"Content-Type": "text/plain; charset=utf-8"}
+    if con.execute("SELECT 1 FROM events WHERE ext_key=? AND source='manual'", (key,)).fetchone():
+        return "SKIPPED (edited here): " + subj, 200, {"Content-Type": "text/plain; charset=utf-8"}
     con.execute(
         "INSERT INTO events(ext_key, subject, day, start_time, location, synced_at)"
         " VALUES(?,?,?,?,?,?)"
@@ -549,7 +641,8 @@ def api_events_clear():
         abort(401)
     frm = (request.args.get("from") or datetime.now().date().isoformat()).strip()
     con = db()
-    cur = con.execute("DELETE FROM events WHERE day >= ?", (frm,))
+    cur = con.execute("DELETE FROM events WHERE day >= ? AND COALESCE(source,'outlook')='outlook'",
+                      (frm,))
     con.commit()
     return "CLEARED %d from %s" % (cur.rowcount, frm), 200, {"Content-Type": "text/plain; charset=utf-8"}
 

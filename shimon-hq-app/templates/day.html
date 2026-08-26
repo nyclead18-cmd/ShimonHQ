@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}{{ pretty }} · Shimon HQ{% endblock %}
+{% block body %}
+<div class="wrap">
+<header class="top">
+  <div>
+    <div class="eyebrow">{{ 'Today' if day == today_iso else d.strftime('%A') }}</div>
+    <h1>{{ d.strftime('%B %d') }}</h1>
+  </div>
+  <div class="right">
+    <nav class="tabs">
+      <a class="tab" href="{{ url_for('board') }}">Board</a>
+      <a class="tab on" href="{{ url_for('calendar_view') }}">Calendar</a>
+      <a class="tab" href="{{ url_for('people_view') }}">People</a>
+      <a class="tab" href="{{ url_for('joel_view') }}">Joel</a>
+    </nav>
+    <button type="button" class="notifbtn" id="notifbtn" title="Reminders on this device">&#9200;</button>
+    <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
+  </div>
+</header>
+
+<div class="cal-nav">
+  <a class="cal-arrow" href="{{ url_for('day_view', day=prev_day) }}">&larr;</a>
+  <h2 class="cal-month">{{ pretty }}</h2>
+  <a class="cal-arrow" href="{{ url_for('day_view', day=next_day) }}">&rarr;</a>
+  <a class="backlink" href="{{ url_for('calendar_view', m=day[:7]) }}">month view</a>
+</div>
+
+<section class="card" style="--sa:#1F3A5F">
+  <div class="sec-head"><h2><span class="dot"></span>Schedule</h2>
+    <span class="counts">{{ evs | length }}</span></div>
+  <ul class="items">
+    {% for e in evs %}
+    <li class="item">
+      <span class="pill {{ 'waiting' if e.source == 'manual' else 'done' }}">{{ e.start_time or '—' }}</span>
+      <div class="body">
+        <div class="t" dir="auto">{{ e.subject }}</div>
+        <div class="metaline">
+          {% if e.location %}<span class="w">{{ e.location }}</span>{% endif %}
+          <span class="evtag">{{ 'Yours' if e.source == 'manual' else 'Outlook' }}</span>
+        </div>
+        {% if e.note %}<div class="w" dir="auto">{{ e.note }}</div>{% endif %}
+        <details class="editbox">
+          <summary>edit</summary>
+          <form class="edit" method="post" action="{{ url_for('edit_event', ev_id=e.id) }}">
+            <input name="subject" dir="auto" value="{{ e.subject }}" required>
+            <label class="duelabel">Date <input type="date" name="day" value="{{ e.day }}" required></label>
+            <label class="duelabel">Time <input type="time" name="start_time" value="{{ e.start_time or '' }}"></label>
+            <input name="location" dir="auto" value="{{ e.location or '' }}" placeholder="Where">
+            <input name="note" dir="auto" value="{{ e.note or '' }}" placeholder="Note">
+            <div class="btns"><button type="submit">Save</button></div>
+          </form>
+          {% if e.source != 'manual' %}<div class="hint">Saving keeps your version — the daily Outlook sync stops overwriting it.</div>{% endif %}
+          <form method="post" action="{{ url_for('delete_event', ev_id=e.id) }}" class="delform">
+            <button type="submit" class="del" title="Remove">&#x2715;</button>
+          </form>
+        </details>
+      </div>
+    </li>
+    {% endfor %}
+    {% if not evs %}<li class="item"><span></span><div class="body"><span class="quiet">Nothing scheduled.</span></div></li>{% endif %}
+  </ul>
+  <div class="addrow">
+    <details>
+      <summary>+ Add to the day</summary>
+      <form class="edit" method="post" action="{{ url_for('add_event') }}">
+        <input type="hidden" name="day" value="{{ day }}">
+        <input name="subject" placeholder="What" dir="auto" required>
+        <label class="duelabel">Time <input type="time" name="start_time"></label>
+        <input name="location" placeholder="Where" dir="auto">
+        <input name="note" placeholder="Note" dir="auto">
+        <div class="btns"><button type="submit">Add</button></div>
+      </form>
+    </details>
+  </div>
+</section>
+
+<section class="card" style="--sa:#C24E2A">
+  <div class="sec-head"><h2><span class="dot"></span>Due this day</h2>
+    <span class="counts">{{ tasks | length }}</span></div>
+  <ul class="items">
+    {% for it in tasks %}
+    <li class="item {{ it.status }}">
+      <span class="pill {{ it.status }}">{{ 'Open' if it.status == 'open' else 'Waiting' if it.status == 'waiting' else 'Done' }}</span>
+      <div class="body">
+        <div class="t" dir="auto"><a class="plain" href="{{ url_for('board', _anchor='item-' ~ it.id) }}">{{ it.title }}</a>{% if it.note %} <span class="n" dir="auto">&mdash; {{ it.note }}</span>{% endif %}</div>
+        <div class="metaline">
+          {% if it.waiting_on %}<span class="w">waiting on <b dir="auto">{{ it.waiting_on }}</b></span>{% endif %}
+          <span class="w">{{ it.sec_title }}</span>
+        </div>
+      </div>
+    </li>
+    {% endfor %}
+    {% if not tasks %}<li class="item"><span></span><div class="body"><span class="quiet">Nothing due.</span></div></li>{% endif %}
+  </ul>
+  <div class="addrow">
+    <details>
+      <summary>+ Add a task due this day</summary>
+      <form class="edit" method="post" action="{{ url_for('add_item') }}">
+        <input type="hidden" name="due_date" value="{{ day }}">
+        <input name="title" placeholder="Task" dir="auto" required>
+        <input name="note" placeholder="Next step / note" dir="auto">
+        <input name="waiting_on" placeholder="Waiting on (who)" dir="auto">
+        <label class="taglabel">Section
+          <select name="section_id">
+            {% for s in sections %}<option value="{{ s.id }}">{{ s.title }}</option>{% endfor %}
+          </select>
+        </label>
+        <div class="btns"><button type="submit">Add</button></div>
+      </form>
+    </details>
+  </div>
+</section>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='board.js') }}?v={{ css_v }}"></script>
+{% endblock %}

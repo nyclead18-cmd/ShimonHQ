@@ -42,14 +42,15 @@
   {% for d in days %}
   {% set iso = d.isoformat() %}
   <div class="cal-day{% if d.month != cur_month %} dim{% endif %}{% if iso == today_iso %} today{% endif %}">
-    <div class="cal-num">{{ d.day }}</div>
+    <a class="cal-num" href="{{ url_for('day_view', day=iso) }}" title="Open this day">{{ d.day }}</a>
     {% for e in ev_by_day.get(iso, []) %}
-    <span class="cal-ev" dir="auto" title="{{ e.subject }}{% if e.location %} — {{ e.location }}{% endif %}">{% if e.start_time %}<b>{{ e.start_time }}</b> {% endif %}{{ e.subject }}</span>
+    <a class="cal-ev{% if e.source == 'manual' %} mine{% endif %}" href="{{ url_for('day_view', day=iso) }}" dir="auto" title="{{ e.subject }}{% if e.location %} — {{ e.location }}{% endif %}">{% if e.start_time %}<b>{{ e.start_time }}</b> {% endif %}{{ e.subject }}</a>
     {% endfor %}
     {% for it in by_day.get(iso, []) %}
     <a class="cal-item {{ it.status }}{% if it.status != 'done' and iso < today_iso %} late{% endif %}"
        href="{{ url_for('board', _anchor='item-' ~ it.id) }}" dir="auto" title="{{ it.title }}">{{ it.title }}</a>
     {% endfor %}
+    <a class="cal-open" href="{{ url_for('day_view', day=iso) }}" aria-label="Open {{ iso }}"></a>
   </div>
   {% endfor %}
 </div>
@@ -62,7 +63,7 @@
     {% for e in upcoming_events %}
     <li><span class="nd">{{ e.day[5:7]|int }}/{{ e.day[8:10]|int }}</span>
       {% if e.start_time %}<span class="evtime">{{ e.start_time }}</span>{% endif %}
-      <span dir="auto">{{ e.subject }}</span>
+      <a class="plain" href="{{ url_for('day_view', day=e.day) }}" dir="auto">{{ e.subject }}</a>
       {% if e.location %}<span class="w">{{ e.location }}</span>{% endif %}
       <span class="evtag">Outlook</span></li>
     {% endfor %}

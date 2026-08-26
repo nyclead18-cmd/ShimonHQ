@@ -47,7 +47,13 @@ CREATE TABLE IF NOT EXISTS events (
   day TEXT NOT NULL,          -- YYYY-MM-DD
   start_time TEXT,            -- HH:MM (24h, local)
   location TEXT DEFAULT '',
+  source TEXT DEFAULT 'outlook',   -- outlook = refreshed daily | manual = yours, never overwritten
+  note TEXT DEFAULT '',
   synced_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS hidden_events (
+  ext_key TEXT PRIMARY KEY        -- Outlook events you deleted here; the sync stops bringing them back
 );
 
 CREATE TABLE IF NOT EXISTS push_subs (

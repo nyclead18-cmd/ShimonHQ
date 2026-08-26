@@ -324,3 +324,17 @@ li.item.flash .t{font-weight:700;}
 .notifbtn.on{background:var(--pill-done-bg); color:var(--pill-done-tx); border-color:transparent; font-weight:700;}
 .rem{font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums;}
 @media print{ .notifbtn{display:none !important;} }
+/* clickable day cells */
+.cal-day{position:relative;}
+.cal-num{color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums;
+  text-decoration:none; position:relative; z-index:2; width:max-content;}
+.cal-num:hover{color:var(--accent); text-decoration:underline;}
+.cal-open{position:absolute; inset:0; z-index:0;}
+.cal-day:hover{background:var(--row);}
+.cal-day.dim:hover{background:var(--card);}
+.cal-ev{position:relative; z-index:2; text-decoration:none;}
+.cal-ev:hover{border-left-color:var(--accent);}
+.cal-ev.mine{border-left-color:var(--accent); color:var(--ink);}
+.cal-item{position:relative; z-index:2;}
+.backlink{color:var(--muted); font-size:13px; margin-left:auto;}
+.hint{color:var(--muted); font-size:12px; font-style:italic; margin:4px 0 2px; max-width:420px;}
