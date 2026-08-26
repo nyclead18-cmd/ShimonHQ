@@ -1543,6 +1543,11 @@ def wa_check():
         abort(401)
     con = db()
     st = {"token": bool(wa.TOKEN)}
+    try:
+        st["tables"] = sorted(r[0] for r in con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'wa%'"))
+    except Exception as e:
+        st["tables_error"] = str(e)
     if wa.TOKEN:
         try:
             rows, more = wa.chats(page=1, ua=request.args.get("ua") or None)
@@ -1555,14 +1560,22 @@ def wa_check():
     else:
         st["works"] = False
         st["detail"] = "No TIMELINES_TOKEN set."
-    st["hook_url"] = url_for("wa_hook", secret=_wa_secret(con), _external=True)
-    st["inbox_waiting"] = con.execute(
-        "SELECT COUNT(*) c FROM wa_inbox WHERE handled=0").fetchone()["c"]
-    st["inbox_total"] = con.execute("SELECT COUNT(*) c FROM wa_inbox").fetchone()["c"]
-    st["last_hook_at"] = _setting_ro(con, "wa_last_hook", "") or "(no webhook has arrived yet)"
-    st["anchored_chats"] = con.execute(
-        "SELECT COUNT(*) c FROM items WHERE wa_chat_id IS NOT NULL"
-        " AND wa_chat_id != ''").fetchone()["c"]
+    for label, fn in (
+        ("hook_url", lambda: url_for("wa_hook", secret=_wa_secret(con), _external=True)),
+        ("inbox_waiting", lambda: con.execute(
+            "SELECT COUNT(*) c FROM wa_inbox WHERE handled=0").fetchone()["c"]),
+        ("inbox_total", lambda: con.execute(
+            "SELECT COUNT(*) c FROM wa_inbox").fetchone()["c"]),
+        ("last_hook_at", lambda: _setting_ro(con, "wa_last_hook", "")
+            or "(no webhook has arrived yet)"),
+        ("anchored_chats", lambda: con.execute(
+            "SELECT COUNT(*) c FROM items WHERE wa_chat_id IS NOT NULL"
+            " AND wa_chat_id != ''").fetchone()["c"]),
+    ):
+        try:
+            st[label] = fn()
+        except Exception as e:
+            st[label] = "ERROR %s: %s" % (type(e).__name__, e)
     return jsonify(st)
 
 
