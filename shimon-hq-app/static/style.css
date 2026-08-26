@@ -296,3 +296,6 @@ li.item:target .t{font-weight:700;}
 .taglabel select{flex:1; min-width:0;}
 /* iPhone standalone: keep header clear of the status bar / notch */
 body{padding-top:env(safe-area-inset-top); padding-bottom:env(safe-area-inset-bottom);}
+li.item{scroll-margin-top:22vh; scroll-margin-bottom:22vh;}
+li.item.flash{animation:flash 2.2s ease-out;}
+li.item.flash .t{font-weight:700;}

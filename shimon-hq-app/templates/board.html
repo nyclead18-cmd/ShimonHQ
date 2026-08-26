@@ -143,6 +143,27 @@
 
 {% block scripts %}
 <script>
+// jump to a task linked from Joel / People / Calendar — after layout settles
+function jumpToLinkedItem() {
+  var m = /^#item-(\d+)$/.exec(location.hash || '');
+  if (!m) return;
+  var el = document.getElementById('item-' + m[1]);
+  if (!el) return;
+  var sec = el.closest('section.card');
+  if (sec) { sec.classList.add('show-done'); }   // reveal it if it is a done row
+  el.classList.remove('flash');
+  var land = function () {
+    el.scrollIntoView({block: 'center', behavior: 'auto'});
+    void el.offsetWidth;
+    el.classList.add('flash');
+  };
+  land();
+  if (document.fonts && document.fonts.ready) { document.fonts.ready.then(land); }
+  setTimeout(land, 350);
+}
+window.addEventListener('hashchange', jumpToLinkedItem);
+window.addEventListener('load', jumpToLinkedItem);
+
 var MODE = 'all';
 var q = document.getElementById('q');
 
@@ -292,5 +313,7 @@ document.addEventListener('submit', function (ev) {
     input.focus();
   });
 });
+
+jumpToLinkedItem();
 </script>
 {% endblock %}
