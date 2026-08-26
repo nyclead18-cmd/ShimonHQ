@@ -513,6 +513,81 @@ li.noterow .t{flex:1; min-width:0;}
   ul.notes li > .t{line-height:1.45;}
 }
 .srcchip.wa{color:#2E7D57; border-color:#2E7D57;}
-.savewarn{color:var(--danger); font-size:12.5px; font-weight:600; margin-top:5px;}
 /* a send that is in flight must look busy, not dead */
 .respond button[disabled]{opacity:.4; cursor:default;}
+
+/* ---------- pulse ---------- */
+.weeknav{display:flex; align-items:baseline; justify-content:space-between; gap:12px;
+  margin:22px 0 4px; flex-wrap:wrap;}
+.weeknav h2{font-family:'Playfair Display','Frank Ruhl Libre',Georgia,serif;
+  font-size:21px; font-weight:600; margin:0; letter-spacing:.01em;}
+.wknav{color:var(--muted); text-decoration:none; font-size:13px; font-weight:600;
+  letter-spacing:.03em; padding:4px 2px;}
+.wknav:hover{color:var(--accent);}
+.wknav.off{color:var(--border); cursor:default;}
+.stat .delta{color:var(--muted); font-size:11px; margin-top:5px; letter-spacing:.02em;}
+.stat.bad .num{color:var(--danger);}
+.stat.good .num{color:var(--pill-done-tx);}
+.stat.bad, .stat.good{border-color:var(--border);}
+
+.readcard{border-left:3px solid var(--accent); margin-bottom:22px;}
+.readbody{white-space:pre-line; padding:2px 2px 6px; font-size:16px; line-height:1.62;}
+
+.secnote{color:var(--muted); font-size:11.5px; letter-spacing:.06em; text-transform:uppercase;}
+
+/* eight-week bars */
+.bars{display:flex; gap:8px; align-items:flex-end; height:132px; padding:10px 2px 0;}
+.barcol{flex:1; display:flex; flex-direction:column; justify-content:flex-end; height:100%;}
+.barpair{display:flex; gap:3px; align-items:flex-end; height:100%; min-height:1px;}
+.bar{flex:1; border-radius:3px 3px 0 0; min-height:2px;}
+.bar.in{background:var(--pill-wait-bg); border:1px solid var(--pill-wait-tx);}
+.bar.out{background:var(--pill-done-bg); border:1px solid var(--pill-done-tx);}
+.barcol.now .bar.in{background:var(--pill-wait-tx);}
+.barcol.now .bar.out{background:var(--pill-done-tx);}
+.barlbl{text-align:center; color:var(--muted); font-size:10.5px; margin-top:7px;
+  font-variant-numeric:tabular-nums;}
+.legend{color:var(--muted); font-size:11.5px; margin-top:10px; display:flex;
+  align-items:center; gap:5px;}
+.legend .key{display:inline-block; width:11px; height:11px; border-radius:3px;}
+.legend .key.in{background:var(--pill-wait-tx);}
+.legend .key.out{background:var(--pill-done-tx);}
+
+/* list rows */
+ul.prows{list-style:none; margin:6px 0 0; padding:0;}
+li.prow{display:grid; grid-template-columns:48px auto 1fr; gap:10px; align-items:baseline;
+  padding:8px 2px; border-top:1px solid var(--border);}
+li.prow:first-child{border-top:none;}
+li.prow .days{font-variant-numeric:tabular-nums; font-weight:700; font-size:13px;
+  color:var(--muted); text-align:right;}
+li.prow .days.warm{color:var(--pill-wait-tx);}
+li.prow .days.hot{color:var(--danger);}
+li.prow .pwho{font-weight:700; font-size:13.5px; white-space:nowrap;}
+li.prow .ptitle{font-size:14px; overflow-wrap:anywhere;}
+li.prow .psec{color:var(--muted); font-size:11.5px; text-align:right; white-space:nowrap;}
+li.prow .ptitle + .psec{justify-self:end;}
+.caveat{color:var(--muted); font-size:12px; font-style:italic; margin:12px 0 0; line-height:1.5;}
+.empty{color:var(--muted); font-style:italic; margin:8px 0 0;}
+
+@media (max-width:520px){
+  /* Three columns will not fit a phone. Rows that name a person put the name
+     above the task instead of beside it; rows that do not stay on one line. */
+  li.prow{grid-template-columns:42px 1fr; gap:2px 10px;}
+  li.prow .psec{display:none;}
+  li.prow.who .pwho{grid-column:2; grid-row:1;}
+  li.prow.who .ptitle{grid-column:2; grid-row:2;}
+  li.prow.rhythm{grid-template-columns:66px 1fr;}
+  li.prow.rhythm .pwho{text-align:left;}
+  .bars{height:104px; gap:5px;}
+  .stats{gap:8px;}
+  .stat{min-width:0; flex:1 1 44%; padding:12px 14px 10px;}
+  .stat .num{font-size:28px;}
+}
+
+/* Six tabs is one more than a phone has room for - tighten them rather than
+   let two run into each other, and let the strip scroll if it still overflows. */
+@media (max-width:560px){
+  .tabs{max-width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch;
+    scrollbar-width:none;}
+  .tabs::-webkit-scrollbar{display:none;}
+  .tab{flex:0 0 auto; padding:6px 11px; font-size:11.5px; letter-spacing:.03em; white-space:nowrap;}
+}

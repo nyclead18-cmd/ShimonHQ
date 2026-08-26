@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block title %}Pulse · Shimon HQ{% endblock %}
+{% block body %}
+<div class="wrap wide">
+<header class="top">
+  <div>
+    <div class="eyebrow">What actually moved</div>
+    <h1>Shimon HQ</h1>
+  </div>
+  <div class="right">
+    <nav class="tabs">
+      <a class="tab" href="{{ url_for('board') }}">Board</a>
+      <a class="tab" href="{{ url_for('briefing_view') }}">Brief{% if brief_unread %} <span class="badge">{{ brief_unread }}</span>{% endif %}</a>
+      <a class="tab" href="{{ url_for('calendar_view') }}">Calendar</a>
+      <a class="tab" href="{{ url_for('people_view') }}">People</a>
+      <a class="tab" href="{{ url_for('joel_view') }}">Joel</a>
+      <a class="tab on" href="{{ url_for('pulse_view') }}">Pulse</a>
+    </nav>
+    <button type="button" class="notifbtn" id="notifbtn" title="Reminders on this device">&#9200;</button>
+    <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
+  </div>
+</header>
+
+<div class="weeknav">
+  <a class="wknav" href="{{ url_for('pulse_view', day=prev_week) }}">&larr; Previous</a>
+  <h2>{{ p['from']|weekspan(p['to']) }}</h2>
+  {% if p['from'] != this_week %}
+    <a class="wknav" href="{{ url_for('pulse_view', day=next_week) }}">Next &rarr;</a>
+  {% else %}
+    <span class="wknav off">This week</span>
+  {% endif %}
+</div>
+
+{% set m = p['movement'] %}{% set prev = p['previous'] %}
+{% set net = m['opened'] - m['closed'] %}
+<div class="stats">
+  <div class="stat"><div class="num">{{ m['closed'] }}</div><div class="lbl">closed</div>
+    <div class="delta">{% if prev['closed'] %}{{ '%+d'|format(m['closed'] - prev['closed']) }} vs last week{% else %}&nbsp;{% endif %}</div></div>
+  <div class="stat"><div class="num">{{ m['opened'] }}</div><div class="lbl">landed on you</div>
+    <div class="delta">{% if prev['opened'] %}{{ '%+d'|format(m['opened'] - prev['opened']) }} vs last week{% else %}&nbsp;{% endif %}</div></div>
+  <div class="stat {% if net > 0 %}bad{% elif net < 0 %}good{% endif %}">
+    <div class="num">{{ '%+d'|format(net) }}</div><div class="lbl">net on the board</div>
+    <div class="delta">{% if net > 0 %}growing{% elif net < 0 %}shrinking{% else %}holding{% endif %}</div></div>
+  <div class="stat"><div class="num">{{ p['meetings']['count'] }}</div><div class="lbl">meetings</div>
+    <div class="delta">{% if p['meetings']['minutes_known'] %}{{ p['meetings']['minutes_known']|hrs }}{% if p['meetings']['unmeasured'] %} + {{ p['meetings']['unmeasured'] }} unmeasured{% endif %}{% else %}&nbsp;{% endif %}</div></div>
+</div>
+
+{% if p['note'] %}
+<section class="card readcard">
+  <div class="sec-head"><h2>The read</h2></div>
+  <div class="readbody">{{ p['note']|linkify }}</div>
+</section>
+{% endif %}
+
+<div class="grid">
+
+<section class="card" style="--sa:#1F3A5F">
+  <div class="sec-head"><h2>Eight weeks</h2>
+    <span class="secnote">opened against closed</span></div>
+  {% set peak = p['history']|map(attribute='opened')|list + p['history']|map(attribute='closed')|list %}
+  {% set top = peak|max if peak else 1 %}
+  <div class="bars">
+    {% for w in p['history'] %}
+    <div class="barcol{% if w['week'] == p['from'] %} now{% endif %}">
+      <div class="barpair">
+        <div class="bar in"  style="height:{{ (w['opened'] / (top or 1) * 100)|round(1) }}%" title="{{ w['opened'] }} opened"></div>
+        <div class="bar out" style="height:{{ (w['closed'] / (top or 1) * 100)|round(1) }}%" title="{{ w['closed'] }} closed"></div>
+      </div>
+      <div class="barlbl">{{ w['week']|shortday }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="legend"><span class="key in"></span> landed &nbsp; <span class="key out"></span> closed</div>
+  {% if not p['tracking_since'] %}
+  <p class="caveat">Nothing recorded yet &mdash; the first real week starts now.</p>
+  {% endif %}
+</section>
+
+<section class="card" style="--sa:#8A671D">
+  <div class="sec-head"><h2>Waiting on people</h2>
+    <span class="secnote">{% if p['waiting']|length > 12 %}top 12 of {{ p['waiting']|length }}{% else %}{{ p['waiting']|length }} open{% endif %}</span></div>
+  {% if p['waiting'] %}
+  <ul class="prows">
+    {% for r in p['waiting'][:12] %}
+    <li class="prow who">
+      <span class="days {% if r['days'] and r['days'] >= 14 %}hot{% elif r['days'] and r['days'] >= 7 %}warm{% endif %}">
+        {% if r['days'] is not none %}{% if r['approx'] %}&ge;{% endif %}{{ r['days'] }}d{% else %}&mdash;{% endif %}</span>
+      <span class="pwho">{{ r['who'] }}</span>
+      <span class="ptitle">{{ r['title'] }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% if p['waiting']|selectattr('approx')|list %}
+  <p class="caveat">A dash means it was already waiting before the board started keeping history,
+  so the honest answer is that nobody knows. <b>&ge;</b> means at least that long. Anything handed
+  over from today onwards is counted exactly.</p>
+  {% endif %}
+  {% else %}<p class="empty">Nobody owes you anything. Suspicious.</p>{% endif %}
+</section>
+
+<section class="card" style="--sa:#A33B2E">
+  <div class="sec-head"><h2>Going quiet</h2>
+    <span class="secnote">{% if p['stalled']|length > 12 %}worst 12 of {{ p['stalled']|length }}{% else %}untouched 14 days+{% endif %}</span></div>
+  {% if p['stalled'] %}
+  <ul class="prows">
+    {% for r in p['stalled'][:12] %}
+    <li class="prow">
+      <span class="days {% if r['quiet_days'] >= 30 %}hot{% else %}warm{% endif %}">{{ r['quiet_days'] }}d</span>
+      <span class="ptitle">{{ r['title'] }}</span>
+      <span class="psec">{{ r['section'] }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="caveat">These are the ones that quietly die. Close them or actually do them.</p>
+  {% else %}<p class="empty">Nothing has been left to rot.</p>{% endif %}
+</section>
+
+<section class="card" style="--sa:#3A6B3E">
+  <div class="sec-head"><h2>Finished this week</h2></div>
+  {% if p['closed'] %}
+  <ul class="prows">
+    {% for r in p['closed'] %}
+    <li class="prow">
+      <span class="days">{% if r['age_days'] is not none %}{{ r['age_days'] }}d{% else %}&mdash;{% endif %}</span>
+      <span class="ptitle">{{ r['title'] }}</span>
+      <span class="psec">{{ r['section'] }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="caveat">The number is how long it sat on the board before you closed it.</p>
+  {% else %}<p class="empty">Nothing closed yet this week.</p>{% endif %}
+</section>
+
+<section class="card" style="--sa:#6B4A8A">
+  <div class="sec-head"><h2>Your days</h2>
+    <span class="secnote">first to last thing you touched</span></div>
+  {% if p['active'] %}
+  <ul class="prows">
+    {% for day, w in p['active'].items() %}
+    <li class="prow rhythm">
+      <span class="pwho">{{ day|weekday }}</span>
+      <span class="ptitle">{% if w['span_min'] %}{{ w['first'] }} &ndash; {{ w['last'] }}{% else %}{{ w['first'] }} only{% endif %}</span>
+      <span class="psec">{% if p['meetings']['per_day'].get(day) %}{{ p['meetings']['per_day'][day] }} mtg{% endif %}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="empty">No activity recorded.</p>{% endif %}
+  <p class="caveat">This is not hours worked &mdash; it is the span between the first and last
+  thing you did in here. The board cannot see the rest of your day, and will not pretend to.</p>
+</section>
+
+</div>
+</div>
+{% endblock %}

@@ -102,3 +102,69 @@ CREATE TABLE IF NOT EXISTS wa_inbox (
   handled INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS wa_inbox_open ON wa_inbox(handled, ts);
+
+-- ---------- productivity history ----------
+-- The board only ever knew the present: a task was open, or it was not. To say
+-- anything about a week you need to know what changed and when, so every change
+-- to an item is written here by a trigger. A trigger rather than application
+-- code on purpose - there are a dozen routes that can close a task (swipe, the
+-- hold menu, the edit form, the API, the briefing) and one of them would
+-- eventually be missed.
+--
+-- No foreign key to items: when a task is deleted its history has to survive,
+-- otherwise deleting finished work quietly rewrites the record of the week.
+CREATE TABLE IF NOT EXISTS item_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_id INTEGER NOT NULL,
+  at TEXT NOT NULL,                 -- UTC, always ...Z
+  kind TEXT NOT NULL,               -- created | status | waiting | due | deleted | snapshot
+  old TEXT DEFAULT '',
+  new TEXT DEFAULT '',
+  title TEXT DEFAULT ''             -- copied in, so a deleted task still reads sensibly
+);
+CREATE INDEX IF NOT EXISTS item_events_at ON item_events(at);
+CREATE INDEX IF NOT EXISTS item_events_item ON item_events(item_id, at);
+
+CREATE TRIGGER IF NOT EXISTS ie_created AFTER INSERT ON items
+BEGIN
+  INSERT INTO item_events(item_id, at, kind, old, new, title)
+  VALUES(new.id, strftime('%Y-%m-%dT%H:%M:%SZ','now'), 'created', '', new.status, new.title);
+END;
+
+CREATE TRIGGER IF NOT EXISTS ie_status AFTER UPDATE OF status ON items
+WHEN ifnull(old.status,'') <> ifnull(new.status,'')
+BEGIN
+  INSERT INTO item_events(item_id, at, kind, old, new, title)
+  VALUES(new.id, strftime('%Y-%m-%dT%H:%M:%SZ','now'), 'status',
+         ifnull(old.status,''), ifnull(new.status,''), new.title);
+END;
+
+CREATE TRIGGER IF NOT EXISTS ie_waiting AFTER UPDATE OF waiting_on ON items
+WHEN ifnull(old.waiting_on,'') <> ifnull(new.waiting_on,'')
+BEGIN
+  INSERT INTO item_events(item_id, at, kind, old, new, title)
+  VALUES(new.id, strftime('%Y-%m-%dT%H:%M:%SZ','now'), 'waiting',
+         ifnull(old.waiting_on,''), ifnull(new.waiting_on,''), new.title);
+END;
+
+CREATE TRIGGER IF NOT EXISTS ie_due AFTER UPDATE OF due_date ON items
+WHEN ifnull(old.due_date,'') <> ifnull(new.due_date,'')
+BEGIN
+  INSERT INTO item_events(item_id, at, kind, old, new, title)
+  VALUES(new.id, strftime('%Y-%m-%dT%H:%M:%SZ','now'), 'due',
+         ifnull(old.due_date,''), ifnull(new.due_date,''), new.title);
+END;
+
+CREATE TRIGGER IF NOT EXISTS ie_deleted AFTER DELETE ON items
+BEGIN
+  INSERT INTO item_events(item_id, at, kind, old, new, title)
+  VALUES(old.id, strftime('%Y-%m-%dT%H:%M:%SZ','now'), 'deleted',
+         ifnull(old.status,''), '', old.title);
+END;
+
+-- The written half of the week - the part numbers cannot say.
+CREATE TABLE IF NOT EXISTS pulse_notes (
+  week TEXT PRIMARY KEY,            -- the Monday, YYYY-MM-DD
+  body TEXT NOT NULL,
+  created_at TEXT
+);

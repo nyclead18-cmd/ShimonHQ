@@ -3,7 +3,7 @@ import re
 import json
 import uuid
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone, timedelta, date
 from functools import wraps
 
 from flask import (Flask, g, render_template, request, redirect,
@@ -11,6 +11,7 @@ from flask import (Flask, g, render_template, request, redirect,
 from markupsafe import Markup, escape
 
 import maps
+import pulse
 import wa
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -104,6 +105,40 @@ def linkify(text):
     out.append(escape(s[last:]))
     return Markup("").join(out)
 
+@app.template_filter("weekspan")
+def _weekspan(a, b):
+    """Mon 18 Aug - Sun 24 Aug, or the short form when the month is shared."""
+    try:
+        d0, d1 = date.fromisoformat(a), date.fromisoformat(b)
+    except ValueError:
+        return "%s to %s" % (a, b)
+    if d0.month == d1.month:
+        return "%s %d\u2013%d %s" % (d0.strftime("%b"), d0.day, d1.day, d0.strftime("%Y"))
+    return "%s \u2013 %s %s" % (d0.strftime("%b %-d"), d1.strftime("%b %-d"), d1.strftime("%Y"))
+
+
+@app.template_filter("shortday")
+def _shortday(iso):
+    try:
+        return date.fromisoformat(iso).strftime("%-m/%-d")
+    except ValueError:
+        return iso
+
+
+@app.template_filter("weekday")
+def _weekday(iso):
+    try:
+        return date.fromisoformat(iso).strftime("%a %-d")
+    except ValueError:
+        return iso
+
+
+@app.template_filter("hrs")
+def _hrs(mins):
+    import pulse as _p
+    return _p.hours(mins)
+
+
 HQ_USER = os.environ.get("HQ_USER", "shimon")
 HQ_PASSWORD = os.environ.get("HQ_PASSWORD", "changeme")
 
@@ -176,6 +211,43 @@ def _stamp_responses_in_new_york(con):
                          .isoformat(timespec="seconds"), rid))
 
 
+def _seed_history(con):
+    """Give the history table a floor to measure from.
+
+    Nothing before today was ever recorded, so a task that has been waiting on
+    someone since July would otherwise read as "0 days" - worse than saying
+    nothing. For every task that is already waiting, write one snapshot event
+    dated when the task was last touched, and mark it approximate so the page
+    can say so rather than pretend it is exact.
+    """
+    try:
+        already = con.execute(
+            "SELECT COUNT(*) FROM item_events WHERE kind='snapshot'").fetchone()[0]
+    except sqlite3.Error:
+        return
+    if already:
+        return
+    rows = con.execute(
+        "SELECT id, title, status, waiting_on, updated_at FROM items").fetchall()
+    if not rows:
+        return
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for iid, title, status, waiting_on, updated in rows:
+        at = now
+        if updated:
+            try:
+                d = datetime.fromisoformat(updated)
+                if d.tzinfo is None:
+                    d = d.replace(tzinfo=timezone.utc)
+                at = d.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            except ValueError:
+                pass
+        con.execute(
+            "INSERT INTO item_events(item_id, at, kind, old, new, title)"
+            " VALUES(?,?,'snapshot',?,?,?)",
+            (iid, at, status or "", waiting_on or "", title))
+
+
 def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True) if os.path.dirname(DB_PATH) else None
     con = sqlite3.connect(DB_PATH, timeout=10)
@@ -216,11 +288,16 @@ def init_db():
         " from_me INTEGER NOT NULL DEFAULT 0, text TEXT, ts TEXT, received_at TEXT,"
         " handled INTEGER NOT NULL DEFAULT 0);"
         "CREATE INDEX IF NOT EXISTS wa_inbox_open ON wa_inbox(handled, ts);")
+    if "created_at" not in cols:
+        con.execute("ALTER TABLE items ADD COLUMN created_at TEXT")
+    _seed_history(con)
     ecols = [r[1] for r in con.execute("PRAGMA table_info(events)")]
     if ecols and "source" not in ecols:
         con.execute("ALTER TABLE events ADD COLUMN source TEXT DEFAULT 'outlook'")
     if ecols and "note" not in ecols:
         con.execute("ALTER TABLE events ADD COLUMN note TEXT DEFAULT ''")
+    if ecols and "dur_min" not in ecols:
+        con.execute("ALTER TABLE events ADD COLUMN dur_min INTEGER")
     os.makedirs(FILES_DIR, exist_ok=True)
     _stamp_responses_in_new_york(con)
     n = con.execute("SELECT COUNT(*) FROM sections").fetchone()[0]
@@ -1198,6 +1275,101 @@ def event_ics(ev_id):
                        "Content-Disposition": 'attachment; filename="%s.ics"' % safe}
 
 
+def _int_or_none(v):
+    """Length of a meeting, when the sweep bothered to send one."""
+    try:
+        n = int(str(v).strip())
+    except (TypeError, ValueError):
+        return None
+    return n if 0 < n < 24 * 60 else None
+
+
+# ---------- pulse ----------
+
+@app.route("/pulse")
+@app.route("/pulse/<day>")
+@login_required
+def pulse_view(day=None):
+    """The week, measured. Nothing here asks him to record anything."""
+    try:
+        d = date.fromisoformat(day) if day else None
+    except ValueError:
+        d = None
+    con = db()
+    data = pulse.week(con, d)
+    mon = date.fromisoformat(data["from"])
+    return render_template("pulse.html",
+                           p=data,
+                           prev_week=(mon - timedelta(days=7)).isoformat(),
+                           next_week=(mon + timedelta(days=7)).isoformat(),
+                           this_week=pulse.week_of()[0].isoformat())
+
+
+@app.route("/api/pulse")
+def api_pulse():
+    """The week as plain text, for whatever writes the read on Friday.
+
+    Deliberately not JSON: the fetch proxy mangles long encoded payloads, and a
+    tab-separated page survives it.
+    """
+    if not _api_auth():
+        abort(401)
+    try:
+        d = date.fromisoformat((request.args.get("day") or "").strip())
+    except ValueError:
+        d = None
+    con = db()
+    p = pulse.week(con, d)
+    m, prev = p["movement"], p["previous"]
+    L = ["WEEK\t%s to %s" % (p["from"], p["to"]),
+         "MOVED\topened %d\tclosed %d\treopened %d\t(last week opened %d closed %d)"
+         % (m["opened"], m["closed"], m["reopened"], prev["opened"], prev["closed"])]
+    mt = p["meetings"]
+    L.append("MEETINGS\t%d\t%s\tbusiest %s (%d)\tunmeasured %d"
+             % (mt["count"], pulse.hours(mt["minutes_known"]) or "length unknown",
+                mt["busiest_day"] or "-", mt["busiest_count"], mt["unmeasured"]))
+    for r in p["closed"]:
+        L.append("CLOSED\t%s\t%s\t%s" % (r["title"], r["section"],
+                 ("%d days old" % r["age_days"]) if r["age_days"] is not None else "age unknown"))
+    for r in p["opened"]:
+        L.append("OPENED\t%s\t%s\t%s" % (r["title"], r["section"], r["status"]))
+    for r in p["waiting"][:15]:
+        L.append("WAITING\t%s\t%s\t%s" % (
+            r["who"], r["title"],
+            ("at least %d days" % r["days"]) if (r["days"] and r["approx"])
+            else ("%d days" % r["days"]) if r["days"] is not None
+            else "unknown (was waiting before tracking began)"))
+    for r in p["stalled"][:15]:
+        L.append("STALLED\t%s\t%s\t%d days quiet" % (r["title"], r["section"], r["quiet_days"]))
+    for day_key, w in p["active"].items():
+        L.append("ACTIVE\t%s\t%s to %s" % (day_key, w["first"], w["last"]))
+    if not p["tracking_since"]:
+        L.append("NOTE\tno history recorded yet")
+    return "\n".join(L) or "(nothing)", 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+
+@app.route("/api/read")
+def api_read():
+    """Store the written half of the week - the part the numbers cannot say."""
+    if not _api_auth():
+        abort(401)
+    body = (request.args.get("text") or "").strip()
+    if not body:
+        return "ERROR: text required", 400, {"Content-Type": "text/plain; charset=utf-8"}
+    try:
+        d = date.fromisoformat((request.args.get("week") or "").strip())
+    except ValueError:
+        d = None
+    mon = pulse.week_of(d)[0].isoformat()
+    con = db()
+    con.execute("INSERT INTO pulse_notes(week, body, created_at) VALUES(?,?,?)"
+                " ON CONFLICT(week) DO UPDATE SET body=excluded.body,"
+                " created_at=excluded.created_at",
+                (mon, body, datetime.now().isoformat(timespec="seconds")))
+    commit_retry(con)
+    return "SAVED for week of " + mon, 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+
 # ---------- api (for CRM integration) ----------
 
 def _api_auth():
@@ -1252,13 +1424,15 @@ def api_event():
     if con.execute("SELECT 1 FROM events WHERE ext_key=? AND source='manual'", (key,)).fetchone():
         return "SKIPPED (edited here): " + subj, 200, {"Content-Type": "text/plain; charset=utf-8"}
     con.execute(
-        "INSERT INTO events(ext_key, subject, day, start_time, location, synced_at)"
-        " VALUES(?,?,?,?,?,?)"
+        "INSERT INTO events(ext_key, subject, day, start_time, location, dur_min, synced_at)"
+        " VALUES(?,?,?,?,?,?,?)"
         " ON CONFLICT(ext_key) DO UPDATE SET subject=excluded.subject, day=excluded.day,"
-        " start_time=excluded.start_time, location=excluded.location, synced_at=excluded.synced_at",
+        " start_time=excluded.start_time, location=excluded.location,"
+        " dur_min=excluded.dur_min, synced_at=excluded.synced_at",
         (key, subj, day,
          (request.args.get("time") or request.args.get("t") or "").strip() or None,
          (request.args.get("loc") or request.args.get("l") or "").strip(),
+         _int_or_none(request.args.get("mins")),
          datetime.now().isoformat(timespec="seconds")))
     commit_retry(con)
     return "SYNCED: " + subj, 200, {"Content-Type": "text/plain; charset=utf-8"}

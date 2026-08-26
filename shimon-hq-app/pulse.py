@@ -1,0 +1,325 @@
+"""What actually moved, and what did not.
+
+Every number here comes from history the board records for itself - no stopwatch,
+no timesheet, nothing to remember to press. The cost of that is honesty about
+what cannot be known: hours at a desk are not measurable this way, so this module
+never invents them. It reports meetings, which are real, and movement, which is
+real, and is explicit everywhere else about what it is guessing.
+"""
+
+import sqlite3
+from datetime import datetime, timedelta, timezone
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:                                   # pragma: no cover
+    ZoneInfo = None
+
+TZ_NAME = "America/New_York"
+STALE_DAYS = 14           # open, untouched this long, and it is not really open
+
+
+def _ny():
+    return ZoneInfo(TZ_NAME) if ZoneInfo else timezone.utc
+
+
+def now_utc():
+    return datetime.now(timezone.utc)
+
+
+def stamp(dt):
+    """The exact format the SQLite triggers write, so comparisons are plain strings."""
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def parse(raw):
+    """Any timestamp this database holds -> an aware UTC datetime, or None.
+
+    Three formats are in circulation: trigger rows ending in Z, responses
+    carrying a New York offset, and older naive rows written in the server's
+    UTC clock. A naive value is treated as UTC, which is what it always was.
+    """
+    if not raw:
+        return None
+    try:
+        d = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=timezone.utc)
+    return d.astimezone(timezone.utc)
+
+
+def today_ny():
+    return datetime.now(_ny()).date()
+
+
+def week_of(d=None):
+    """The Monday-to-Sunday week containing `d`, as New York dates."""
+    d = d or today_ny()
+    monday = d - timedelta(days=d.weekday())
+    return monday, monday + timedelta(days=6)
+
+
+def _bounds(day_from, day_to):
+    """New York dates -> the UTC string window covering them, end exclusive."""
+    ny = _ny()
+    a = datetime.combine(day_from, datetime.min.time(), tzinfo=ny)
+    b = datetime.combine(day_to + timedelta(days=1), datetime.min.time(), tzinfo=ny)
+    return stamp(a), stamp(b)
+
+
+def _q(con, sql, args=()):
+    try:
+        return con.execute(sql, args).fetchall()
+    except sqlite3.Error:
+        return []
+
+
+# ---------- movement ----------
+
+def movement(con, day_from, day_to):
+    """Opened, closed and reopened inside the window.
+
+    Counted per event, not per task: a task closed on Tuesday and reopened on
+    Thursday shows in both columns, because both things happened.
+    """
+    a, b = _bounds(day_from, day_to)
+    opened = _q(con, "SELECT COUNT(*) FROM item_events"
+                     " WHERE kind='created' AND at>=? AND at<?", (a, b))
+    closed = _q(con, "SELECT COUNT(*) FROM item_events"
+                     " WHERE kind='status' AND new='done' AND at>=? AND at<?", (a, b))
+    reopened = _q(con, "SELECT COUNT(*) FROM item_events"
+                       " WHERE kind='status' AND old='done' AND new<>'done'"
+                       " AND at>=? AND at<?", (a, b))
+    return {"opened": opened[0][0] if opened else 0,
+            "closed": closed[0][0] if closed else 0,
+            "reopened": reopened[0][0] if reopened else 0}
+
+
+def closed_items(con, day_from, day_to):
+    """What was finished, newest first, with how long each had been on the board.
+
+    `age_days` is None for anything that predates the history table - guessing
+    would make old work look freshly done.
+    """
+    a, b = _bounds(day_from, day_to)
+    rows = _q(con,
+              "SELECT e.item_id, e.title, e.at, s.title"
+              " FROM item_events e"
+              " LEFT JOIN items i ON i.id = e.item_id"
+              " LEFT JOIN sections s ON s.id = i.section_id"
+              " WHERE e.kind='status' AND e.new='done' AND e.at>=? AND e.at<?"
+              " ORDER BY e.at DESC", (a, b))
+    out = []
+    seen = set()
+    for iid, title, at, section in rows:
+        if iid in seen:
+            continue
+        seen.add(iid)
+        born = _q(con, "SELECT at FROM item_events WHERE item_id=? AND kind='created'"
+                       " ORDER BY at LIMIT 1", (iid,))
+        age = None
+        if born:
+            d0, d1 = parse(born[0][0]), parse(at)
+            if d0 and d1:
+                age = max(0, (d1 - d0).days)
+        out.append({"id": iid, "title": title, "section": section or "",
+                    "at": at, "age_days": age})
+    return out
+
+
+def opened_items(con, day_from, day_to):
+    a, b = _bounds(day_from, day_to)
+    rows = _q(con,
+              "SELECT e.item_id, e.title, e.at, s.title, i.status"
+              " FROM item_events e"
+              " LEFT JOIN items i ON i.id = e.item_id"
+              " LEFT JOIN sections s ON s.id = i.section_id"
+              " WHERE e.kind='created' AND e.at>=? AND e.at<?"
+              " ORDER BY e.at DESC", (a, b))
+    return [{"id": r[0], "title": r[1], "at": r[2],
+             "section": r[3] or "", "status": r[4] or "gone"} for r in rows]
+
+
+def history(con, weeks=8, day=None):
+    """Opened against closed, one row a week, oldest first."""
+    _mon, _sun = week_of(day)
+    out = []
+    for back in range(weeks - 1, -1, -1):
+        a = _mon - timedelta(days=7 * back)
+        b = a + timedelta(days=6)
+        m = movement(con, a, b)
+        m["week"] = a.isoformat()
+        m["label"] = a.strftime("%-m/%-d") if hasattr(a, "strftime") else str(a)
+        out.append(m)
+    return out
+
+
+# ---------- other people ----------
+
+def waiting_on(con):
+    """Everything sitting with someone else, longest first.
+
+    `approx` means the clock started when history did, not when he actually
+    handed it over - so the real wait is at least this long, never less.
+    """
+    rows = _q(con,
+              "SELECT i.id, i.title, i.waiting_on, s.title"
+              " FROM items i LEFT JOIN sections s ON s.id = i.section_id"
+              " WHERE i.status<>'done' AND ifnull(i.waiting_on,'')<>''")
+    now = now_utc()
+    out = []
+    for iid, title, who, section in rows:
+        ev = _q(con, "SELECT at, kind FROM item_events"
+                     " WHERE item_id=? AND kind IN ('waiting','snapshot')"
+                     " AND ifnull(new,'')<>'' ORDER BY at DESC LIMIT 1", (iid,))
+        since, approx = None, True
+        if ev:
+            since = parse(ev[0][0])
+            approx = (ev[0][1] == "snapshot")
+        days = (now - since).days if since else None
+        if approx and not days:
+            # The snapshot was written when tracking began, so "0 days" would be a
+            # lie about a task that may have been sitting with someone since July.
+            # Say nothing rather than say something wrong.
+            days = None
+        out.append({"id": iid, "title": title, "who": who, "section": section or "",
+                    "days": days, "approx": approx})
+    out.sort(key=lambda r: (r["days"] is None, -(r["days"] or 0)))
+    return out
+
+
+# ---------- things going quiet ----------
+
+def _last_touch(con, item_id):
+    """When something last actually happened to this task.
+
+    Snapshot rows are excluded on purpose: they were all written the moment
+    tracking began, and counting them would make every old task look freshly
+    handled and nothing would ever show as stalled.
+    """
+    best = None
+    for sql, args in (("SELECT MAX(at) FROM item_events"
+                       " WHERE item_id=? AND kind<>'snapshot'", (item_id,)),
+                      ("SELECT MAX(created_at) FROM item_notes WHERE item_id=?", (item_id,)),
+                      ("SELECT MAX(created_at) FROM item_files WHERE item_id=?", (item_id,)),
+                      ("SELECT updated_at FROM items WHERE id=?", (item_id,))):
+        r = _q(con, sql, args)
+        d = parse(r[0][0]) if r and r[0][0] else None
+        if d and (best is None or d > best):
+            best = d
+    return best
+
+
+def stalled(con, days=STALE_DAYS):
+    """Open, and nothing has happened to it in a fortnight."""
+    rows = _q(con,
+              "SELECT i.id, i.title, s.title, i.status, i.due_date"
+              " FROM items i LEFT JOIN sections s ON s.id = i.section_id"
+              " WHERE i.status<>'done'")
+    now = now_utc()
+    out = []
+    for iid, title, section, status, due in rows:
+        t = _last_touch(con, iid)
+        if not t:
+            continue
+        quiet = (now - t).days
+        if quiet >= days:
+            out.append({"id": iid, "title": title, "section": section or "",
+                        "status": status, "due": due or "", "quiet_days": quiet})
+    out.sort(key=lambda r: -r["quiet_days"])
+    return out
+
+
+# ---------- the calendar ----------
+
+def meetings(con, day_from, day_to):
+    """Meetings are the one part of the day that is genuinely measured.
+
+    Duration is only known for events synced after the column existed, so hours
+    are reported as a floor with a count of how many are still unmeasured.
+    """
+    rows = _q(con, "SELECT day, subject, start_time, dur_min FROM events"
+                   " WHERE day>=? AND day<=? ORDER BY day, start_time",
+              (day_from.isoformat(), day_to.isoformat()))
+    per_day, known, unknown = {}, 0, 0
+    for day, _subj, _st, dur in rows:
+        per_day[day] = per_day.get(day, 0) + 1
+        if dur:
+            known += int(dur)
+        else:
+            unknown += 1
+    busiest = max(per_day.items(), key=lambda kv: kv[1]) if per_day else None
+    return {"count": len(rows), "minutes_known": known, "unmeasured": unknown,
+            "per_day": per_day,
+            "busiest_day": busiest[0] if busiest else "",
+            "busiest_count": busiest[1] if busiest else 0}
+
+
+def hours(minutes):
+    if not minutes:
+        return ""
+    h, m = divmod(int(minutes), 60)
+    if not h:
+        return "%d min" % m
+    return "%dh %02dm" % (h, m) if m else "%dh" % h
+
+
+# ---------- when the day starts and stops ----------
+
+def active_window(con, day_from, day_to):
+    """The first and last time he touched the board each day.
+
+    This is not hours worked and must never be presented as such - it is the
+    span between the first and last thing he did in here, which is the only
+    honest thing the board can say about a day without being told.
+    """
+    a, b = _bounds(day_from, day_to)
+    ny = _ny()
+    marks = {}
+    for sql in ("SELECT at FROM item_events WHERE at>=? AND at<?",
+                "SELECT created_at FROM item_notes WHERE created_at>=? AND created_at<?"):
+        for (raw,) in _q(con, sql, (a, b)):
+            d = parse(raw)
+            if not d:
+                continue
+            local = d.astimezone(ny)
+            key = local.date().isoformat()
+            lo, hi = marks.get(key, (None, None))
+            marks[key] = (local if lo is None or local < lo else lo,
+                          local if hi is None or local > hi else hi)
+    return dict((k, {"first": v[0].strftime("%H:%M"), "last": v[1].strftime("%H:%M"),
+                     "span_min": int((v[1] - v[0]).total_seconds() // 60)})
+                for k, v in sorted(marks.items()))
+
+
+# ---------- everything, for one week ----------
+
+def week(con, day=None):
+    mon, sun = week_of(day)
+    prev = movement(con, mon - timedelta(days=7), mon - timedelta(days=1))
+    m = movement(con, mon, sun)
+    return {
+        "from": mon.isoformat(), "to": sun.isoformat(),
+        "movement": m, "previous": prev,
+        "closed": closed_items(con, mon, sun),
+        "opened": opened_items(con, mon, sun),
+        "waiting": waiting_on(con),
+        "stalled": stalled(con),
+        "meetings": meetings(con, mon, sun),
+        "active": active_window(con, mon, sun),
+        "history": history(con, 8, day),
+        "note": note(con, mon),
+        "tracking_since": tracking_since(con),
+    }
+
+
+def tracking_since(con):
+    r = _q(con, "SELECT MIN(at) FROM item_events")
+    return (r[0][0] or "") if r else ""
+
+
+def note(con, monday):
+    r = _q(con, "SELECT body FROM pulse_notes WHERE week=?", (monday.isoformat(),))
+    return r[0][0] if r else ""

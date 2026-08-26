@@ -16,6 +16,17 @@
 {% block body %}{% endblock %}
 <script>
 if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/sw.js'); }
+// Six tabs no longer fit a phone, so the strip scrolls. Bring the tab you are
+// actually on into view - setting scrollLeft directly, because scrollIntoView
+// would drag the whole page with it.
+(function () {
+  var strip = document.querySelector('nav.tabs');
+  var on = strip && strip.querySelector('.tab.on');
+  if (!strip || !on) { return; }
+  if (strip.scrollWidth > strip.clientWidth + 2) {
+    strip.scrollLeft = Math.max(0, on.offsetLeft - (strip.clientWidth - on.offsetWidth) / 2);
+  }
+})();
 </script>
 {% block scripts %}{% endblock %}
 <script src="{{ url_for('static', filename='gestures.js') }}?v={{ css_v }}"></script>
