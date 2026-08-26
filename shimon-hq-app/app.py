@@ -1578,6 +1578,7 @@ def wa_check():
             "SELECT COUNT(*) c FROM wa_inbox").fetchone()["c"]),
         ("last_hook_at", lambda: _setting_ro(con, "wa_last_hook", "")
             or "(no webhook has arrived yet)"),
+        ("unreadable_payload_shape", lambda: _setting_ro(con, "wa_last_shape", "") or "-"),
         ("anchored_chats", lambda: con.execute(
             "SELECT COUNT(*) c FROM items WHERE wa_chat_id IS NOT NULL"
             " AND wa_chat_id != ''").fetchone()["c"]),
@@ -1690,6 +1691,14 @@ def wa_hook(secret):
                 " ON CONFLICT(k) DO UPDATE SET v=excluded.v", (now,))
     row = wa.parse_hook(payload)
     if not row:
+        # remember the SHAPE of anything we could not read - names and types only,
+        # never values - so the parser can be taught the real payload
+        try:
+            con.execute("INSERT INTO settings(k, v) VALUES('wa_last_shape', ?)"
+                        " ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+                        (json.dumps(_shape(payload))[:4000],))
+        except Exception:
+            pass
         con.commit()
         return jsonify(ok=True, stored=False)
     con.execute(
