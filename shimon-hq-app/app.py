@@ -804,6 +804,28 @@ def set_origin():
     return redirect(request.form.get("back") or url_for("calendar_view"))
 
 
+@app.route("/api/origin")
+def api_origin():
+    """Read or set the two addresses travel times are measured from."""
+    if not _api_auth():
+        abort(401)
+    con = db()
+    changed = []
+    for arg, key in (("home", "origin_home"), ("work", "origin_work")):
+        if arg in request.args:
+            con.execute("INSERT INTO settings(k, v) VALUES(?, ?)"
+                        " ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+                        (key, (request.args.get(arg) or "").strip()))
+            changed.append(arg)
+    if changed:
+        con.commit()
+    home, work = _origins(con)
+    return ("HOME: %s\nWORK: %s\n%s" %
+            (home or "(not set)", work or "(not set)",
+             ("SAVED: " + ", ".join(changed)) if changed else "unchanged")), 200, \
+        {"Content-Type": "text/plain; charset=utf-8"}
+
+
 @app.route("/maps/check")
 def maps_check():
     """Is the Google key in place and does it actually answer? Signed in, or with the API token."""
