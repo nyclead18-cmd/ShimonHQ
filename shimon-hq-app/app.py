@@ -1535,7 +1535,7 @@ def wa_check():
     """Is WhatsApp connected? Signed in, or with the API token."""
     if not (session.get("user") or _api_auth()):
         abort(401)
-    st = wa.status()
+    st = wa.status(request.args.get("ua") or None)
     con = db()
     st["watermark"] = _setting_ro(con, "wa_seen_at", "") or "(never pulled)"
     st["anchored_chats"] = con.execute(

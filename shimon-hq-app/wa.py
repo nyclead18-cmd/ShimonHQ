@@ -17,7 +17,13 @@ BASE = "https://app.timelines.ai/integrations/api"
 TOKEN = (os.environ.get("TIMELINES_TOKEN") or "").strip()
 
 
-def _get(path, params=None, timeout=20):
+# TimelinesAI sits behind Cloudflare, which rejects urllib's default signature
+# outright (error 1010) before the token is ever looked at.
+UA = (os.environ.get("TIMELINES_UA") or "").strip() or \
+     "ShimonHQ/1.0 (+https://shimonhq.onrender.com)"
+
+
+def _get(path, params=None, timeout=20, ua=None):
     if not TOKEN:
         raise RuntimeError("no TIMELINES_TOKEN set")
     url = BASE + path
@@ -28,6 +34,8 @@ def _get(path, params=None, timeout=20):
     req = urllib.request.Request(url, headers={
         "Authorization": "Bearer " + TOKEN,
         "Accept": "application/json",
+        "Accept-Language": "en-US,en;q=0.9",
+        "User-Agent": ua or UA,
     })
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode("utf-8"))
@@ -51,8 +59,8 @@ def _rows(payload):
     return [], more
 
 
-def chats(page=1, **filters):
-    payload = _get("/chats", dict(filters, page=page))
+def chats(page=1, ua=None, **filters):
+    payload = _get("/chats", dict(filters, page=page), ua=ua)
     return _rows(payload)
 
 
@@ -104,19 +112,23 @@ def one_line(m, width=220):
     return "%s  %s: %s" % ((m.get("timestamp") or "")[:16].replace("T", " "), who, txt)
 
 
-def status():
+def status(ua=None):
     if not TOKEN:
         return {"token": False, "works": False,
                 "detail": "No TIMELINES_TOKEN set - WhatsApp is not connected."}
     try:
-        rows, _more = chats(page=1)
+        rows, _more = chats(page=1, ua=ua)
     except urllib.error.HTTPError as e:
         try:
             body = e.read(400).decode("utf-8", "replace").strip()
         except Exception:
             body = ""
-        return {"token": True, "works": False,
-                "detail": "TimelinesAI refused the token: HTTP %s %s" % (e.code, body[:200])}
+        why = "TimelinesAI refused the token"
+        if e.code == 403 and "1010" in body:
+            why = ("Cloudflare blocked the client before the token was checked "
+                   "(error 1010) - try another User-Agent")
+        return {"token": True, "works": False, "ua": ua or UA,
+                "detail": "%s: HTTP %s %s" % (why, e.code, body[:200])}
     except Exception as e:
         return {"token": True, "works": False, "detail": "Could not reach TimelinesAI: %s" % e}
     newest = ""
@@ -124,6 +136,6 @@ def status():
         ts = c.get("last_message_timestamp") or ""
         if ts > newest:
             newest = ts
-    return {"token": True, "works": True, "chats_first_page": len(rows),
+    return {"token": True, "works": True, "chats_first_page": len(rows), "ua": ua or UA,
             "detail": "Connected. %d chats on the first page, newest message %s."
                       % (len(rows), newest[:16].replace("T", " ") or "unknown")}
