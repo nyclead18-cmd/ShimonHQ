@@ -1585,14 +1585,16 @@ def api_washape():
         out["chat_count"] = len(rows)
         out["has_more"] = more
         out["chat_keys"] = sorted(rows[0].keys()) if rows else []
-        cid = None
-        for cand in ("id", "chat_id", "uid", "pk"):
-            if rows and rows[0].get(cand) is not None:
-                cid = rows[0][cand]
-                out["id_field"] = cand
-                break
+        stamped = [c for c in rows if c.get("last_message_timestamp")]
+        out["chats_with_a_timestamp"] = len(stamped)
+        out["newest_timestamp"] = max(
+            [c["last_message_timestamp"] for c in stamped], default=None)
+        # probe the most recently active chat, not whichever happens to be first
+        pick = max(stamped, key=lambda c: c["last_message_timestamp"]) if stamped else \
+            (rows[0] if rows else None)
+        cid = pick.get("id") if pick else None
+        out["id_field"] = "id" if cid is not None else None
         if cid is None:
-            out["id_field"] = None
             return jsonify(out)
         try:
             raw = wa._get("/chats/%s/messages" % cid, {"sorting_order": "desc"})

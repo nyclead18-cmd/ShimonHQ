@@ -93,11 +93,13 @@ def active_since(iso, max_pages=6):
     """
     out = []
     for c in all_chats(max_pages=max_pages):
-        ts = (c.get("last_message_timestamp") or "")[:19]
-        if ts and iso and ts < iso[:19]:
+        ts = (c.get("last_message_timestamp") or "")
+        if not ts:
+            continue                      # never had a message - nothing to read
+        if iso and ts[:19] < iso[:19]:
             continue
         out.append(c)
-    out.sort(key=lambda c: (c.get("last_message_timestamp") or ""), reverse=True)
+    out.sort(key=lambda c: c.get("last_message_timestamp") or "", reverse=True)
     return out
 
 
