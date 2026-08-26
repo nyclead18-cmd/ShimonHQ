@@ -833,7 +833,14 @@ def maps_check():
         abort(401)
     st = maps.status()
     con = db()
-    st["origin"] = _setting_ro(con, "origin_address", "") or ""
+    home, work = _origins(con)
+    st["home"], st["work"] = home, work
+    # prove the real path end to end, not just that the key answers
+    if maps.KEY and home and work:
+        secs = maps.drive_seconds(home, work)
+        st["sample"] = ("home to the office: %s, so for a 9:00 AM you leave at %s"
+                        % (maps.pretty_minutes(secs), _leave_by("09:00", secs))) \
+            if secs else "home to the office: no route came back"
     return jsonify(st)
 
 
