@@ -120,6 +120,26 @@ def db():
     return g.db
 
 
+def commit_retry(con, tries=5):
+    """SQLite locks briefly when the reminder thread writes. A dropped WhatsApp
+    webhook is a lost message, so wait and try again rather than give up."""
+    import time as _t
+    for i in range(tries):
+        try:
+            con.commit()
+            return True
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e).lower() and "busy" not in str(e).lower():
+                raise
+            _t.sleep(0.15 * (i + 1))
+    try:
+        con.commit()
+        return True
+    except sqlite3.OperationalError:
+        app.logger.warning("commit still blocked after %d tries", tries)
+        return False
+
+
 @app.teardown_appcontext
 def close_db(e=None):
     d = g.pop("db", None)
@@ -1665,7 +1685,7 @@ def _wa_secret(con):
         v = uuid.uuid4().hex
         con.execute("INSERT INTO settings(k, v) VALUES('wa_hook_secret', ?)"
                     " ON CONFLICT(k) DO UPDATE SET v=excluded.v", (v,))
-        con.commit()
+        commit_retry(con)
     return v
 
 
@@ -1710,8 +1730,8 @@ def wa_hook(secret):
     con.execute("DELETE FROM wa_inbox WHERE handled=1 AND received_at < ?",
                 ((_now_local() - __import__("datetime").timedelta(days=30))
                  .isoformat(timespec="seconds"),))
-    con.commit()
-    return jsonify(ok=True, stored=True)
+    ok = commit_retry(con)
+    return jsonify(ok=ok, stored=ok), (200 if ok else 503)
 
 
 @app.route("/api/wafeed")
