@@ -693,9 +693,13 @@ def set_origin():
 
 
 @app.route("/maps/check")
-@login_required
 def maps_check():
+    """Is the Google key in place and does it actually answer? Signed in, or with the API token."""
+    if not (session.get("user") or _api_auth()):
+        abort(401)
     st = maps.status()
+    con = db()
+    st["origin"] = _setting_ro(con, "origin_address", "") or ""
     return jsonify(st)
 
 
