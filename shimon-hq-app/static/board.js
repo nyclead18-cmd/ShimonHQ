@@ -155,12 +155,31 @@ document.addEventListener('submit', function (ev) {
   var input = form.querySelector('input[name=body]');
   var body = (input.value || '').trim();
   if (!body) return;
+  var sendBtn = form.querySelector('button[type=submit]');
+  if (sendBtn) { sendBtn.disabled = true; }
+  function failed(msg) {
+    if (sendBtn) { sendBtn.disabled = false; }
+    var warn = form.parentElement.querySelector('.savewarn');
+    if (!warn) {
+      warn = document.createElement('div');
+      warn.className = 'savewarn';
+      form.parentElement.appendChild(warn);
+    }
+    warn.textContent = msg;          // the text stays in the box, ready to resend
+    input.focus();
+  }
   fetch(form.action, {
     method: 'POST',
     headers: {'X-Requested-With': 'fetch'},
     body: new FormData(form)
-  }).then(function (r) { return r.json(); }).then(function (d) {
-    if (!d.id) return;
+  }).then(function (r) {
+    if (!r.ok) { throw new Error(r.status === 503 ? 'busy' : 'http ' + r.status); }
+    return r.json();
+  }).then(function (d) {
+    if (sendBtn) { sendBtn.disabled = false; }
+    var oldWarn = form.parentElement.querySelector('.savewarn');
+    if (oldWarn) { oldWarn.remove(); }
+    if (!d.id) { failed('Not saved. Tap the arrow to try again.'); return; }
     var itemBody = form.closest('.body');
     var list = itemBody.querySelector('ul.notes');
     if (!list) {
@@ -180,6 +199,10 @@ document.addEventListener('submit', function (ev) {
     list.appendChild(li);
     input.value = '';
     input.focus();
+  }).catch(function (e) {
+    failed(String(e.message) === 'busy'
+      ? 'Busy for a moment. Tap the arrow to send it again.'
+      : 'Could not save that. Tap the arrow to try again.');
   });
 });
 

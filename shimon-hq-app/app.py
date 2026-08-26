@@ -238,7 +238,7 @@ def init_db():
                     " VALUES(?,?,?,?,?,?,?)",
                     (sid, it["t"], it.get("n", ""), it.get("w", ""),
                      it.get("s", "open"), pi, now))
-    con.commit()
+    commit_retry(con)
     con.close()
 
 
@@ -335,7 +335,7 @@ def add_item():
          (request.form.get("due_date") or "").strip() or None,
          request.form.get("project_id", type=int) or None,
          datetime.now().isoformat(timespec="seconds")))
-    con.commit()
+    commit_retry(con)
     if (request.form.get("due_date") or "").strip():
         return redirect(url_for("day_view", day=request.form["due_date"].strip()))
     return redirect(url_for("board", _anchor="sec-%d" % sid))
@@ -370,7 +370,7 @@ def edit_item(item_id):
          datetime.now().isoformat(timespec="seconds"), item_id))
     con.execute("UPDATE items SET remind_at=? WHERE id=?",
                 ((request.form.get("remind_at") or "").strip() or None, item_id))
-    con.commit()
+    commit_retry(con)
     return redirect(url_for("board"))
 
 
@@ -386,7 +386,11 @@ def add_note(item_id):
                           (item_id, body, created))
         note_id = cur.lastrowid
         con.execute("UPDATE items SET updated_at=? WHERE id=?", (created, item_id))
-        con.commit()
+        if not commit_retry(con):
+            # never fail silently - the response is still sitting in his box
+            if request.headers.get("X-Requested-With") == "fetch":
+                return jsonify(error="busy"), 503
+            abort(503)
     if request.headers.get("X-Requested-With") == "fetch":
         return jsonify(id=note_id, body=body, created_at=created)
     return redirect(url_for("board"))
@@ -397,7 +401,7 @@ def add_note(item_id):
 def delete_note(note_id):
     con = db()
     con.execute("DELETE FROM item_notes WHERE id=?", (note_id,))
-    con.commit()
+    commit_retry(con)
     if request.headers.get("X-Requested-With") == "fetch":
         return jsonify(ok=True)
     return redirect(url_for("board"))
@@ -414,7 +418,7 @@ def cycle_item(item_id):
         if row["status"] in STATUSES else "open"
     con.execute("UPDATE items SET status=?, updated_at=? WHERE id=?",
                 (nxt, datetime.now().isoformat(timespec="seconds"), item_id))
-    con.commit()
+    commit_retry(con)
     return jsonify(status=nxt)
 
 
@@ -430,7 +434,7 @@ def set_item_status(item_id):
         abort(404)
     con.execute("UPDATE items SET status=?, updated_at=? WHERE id=?",
                 (st, datetime.now().isoformat(timespec="seconds"), item_id))
-    con.commit()
+    commit_retry(con)
     return jsonify(status=st)
 
 
@@ -439,7 +443,7 @@ def set_item_status(item_id):
 def delete_item(item_id):
     con = db()
     con.execute("DELETE FROM items WHERE id=?", (item_id,))
-    con.commit()
+    commit_retry(con)
     return redirect(url_for("board"))
 
 
@@ -461,7 +465,7 @@ def capture():
     con.execute(
         "INSERT INTO items(section_id, title, status, pos, updated_at) VALUES(?,?,?,?,?)",
         (sid, title, "open", pos, datetime.now().isoformat(timespec="seconds")))
-    con.commit()
+    commit_retry(con)
     return redirect(url_for("board"))
 
 
@@ -480,7 +484,7 @@ def upload_file(item_id):
         "INSERT INTO item_files(item_id, filename, stored_name, size, created_at) VALUES(?,?,?,?,?)",
         (item_id, f.filename, stored, size,
          datetime.now().isoformat(timespec="seconds")))
-    con.commit()
+    commit_retry(con)
     return jsonify(id=cur.lastrowid, filename=f.filename, size=size)
 
 
@@ -505,7 +509,7 @@ def delete_file(file_id):
         except OSError:
             pass
         con.execute("DELETE FROM item_files WHERE id=?", (file_id,))
-        con.commit()
+        commit_retry(con)
     if request.headers.get("X-Requested-With") == "fetch":
         return jsonify(ok=True)
     return redirect(url_for("board"))
@@ -524,7 +528,7 @@ def add_project():
                           (sid,)).fetchone()[0]
         con.execute("INSERT INTO projects(section_id, title, pos, created_at) VALUES(?,?,?,?)",
                     (sid, title, pos, datetime.now().isoformat(timespec="seconds")))
-        con.commit()
+        commit_retry(con)
     return redirect(url_for("board", _anchor="sec-%d" % (sid or 0)))
 
 
@@ -534,7 +538,7 @@ def delete_project(proj_id):
     con = db()
     con.execute("UPDATE items SET project_id=NULL WHERE project_id=?", (proj_id,))
     con.execute("DELETE FROM projects WHERE id=?", (proj_id,))
-    con.commit()
+    commit_retry(con)
     return redirect(url_for("board"))
 
 
@@ -693,7 +697,7 @@ def brief_read(bid):
         abort(404)
     new = 0 if row["is_read"] else 1
     con.execute("UPDATE brief_items SET is_read=? WHERE id=?", (new, bid))
-    con.commit()
+    commit_retry(con)
     if request.headers.get("X-Requested-With") == "fetch":
         return jsonify(is_read=new)
     return redirect(url_for("briefing_view", day=row["day"]))
@@ -704,7 +708,7 @@ def brief_read(bid):
 def brief_read_all(day):
     con = db()
     con.execute("UPDATE brief_items SET is_read=1 WHERE day=?", (day,))
-    con.commit()
+    commit_retry(con)
     return redirect(url_for("briefing_view", day=day))
 
 
@@ -731,7 +735,7 @@ def brief_to_task(bid):
          (request.form.get("due_date") or "").strip() or None,
          datetime.now().isoformat(timespec="seconds"))).lastrowid
     con.execute("UPDATE brief_items SET item_id=?, is_read=1 WHERE id=?", (iid, bid))
-    con.commit()
+    commit_retry(con)
     return redirect(url_for("briefing_view", day=row["day"]))
 
 
@@ -754,7 +758,7 @@ def brief_file(bid):
                 " VALUES(?,?,?,?)", (target, body, "email", now))
     con.execute("UPDATE items SET updated_at=? WHERE id=?", (now, target))
     con.execute("UPDATE brief_items SET item_id=?, is_read=1 WHERE id=?", (target, bid))
-    con.commit()
+    commit_retry(con)
     if request.headers.get("X-Requested-With") == "fetch":
         return jsonify(ok=True, item_id=target)
     return redirect(url_for("board", _anchor="item-%d" % target))
@@ -766,7 +770,7 @@ def brief_dismiss(bid):
     con = db()
     row = con.execute("SELECT day FROM brief_items WHERE id=?", (bid,)).fetchone()
     con.execute("DELETE FROM brief_items WHERE id=?", (bid,))
-    con.commit()
+    commit_retry(con)
     if request.headers.get("X-Requested-With") == "fetch":
         return jsonify(ok=True)
     return redirect(url_for("briefing_view", day=row["day"] if row else None))
@@ -877,7 +881,7 @@ def set_origin():
             con.execute("INSERT INTO settings(k, v) VALUES(?, ?)"
                         " ON CONFLICT(k) DO UPDATE SET v=excluded.v",
                         (key, (request.form.get(field) or "").strip()))
-    con.commit()
+    commit_retry(con)
     return redirect(request.form.get("back") or url_for("calendar_view"))
 
 
@@ -899,7 +903,7 @@ def set_where():
                  ("last_pos_at", _now_local().isoformat(timespec="seconds"))):
         con.execute("INSERT INTO settings(k, v) VALUES(?, ?)"
                     " ON CONFLICT(k) DO UPDATE SET v=excluded.v", (k, v))
-    con.commit()
+    commit_retry(con)
     return jsonify(ok=True)
 
 
@@ -908,7 +912,7 @@ def set_where():
 def forget_where():
     con = db()
     con.execute("DELETE FROM settings WHERE k IN ('last_pos','last_pos_at')")
-    con.commit()
+    commit_retry(con)
     return jsonify(ok=True)
 
 
@@ -926,7 +930,7 @@ def api_origin():
                         (key, (request.args.get(arg) or "").strip()))
             changed.append(arg)
     if changed:
-        con.commit()
+        commit_retry(con)
     home, work = _origins(con)
     return ("HOME: %s\nWORK: %s\n%s" %
             (home or "(not set)", work or "(not set)",
@@ -1012,7 +1016,7 @@ def add_event():
          (request.form.get("location") or "").strip(),
          (request.form.get("note") or "").strip(),
          datetime.now().isoformat(timespec="seconds")))
-    con.commit()
+    commit_retry(con)
     return redirect(url_for("day_view", day=day))
 
 
@@ -1031,7 +1035,7 @@ def edit_event(ev_id):
         (subj, day, (request.form.get("start_time") or "").strip() or None,
          (request.form.get("location") or "").strip(),
          (request.form.get("note") or "").strip(), ev_id))
-    con.commit()
+    commit_retry(con)
     return redirect(url_for("day_view", day=day))
 
 
@@ -1046,7 +1050,7 @@ def delete_event(ev_id):
         # remember it so tomorrow's sync does not bring it back
         con.execute("INSERT OR IGNORE INTO hidden_events(ext_key) VALUES(?)", (row["ext_key"],))
     con.execute("DELETE FROM events WHERE id=?", (ev_id,))
-    con.commit()
+    commit_retry(con)
     return redirect(url_for("day_view", day=row["day"]))
 
 
@@ -1057,7 +1061,7 @@ def _feed_token(con):
     if not tok:
         tok = uuid.uuid4().hex
         con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES('feed_token', ?)", (tok,))
-        con.commit()
+        commit_retry(con)
     return tok
 
 
@@ -1228,7 +1232,7 @@ def api_rm():
     con.execute("DELETE FROM sections WHERE id NOT IN (SELECT DISTINCT section_id FROM items)"
                 " AND title NOT IN ('Joel / Shimon Tracker','Pinta / Office','Shul + Tzedaka',"
                 "'Personal / Family','Inbox')")
-    con.commit()
+    commit_retry(con)
     return "REMOVED %d: %s" % (cur.rowcount, title), 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
@@ -1256,7 +1260,7 @@ def api_event():
          (request.args.get("time") or request.args.get("t") or "").strip() or None,
          (request.args.get("loc") or request.args.get("l") or "").strip(),
          datetime.now().isoformat(timespec="seconds")))
-    con.commit()
+    commit_retry(con)
     return "SYNCED: " + subj, 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
@@ -1269,7 +1273,7 @@ def api_events_clear():
     con = db()
     cur = con.execute("DELETE FROM events WHERE day >= ? AND COALESCE(source,'outlook')='outlook'",
                       (frm,))
-    con.commit()
+    commit_retry(con)
     return "CLEARED %d from %s" % (cur.rowcount, frm), 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
@@ -1285,7 +1289,7 @@ def api_retag():
     con = db()
     cur = con.execute("UPDATE items SET waiting_on=? WHERE lower(trim(waiting_on))=lower(?)",
                       (to, frm))
-    con.commit()
+    commit_retry(con)
     return "RETAGGED %d: %s -> %s" % (cur.rowcount, frm, to), 200, \
         {"Content-Type": "text/plain; charset=utf-8"}
 
@@ -1310,7 +1314,7 @@ def api_set():
                  note if note is not None else row["note"],
                  wait if wait is not None else row["waiting_on"],
                  datetime.now().isoformat(timespec="seconds"), row["id"]))
-    con.commit()
+    commit_retry(con)
     return "UPDATED: " + (title or row["title"]), 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
@@ -1357,7 +1361,7 @@ def api_brief():
                 (day, kind, text, (request.args.get("detail") or "").strip(),
                  (request.args.get("link") or "").strip(), target,
                  datetime.now().isoformat(timespec="seconds")))
-    con.commit()
+    commit_retry(con)
     return "BRIEFED: " + text, 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
@@ -1369,7 +1373,7 @@ def api_brief_clear():
     day = (request.args.get("day") or _now_local().strftime("%Y-%m-%d")).strip()
     con = db()
     cur = con.execute("DELETE FROM brief_items WHERE day=? AND item_id IS NULL", (day,))
-    con.commit()
+    commit_retry(con)
     return "CLEARED %d from %s" % (cur.rowcount, day), 200, \
         {"Content-Type": "text/plain; charset=utf-8"}
 
@@ -1444,7 +1448,7 @@ def api_quickadd():
     chat = (request.args.get("wachat") or "").strip()
     if chat:
         con.execute("UPDATE items SET wa_chat_id=? WHERE id=(SELECT MAX(id) FROM items)", (chat,))
-    con.commit()
+    commit_retry(con)
     return "ADDED: " + title + (" [%s]" % proj if proj else ""), 200, \
         {"Content-Type": "text/plain; charset=utf-8"}
 
@@ -1519,7 +1523,7 @@ def api_link():
         return "SKIPPED (subject too generic): " + it["title"], 200, \
             {"Content-Type": "text/plain; charset=utf-8"}
     con.execute("UPDATE items SET thread_key=? WHERE id=?", (key, it["id"]))
-    con.commit()
+    commit_retry(con)
     return "LINKED: %s <- %s" % (it["title"], key), 200, \
         {"Content-Type": "text/plain; charset=utf-8"}
 
@@ -1556,7 +1560,7 @@ def api_note():
     chat = (request.args.get("wachat") or "").strip()
     if chat and not it["wa_chat_id"]:
         con.execute("UPDATE items SET wa_chat_id=? WHERE id=?", (chat, it["id"]))
-    con.commit()
+    commit_retry(con)
     return "FILED on %s: %s" % (it["title"], body[:60]), 200, \
         {"Content-Type": "text/plain; charset=utf-8"}
 
@@ -1623,7 +1627,7 @@ def api_walink():
     if not chat:
         return "ERROR: wachat required", 400, {"Content-Type": "text/plain; charset=utf-8"}
     con.execute("UPDATE items SET wa_chat_id=? WHERE id=?", (chat, it["id"]))
-    con.commit()
+    commit_retry(con)
     return "LINKED: %s <- chat %s" % (it["title"], chat), 200, \
         {"Content-Type": "text/plain; charset=utf-8"}
 
@@ -1719,7 +1723,7 @@ def wa_hook(secret):
                         (json.dumps(_shape(payload))[:4000],))
         except Exception:
             pass
-        con.commit()
+        commit_retry(con)
         return jsonify(ok=True, stored=False)
     con.execute(
         "INSERT INTO wa_inbox(uid, chat_id, chat_name, sender, from_me, text, ts,"
@@ -1793,11 +1797,11 @@ def api_waseen():
     con = db()
     if uids:
         con.executemany("UPDATE wa_inbox SET handled=1 WHERE uid=?", [(u,) for u in uids])
-        con.commit()
+        commit_retry(con)
         return "MARKED %d" % len(uids), 200, {"Content-Type": "text/plain; charset=utf-8"}
     if (request.args.get("all") or "").strip() == "1":
         cur = con.execute("UPDATE wa_inbox SET handled=1 WHERE handled=0")
-        con.commit()
+        commit_retry(con)
         return "MARKED %d (all)" % cur.rowcount, 200, \
             {"Content-Type": "text/plain; charset=utf-8"}
     return "ERROR: uids or all=1 required", 400, \
@@ -1848,7 +1852,7 @@ def api_add_item():
         " VALUES(?,?,?,?,?,?,?,?)",
         (sid, title, d.get("note", ""), d.get("waiting_on", ""), "open", pos,
          d.get("due_date"), datetime.now().isoformat(timespec="seconds")))
-    con.commit()
+    commit_retry(con)
     return jsonify(id=cur.lastrowid), 201
 
 
@@ -1860,7 +1864,7 @@ def add_section():
         con = db()
         pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM sections").fetchone()[0]
         con.execute("INSERT INTO sections(title, pos) VALUES(?,?)", (title, pos))
-        con.commit()
+        commit_retry(con)
     return redirect(url_for("board"))
 
 
@@ -1872,7 +1876,7 @@ def delete_section(sec_id):
                     (sec_id,)).fetchone()[0]
     if n == 0:
         con.execute("DELETE FROM sections WHERE id=?", (sec_id,))
-        con.commit()
+        commit_retry(con)
     return redirect(url_for("board"))
 
 
@@ -1933,7 +1937,7 @@ def ensure_vapid():
                                             serialization.PublicFormat.UncompressedPoint)
         pub = base64.urlsafe_b64encode(raw).decode().rstrip("=")
         con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES('vapid_public', ?)", (pub,))
-        con.commit()
+        commit_retry(con)
     except Exception as e:
         app.logger.warning("VAPID setup failed: %s", e)
         pub = None
@@ -1960,7 +1964,7 @@ def push_subscribe():
                 " VALUES(?,?,?,?)",
                 (d["endpoint"], keys["p256dh"], keys.get("auth", ""),
                  datetime.now().isoformat(timespec="seconds")))
-    con.commit()
+    commit_retry(con)
     return jsonify(ok=True)
 
 
@@ -1991,7 +1995,7 @@ def send_push(title, body, url="/"):
                 payload, VAPID_PEM, "mailto:sdeutsch@pintapartners.com")
             if status in (404, 410):           # device unsubscribed
                 con.execute("DELETE FROM push_subs WHERE id=?", (sub["id"],))
-                con.commit()
+                commit_retry(con)
             elif 200 <= status < 300:
                 sent += 1
             else:
@@ -2009,7 +2013,7 @@ def _already_sent(con, ref):
 def _mark_sent(con, ref):
     con.execute("INSERT OR REPLACE INTO reminders_sent(ref, sent_at) VALUES(?,?)",
                 (ref, datetime.now().isoformat(timespec="seconds")))
-    con.commit()
+    commit_retry(con)
 
 
 def reminder_tick():
@@ -2110,7 +2114,7 @@ def reminder_tick():
 
     con.execute("DELETE FROM reminders_sent WHERE sent_at < ?",
                 ((now - _td(days=14)).isoformat(timespec="seconds"),))
-    con.commit()
+    commit_retry(con)
     con.close()
 
 
