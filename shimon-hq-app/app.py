@@ -158,7 +158,17 @@ def _stamp_responses_in_new_york(con):
 
 def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True) if os.path.dirname(DB_PATH) else None
-    con = sqlite3.connect(DB_PATH)
+    con = sqlite3.connect(DB_PATH, timeout=10)
+    # An earlier build switched this database into WAL mode, which Render's disk
+    # does not handle - every connection then hung. WAL is a property of the file,
+    # so reverting the code was not enough; put it back on the way in.
+    try:
+        con.execute("PRAGMA busy_timeout = 5000")
+        mode = con.execute("PRAGMA journal_mode").fetchone()[0]
+        if str(mode).lower() == "wal":
+            con.execute("PRAGMA journal_mode = DELETE")
+    except Exception:
+        pass
     with open(os.path.join(BASE, "schema.sql"), encoding="utf-8") as f:
         con.executescript(f.read())
     cols = [r[1] for r in con.execute("PRAGMA table_info(items)")]
