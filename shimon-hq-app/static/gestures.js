@@ -291,6 +291,14 @@
     document.body.classList.remove('sheet-open');
   }
 
+  // belt and braces: the page must never be left unscrollable by a stuck sheet
+  setInterval(function () {
+    if (document.body.classList.contains('sheet-open') &&
+        !(sheet && sheet.classList.contains('on'))) {
+      document.body.classList.remove('sheet-open');
+    }
+  }, 1500);
+
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') { closeSheet(); }
   });
@@ -366,6 +374,7 @@
 
   var cur = null;
   var swallowClick = false;
+  var swallowTimer = null;
 
   // Lifting your finger after a long press fires a click at that spot - and by
   // then the sheet has slid up underneath it, so the click would land on
@@ -374,6 +383,7 @@
   document.addEventListener('click', function (ev) {
     if (!swallowClick) return;
     swallowClick = false;
+    clearTimeout(swallowTimer);
     ev.stopPropagation();
     ev.preventDefault();
   }, true);
@@ -382,12 +392,11 @@
     if (ev.touches && ev.touches.length > 1) return;
     var li = ev.target.closest(ROWS);
     if (!li || !rowKind(li)) return;
-    // never hijack a real control; a text box is fair game to swipe from
-    // unless the cursor is actually in it
-    if (ev.target.closest('button, a, select, textarea, label, summary,'
-        + ' input[type=file], input[type=date], input[type=time], input[type=datetime-local]')) return;
-    var fld = ev.target.closest('input');
-    if (fld && document.activeElement === fld) return;
+    // Never hijack a real control. Text boxes are strictly off limits: a tap that
+    // lingers even slightly is how you get a cursor into one, and stealing that
+    // stops you writing a response at all.
+    if (ev.target.closest('button, a, select, textarea, label, summary, input')) return;
+    if (sheet && sheet.classList.contains('on')) return;
     var t = ev.touches ? ev.touches[0] : ev;
     cur = {li: li, x0: t.clientX, y0: t.clientY, dir: 0, dx: 0,
            right: swipeRight(li), left: swipeLeft(li), held: false};
@@ -395,6 +404,8 @@
       if (!cur || cur.dir) return;
       cur.held = true;
       swallowClick = true;
+      clearTimeout(swallowTimer);
+      swallowTimer = setTimeout(function () { swallowClick = false; }, 700);
       if (navigator.vibrate) { try { navigator.vibrate(12); } catch (e) {} }
       openSheet(li);
       cancel();
