@@ -261,8 +261,9 @@ form.edit select{background:var(--bg); border:1px solid var(--border); border-ra
   h1{font-size:30px;}
   header.top{align-items:flex-start; gap:10px;}
   header.top .right{width:100%; flex-wrap:wrap; gap:10px; padding-bottom:0; align-items:center;}
-  .tabs{flex:1; min-width:0; justify-content:space-between;}
-  .tab{flex:1; text-align:center; padding:7px 4px; font-size:11px; letter-spacing:.03em;}
+  .tabs{flex:1 0 100%; min-width:0; justify-content:space-between; order:-1;}
+  .tab{flex:1 1 0; min-width:0; text-align:center; padding:9px 2px; font-size:11px;
+    letter-spacing:.02em; white-space:nowrap;}
   .printbtn{padding:7px 14px;}
   .stats{gap:8px;}
   .stat{flex:1; min-width:0; padding:11px 12px 10px;}
@@ -354,16 +355,26 @@ li.item.flash .t{font-weight:700;}
   font-size:10.5px; font-weight:700; margin-left:3px; vertical-align:1px;}
 .tab.on .badge{background:var(--btn-tx); color:var(--btn-bg);}
 li.item.brief{grid-template-columns:26px 1fr;}
-.dotbtn{width:13px; height:13px; border-radius:50%; border:2px solid var(--accent);
-  background:var(--accent); cursor:pointer; padding:0; margin-top:5px;}
-.dotbtn.read{background:transparent; border-color:var(--border);}
+/* small dot, finger-sized hit box */
+.dotbtn{width:34px; height:34px; border:none; background:transparent; padding:0; margin:-6px 0 0 -10px;
+  cursor:pointer; position:relative; touch-action:manipulation; -webkit-appearance:none; appearance:none;}
+.dotbtn::after{content:''; position:absolute; left:50%; top:50%; width:13px; height:13px;
+  margin:-6.5px 0 0 -6.5px; border-radius:50%; border:2px solid var(--accent); background:var(--accent);}
+.dotbtn.read::after{background:transparent; border-color:var(--border);}
+.tapread{cursor:pointer; touch-action:manipulation;}
+.briefacts .del{min-width:38px; min-height:38px; font-size:14px; touch-action:manipulation;}
 li.readrow .t{color:var(--muted); font-weight:400;}
 .briefacts{display:flex; gap:8px; align-items:center; margin-top:6px; flex-wrap:wrap;}
 .outlookbtn.done{color:var(--pill-done-tx); border-color:var(--pill-done-bg);}
-.pushbox>summary{color:var(--muted); font-size:12.5px; cursor:pointer; list-style:none;
-  border:1px solid var(--border); border-radius:999px; padding:4px 12px; background:var(--card);
-  width:max-content;}
-.pushbox>summary::-webkit-details-marker{display:none}
+.pushbtn{color:var(--muted); font:inherit; font-size:13px; cursor:pointer;
+  border:1px solid var(--border); border-radius:999px; padding:8px 15px; background:var(--card);
+  min-height:38px; touch-action:manipulation; -webkit-appearance:none; appearance:none;}
+.pushbtn:hover{border-color:var(--accent); color:var(--accent);}
+.pushbtn.on{border-color:var(--accent); color:var(--accent); background:var(--row);}
+.pushform{margin-top:8px; width:100%; order:9;}
+.cancelpush{font:inherit; font-size:13px; background:transparent; color:var(--muted);
+  border:1px solid var(--border); border-radius:999px; padding:7px 14px; cursor:pointer;
+  min-height:36px; touch-action:manipulation;}
 .readallform{margin-left:auto;}
 .emptybrief{padding:18px;}
 .pastdays{color:var(--muted); font-size:13px; margin-top:8px; display:flex; gap:10px; flex-wrap:wrap;}

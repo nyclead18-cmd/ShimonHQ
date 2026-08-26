@@ -55,15 +55,15 @@
       <button type="button" class="dotbtn{% if b.is_read %} read{% endif %}" data-brief="{{ b.id }}"
               title="{{ 'Mark unread' if b.is_read else 'Mark read' }}"></button>
       <div class="body">
-        <div class="t" dir="auto">{{ b.text }}</div>
+        <div class="t tapread" dir="auto" data-brief="{{ b.id }}">{{ b.text }}</div>
         {% if b.detail %}<div class="w" dir="auto">{{ b.detail|linkify }}</div>{% endif %}
         <div class="briefacts">
           {% if b.link %}<a class="outlookbtn" href="{{ b.link }}" target="_blank" rel="noopener">Open</a>{% endif %}
           {% if b.item_id %}
           <a class="outlookbtn done" href="{{ url_for('board', _anchor='item-' ~ b.item_id) }}">On the board &rarr;</a>
           {% else %}
-          <details class="pushbox">
-            <summary>&rarr; Make a task</summary>
+          <button type="button" class="pushbtn" data-push="{{ b.id }}">&rarr; Make a task</button>
+          <div class="pushform" id="push-{{ b.id }}" hidden>
             <form class="edit" method="post" action="{{ url_for('brief_to_task', bid=b.id) }}">
               <input name="title" dir="auto" value="{{ b.text }}" required>
               <input name="note" dir="auto" value="{{ b.detail }}" placeholder="Next step / note">
@@ -74,12 +74,13 @@
                 </select>
               </label>
               <label class="duelabel">Due <input type="date" name="due_date"></label>
-              <div class="btns"><button type="submit">Add to board</button></div>
+              <div class="btns"><button type="submit">Add to board</button>
+                <button type="button" class="cancelpush" data-push="{{ b.id }}">Cancel</button></div>
             </form>
-          </details>
+          </div>
           {% endif %}
           <form method="post" action="{{ url_for('brief_dismiss', bid=b.id) }}" class="delform">
-            <button type="submit" class="del" title="Dismiss">&#x2715;</button>
+            <button type="submit" class="del nowarn" title="Dismiss">&#x2715;</button>
           </form>
         </div>
       </div>
@@ -103,10 +104,36 @@
 {% block scripts %}
 <script src="{{ url_for('static', filename='board.js') }}?v={{ css_v }}"></script>
 <script>
+// open / close the "make a task" panel (plain button - no <details>, which iOS can be odd about)
 document.addEventListener('click', function (ev) {
-  var b = ev.target.closest('.dotbtn');
+  var pb = ev.target.closest('.pushbtn');
+  if (pb) {
+    var box = document.getElementById('push-' + pb.getAttribute('data-push'));
+    if (box) {
+      var opening = box.hidden;
+      box.hidden = !opening;
+      pb.classList.toggle('on', opening);
+      if (opening) { var f = box.querySelector('input[name=title]'); if (f) { f.focus(); } }
+    }
+    return;
+  }
+  var cx = ev.target.closest('.cancelpush');
+  if (cx) {
+    var cbox = document.getElementById('push-' + cx.getAttribute('data-push'));
+    if (cbox) { cbox.hidden = true; }
+    var cbtn = document.querySelector('.pushbtn[data-push="' + cx.getAttribute('data-push') + '"]');
+    if (cbtn) { cbtn.classList.remove('on'); }
+    return;
+  }
+});
+
+// tap the dot OR the headline to flip read / unread
+document.addEventListener('click', function (ev) {
+  var b = ev.target.closest('.dotbtn') || ev.target.closest('.tapread');
   if (!b) return;
   var id = b.getAttribute('data-brief');
+  var row = b.closest('li');
+  b = row.querySelector('.dotbtn');
   fetch('/brief/' + id + '/read', {method: 'POST', headers: {'X-Requested-With': 'fetch'}})
     .then(function (r) { return r.json(); })
     .then(function (d) {

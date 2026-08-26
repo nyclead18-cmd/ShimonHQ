@@ -73,6 +73,7 @@ document.addEventListener('click', function (ev) {
     applyFilter();
   }
   var del = ev.target.closest('.del');
+  if (del && del.classList.contains('nowarn')) { return; }   // briefing dismiss: one tap
   if (del && !del.classList.contains('arm')) {
     ev.preventDefault();
     del.classList.add('arm');
