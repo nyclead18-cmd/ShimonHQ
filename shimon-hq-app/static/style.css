@@ -281,3 +281,18 @@ form.edit select{background:var(--bg); border:1px solid var(--border); border-ra
   .cal{min-width:560px;}
   .cal-day{min-height:70px;}
 }
+
+/* clickable rows + jump-to highlight */
+.jlink{color:#1F3A5F; text-decoration:none;}
+.jlink:hover{text-decoration:underline;}
+li.item:target{animation:flash 2s ease-out;}
+li.item:target .t{font-weight:700;}
+@keyframes flash{
+  0%{background:var(--pill-wait-bg); box-shadow:inset 3px 0 0 var(--accent);}
+  100%{background:transparent; box-shadow:inset 3px 0 0 transparent;}
+}
+@media (prefers-reduced-motion: reduce){ li.item:target{animation:none; background:var(--pill-wait-bg);} }
+.taglabel{display:flex; gap:8px; align-items:center; color:var(--muted); font-size:13px;}
+.taglabel select{flex:1; min-width:0;}
+/* iPhone standalone: keep header clear of the status bar / notch */
+body{padding-top:env(safe-area-inset-top); padding-bottom:env(safe-area-inset-bottom);}

@@ -39,7 +39,7 @@
     {% for it in open_items %}
     <tr>
       <td><span class="jstat {{ it.status }}">{{ 'Open' if it.status == 'open' else 'Waiting' }}</span></td>
-      <td dir="auto"><b>{{ it.title }}</b>{% if it.note %} &mdash; {{ it.note }}{% endif %}
+      <td dir="auto"><a class="jlink" href="{{ url_for('board', _anchor='item-' ~ it.id) }}"><b>{{ it.title }}</b></a>{% if it.note %} &mdash; {{ it.note }}{% endif %}
         {% for n in notes_by_item.get(it.id, []) %}
         <div class="jnote">{{ n.created_at[5:7]|int }}/{{ n.created_at[8:10]|int }} &mdash; <span dir="auto">{{ n.body }}</span></div>
         {% endfor %}
@@ -55,7 +55,7 @@
   <table class="joel-table">
     {% for it in done_items %}
     <tr><td class="jw1"><span class="jstat done">Done</span></td>
-      <td dir="auto">{{ it.title }}{% if it.note %} &mdash; {{ it.note }}{% endif %}</td></tr>
+      <td dir="auto"><a class="jlink" href="{{ url_for('board', _anchor='item-' ~ it.id) }}">{{ it.title }}</a>{% if it.note %} &mdash; {{ it.note }}{% endif %}</td></tr>
     {% endfor %}
   </table>
   {% endif %}

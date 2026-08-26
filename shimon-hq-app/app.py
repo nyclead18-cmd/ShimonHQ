@@ -203,13 +203,25 @@ def edit_item(item_id):
     if not title:
         return redirect(url_for("board"))
     con = db()
+    cur_row = con.execute("SELECT section_id FROM items WHERE id=?", (item_id,)).fetchone()
+    if not cur_row:
+        abort(404)
+    sid = request.form.get("section_id", type=int) or cur_row["section_id"]
+    pid = request.form.get("project_id", type=int) or None
+    if pid:
+        # a project decides the section it lives in
+        prow = con.execute("SELECT section_id FROM projects WHERE id=?", (pid,)).fetchone()
+        if prow:
+            sid = prow["section_id"]
+        else:
+            pid = None
     con.execute(
-        "UPDATE items SET title=?, note=?, waiting_on=?, due_date=?, project_id=?,"
+        "UPDATE items SET title=?, note=?, waiting_on=?, due_date=?, section_id=?, project_id=?,"
         " updated_at=? WHERE id=?",
         (title, (request.form.get("note") or "").strip(),
          (request.form.get("waiting_on") or "").strip(),
          (request.form.get("due_date") or "").strip() or None,
-         request.form.get("project_id", type=int) or None,
+         sid, pid,
          datetime.now().isoformat(timespec="seconds"), item_id))
     con.commit()
     return redirect(url_for("board"))

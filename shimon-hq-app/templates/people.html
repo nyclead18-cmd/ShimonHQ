@@ -33,7 +33,7 @@
     <li class="item {{ it.status }}">
       <span class="pill {{ it.status }}">{{ 'Open' if it.status == 'open' else 'Waiting' }}</span>
       <div class="body">
-        <div class="t" dir="auto"><a class="plain" href="{{ url_for('board', _anchor='sec-' ~ it.section_id) }}">{{ it.title }}</a>
+        <div class="t" dir="auto"><a class="plain" href="{{ url_for('board', _anchor='item-' ~ it.id) }}">{{ it.title }}</a>
           {% if it.note %} <span class="n" dir="auto">&mdash; {{ it.note }}</span>{% endif %}</div>
         <div class="metaline">
           {% if it.due_date %}<span class="due{% if it.due_date < today_iso %} over{% endif %}">due {{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}</span>{% endif %}

@@ -24,7 +24,7 @@
   {% for it in overdue %}
   <div class="os-item"><span class="os-date">{{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}</span>
     <span dir="auto">{{ it.title }}</span>
-    <a class="os-link" href="{{ url_for('board', _anchor='sec-' ~ it.section_id) }}">{{ it.sec_title }}</a></div>
+    <a class="os-link" href="{{ url_for('board', _anchor='item-' ~ it.id) }}">{{ it.sec_title }}</a></div>
   {% endfor %}
 </div>
 {% endif %}
@@ -44,7 +44,7 @@
     <div class="cal-num">{{ d.day }}</div>
     {% for it in by_day.get(iso, []) %}
     <a class="cal-item {{ it.status }}{% if it.status != 'done' and iso < today_iso %} late{% endif %}"
-       href="{{ url_for('board', _anchor='sec-' ~ it.section_id) }}" dir="auto" title="{{ it.title }}">{{ it.title }}</a>
+       href="{{ url_for('board', _anchor='item-' ~ it.id) }}" dir="auto" title="{{ it.title }}">{{ it.title }}</a>
     {% endfor %}
   </div>
   {% endfor %}
@@ -59,7 +59,7 @@
     <li><span class="nd">{{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}</span>
       <span dir="auto">{{ it.title }}</span>
       {% if it.waiting_on %}<span class="w">&mdash; waiting on <b dir="auto">{{ it.waiting_on }}</b></span>{% endif %}
-      <a class="os-link" href="{{ url_for('board', _anchor='sec-' ~ it.section_id) }}">{{ it.sec_title }}</a></li>
+      <a class="os-link" href="{{ url_for('board', _anchor='item-' ~ it.id) }}">{{ it.sec_title }}</a></li>
     {% endfor %}
   </ul>
   {% else %}
