@@ -11,6 +11,7 @@ from flask import (Flask, g, render_template, request, redirect,
 from markupsafe import Markup, escape
 
 import maps
+import wa
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(BASE, "hq.db"))
@@ -169,6 +170,8 @@ def init_db():
         con.execute("ALTER TABLE items ADD COLUMN remind_at TEXT")
     if "thread_key" not in cols:
         con.execute("ALTER TABLE items ADD COLUMN thread_key TEXT")
+    if "wa_chat_id" not in cols:
+        con.execute("ALTER TABLE items ADD COLUMN wa_chat_id TEXT")
     ncols = [r[1] for r in con.execute("PRAGMA table_info(item_notes)")]
     if ncols and "source" not in ncols:
         con.execute("ALTER TABLE item_notes ADD COLUMN source TEXT DEFAULT ''")
@@ -1402,6 +1405,9 @@ def api_quickadd():
     key = thread_key(request.args.get("subject"))
     if key:
         con.execute("UPDATE items SET thread_key=? WHERE id=(SELECT MAX(id) FROM items)", (key,))
+    chat = (request.args.get("wachat") or "").strip()
+    if chat:
+        con.execute("UPDATE items SET wa_chat_id=? WHERE id=(SELECT MAX(id) FROM items)", (chat,))
     con.commit()
     return "ADDED: " + title + (" [%s]" % proj if proj else ""), 200, \
         {"Content-Type": "text/plain; charset=utf-8"}
@@ -1454,10 +1460,12 @@ def api_threads():
     if not _api_auth():
         abort(401)
     rows = db().execute(
-        "SELECT items.id, items.thread_key, items.status, items.title FROM items"
-        " WHERE thread_key IS NOT NULL AND thread_key != '' AND status != 'done'"
-        " ORDER BY items.id").fetchall()
-    out = ["%d\t%s\t%s" % (r["id"], r["thread_key"], r["title"]) for r in rows]
+        "SELECT id, thread_key, wa_chat_id, title FROM items"
+        " WHERE status != 'done' AND ((thread_key IS NOT NULL AND thread_key != '')"
+        "   OR (wa_chat_id IS NOT NULL AND wa_chat_id != '')) ORDER BY id").fetchall()
+    out = ["%d\t%s\t%s\t%s" % (r["id"], r["thread_key"] or "-",
+                                 ("wa:" + r["wa_chat_id"]) if r["wa_chat_id"] else "-",
+                                 r["title"]) for r in rows]
     return ("\n".join(out) or "NONE"), 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
@@ -1499,16 +1507,136 @@ def api_note():
             {"Content-Type": "text/plain; charset=utf-8"}
     who = (request.args.get("who") or "").strip()
     body = ("%s: %s" % (who, text)) if who else text
+    src = (request.args.get("src") or "").strip().lower()
+    if src not in ("email", "wa"):
+        src = "wa" if request.args.get("wachat") else "email"
     now = _now_local().isoformat(timespec="seconds")
     con.execute("INSERT INTO item_notes(item_id, body, source, ext_id, created_at)"
-                " VALUES(?,?,?,?,?)", (it["id"], body, "email", msg or None, now))
+                " VALUES(?,?,?,?,?)", (it["id"], body, src, msg or None, now))
     con.execute("UPDATE items SET updated_at=? WHERE id=?", (now, it["id"]))
     key = thread_key(request.args.get("subject"))
     if key and not it["thread_key"]:
         con.execute("UPDATE items SET thread_key=? WHERE id=?", (key, it["id"]))
+    chat = (request.args.get("wachat") or "").strip()
+    if chat and not it["wa_chat_id"]:
+        con.execute("UPDATE items SET wa_chat_id=? WHERE id=?", (chat, it["id"]))
     con.commit()
     return "FILED on %s: %s" % (it["title"], body[:60]), 200, \
         {"Content-Type": "text/plain; charset=utf-8"}
+
+
+# ---------- WhatsApp, read-only, through TimelinesAI ----------
+
+WA_LOOKBACK_HOURS = 26      # first ever run, and the safety net after an outage
+
+
+@app.route("/wa/check")
+def wa_check():
+    """Is WhatsApp connected? Signed in, or with the API token."""
+    if not (session.get("user") or _api_auth()):
+        abort(401)
+    st = wa.status()
+    con = db()
+    st["watermark"] = _setting_ro(con, "wa_seen_at", "") or "(never pulled)"
+    st["anchored_chats"] = con.execute(
+        "SELECT COUNT(*) c FROM items WHERE wa_chat_id IS NOT NULL"
+        " AND wa_chat_id != ''").fetchone()["c"]
+    return jsonify(st)
+
+
+@app.route("/api/walink")
+def api_walink():
+    """Tie a task to a WhatsApp chat. Everything later in that chat files itself."""
+    if not _api_auth():
+        abort(401)
+    con = db()
+    it = _find_item(con, request.args.get("find") or request.args.get("id"))
+    if not it:
+        return "ERROR: no such task", 404, {"Content-Type": "text/plain; charset=utf-8"}
+    chat = (request.args.get("wachat") or "").strip()
+    if not chat:
+        return "ERROR: wachat required", 400, {"Content-Type": "text/plain; charset=utf-8"}
+    con.execute("UPDATE items SET wa_chat_id=? WHERE id=?", (chat, it["id"]))
+    con.commit()
+    return "LINKED: %s <- chat %s" % (it["title"], chat), 200, \
+        {"Content-Type": "text/plain; charset=utf-8"}
+
+
+@app.route("/api/wafeed")
+def api_wafeed():
+    """Everything said on WhatsApp since the watermark, as plain text for the sweep.
+
+    Reads only. Each chat is labelled with the task it is already tied to, so the
+    sweep knows which lines file themselves and which are new ground."""
+    if not _api_auth():
+        abort(401)
+    if not wa.TOKEN:
+        return "NOT CONNECTED: no TIMELINES_TOKEN set", 200, \
+            {"Content-Type": "text/plain; charset=utf-8"}
+    from datetime import timedelta as _td
+    con = db()
+    since = (request.args.get("since") or _setting_ro(con, "wa_seen_at", "") or "").strip()
+    if not since:
+        since = (_now_local() - _td(hours=WA_LOOKBACK_HOURS)).isoformat(timespec="seconds")
+    try:
+        max_chats = max(1, min(int(request.args.get("chats") or 12), 30))
+    except ValueError:
+        max_chats = 12
+
+    linked = {}
+    for r in con.execute("SELECT id, wa_chat_id, title FROM items"
+                         " WHERE wa_chat_id IS NOT NULL AND wa_chat_id != ''"):
+        linked[str(r["wa_chat_id"])] = (r["id"], r["title"])
+
+    try:
+        active = wa.active_since(since)
+    except Exception as e:
+        return "ERROR reaching TimelinesAI: %s" % e, 502, \
+            {"Content-Type": "text/plain; charset=utf-8"}
+
+    lines = ["SINCE\t" + since]
+    newest = since
+    for c in active[:max_chats]:
+        cid = str(c.get("id"))
+        try:
+            msgs = wa.messages(cid, after=since)
+        except Exception:
+            continue
+        msgs = [m for m in msgs
+                if (m.get("text") or m.get("has_attachment"))
+                and (m.get("timestamp") or "") > since]
+        if not msgs:
+            continue
+        tie = linked.get(cid)
+        lines.append("")
+        lines.append("CHAT\t%s\t%s\t%s" % (
+            cid, (c.get("name") or c.get("phone") or "?"),
+            ("task %d: %s" % tie) if tie else "-"))
+        for m in msgs[-25:]:
+            ts = m.get("timestamp") or ""
+            if ts > newest:
+                newest = ts
+            lines.append("  " + wa.one_line(m))
+    if len(lines) == 1:
+        lines.append("(nothing new)")
+    lines.append("")
+    lines.append("NEWEST\t" + newest)
+    return "\n".join(lines), 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+
+@app.route("/api/waseen")
+def api_waseen():
+    """Move the watermark on once the sweep has dealt with everything it read."""
+    if not _api_auth():
+        abort(401)
+    at = (request.args.get("at") or "").strip()
+    if not at:
+        return "ERROR: at required", 400, {"Content-Type": "text/plain; charset=utf-8"}
+    con = db()
+    con.execute("INSERT INTO settings(k, v) VALUES('wa_seen_at', ?)"
+                " ON CONFLICT(k) DO UPDATE SET v=excluded.v", (at,))
+    con.commit()
+    return "WATERMARK: " + at, 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
 @app.route("/api/board")

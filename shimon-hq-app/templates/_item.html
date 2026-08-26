@@ -17,7 +17,8 @@
       {% for n in inotes %}
       <li class="noterow" id="note-{{ n.id }}"><span class="nd">{{ n.created_at|stamp }}</span>
         <span class="t" dir="auto">{{ n.body|linkify }}</span>
-        {% if n.source == 'email' %}<span class="srcchip" title="Filed automatically from email">mail</span>{% endif %}
+        {% if n.source == 'email' %}<span class="srcchip" title="Filed automatically from email">mail</span>
+        {% elif n.source == 'wa' %}<span class="srcchip wa" title="Filed automatically from WhatsApp">wa</span>{% endif %}
         <form method="post" action="{{ url_for('delete_note', note_id=n.id) }}" class="ndelform"><button type="submit" class="del ndel" title="Remove response">&#x2715;</button></form>
       </li>
       {% endfor %}
