@@ -40,7 +40,7 @@
 </section>
 {% endif %}
 
-{% set kinds = [('due','Needs you today','#A33B2E'), ('meeting','Schedule','#1F3A5F'), ('email','From your inbox','#B8892E'), ('added','Added to the board','#3A6B3E'), ('note','Notes','#6B4A8A')] %}
+{% set kinds = [('due','Needs you today','#A33B2E'), ('meeting','Schedule','#1F3A5F'), ('update','Picked up on open work','#7A5C2E'), ('email','From your inbox','#B8892E'), ('added','Added to the board','#3A6B3E'), ('note','Notes','#6B4A8A')] %}
 {% for key, label, color in kinds %}
 {% set group = lines | selectattr('kind','equalto',key) | list %}
 {% if group %}
@@ -65,6 +65,11 @@
           {% if b.item_id %}
           <a class="outlookbtn done" href="{{ url_for('board', _anchor='item-' ~ b.item_id) }}">On the board &rarr;</a>
           {% else %}
+          {% if b.target_item_id and titles.get(b.target_item_id) %}
+          <form method="post" action="{{ url_for('brief_file', bid=b.id) }}" class="fileform">
+            <button type="submit" class="filebtn">&rarr; File on &ldquo;{{ titles[b.target_item_id]|truncate(34, True) }}&rdquo;</button>
+          </form>
+          {% endif %}
           <button type="button" class="pushbtn" data-push="{{ b.id }}">&rarr; Make a task</button>
           <div class="pushform" id="push-{{ b.id }}" hidden>
             <form class="edit" method="post" action="{{ url_for('brief_to_task', bid=b.id) }}">

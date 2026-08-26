@@ -451,3 +451,26 @@ li.noterow.swipeable{border-radius:6px;}
   font-size:13.5px; font-weight:700; padding:9px 18px; border-radius:999px;
   z-index:90; opacity:0; pointer-events:none; transition:opacity .16s ease, transform .16s ease;}
 .copytoast.on{opacity:.94; transform:translate(-50%, 0);}
+
+/* a response that filed itself, and the one-tap File button in the briefing */
+.srcchip{font-size:9px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--muted); border:1px solid var(--border); border-radius:999px;
+  padding:1px 6px; flex-shrink:0; align-self:center;}
+li.noterow .t{flex:1; min-width:0;}
+/* on a phone a date AND a time is too wide to share the line with the text,
+   so the stamp gets its own thin line above it */
+@media (max-width:640px){
+  ul.notes li{display:grid; grid-template-columns:auto 1fr auto; gap:1px 6px;
+    align-items:center;}
+  ul.notes li > .nd{grid-area:1/1; font-size:11px;}
+  ul.notes li > .srcchip{grid-area:1/2; justify-self:start;}
+  ul.notes li > .ndelform{grid-area:1/3; justify-self:end;}
+  ul.notes li > .t{grid-area:2/1/3/4; line-height:1.42;}
+  .ndel{opacity:.55; padding:2px 6px;}
+}
+.fileform{display:contents;}
+.filebtn{font:inherit; font-size:13px; font-weight:700; cursor:pointer;
+  color:#7A5C2E; border:1px solid #7A5C2E; border-radius:999px; padding:8px 15px;
+  background:var(--card); min-height:38px; touch-action:manipulation;
+  max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.filebtn:hover{background:#7A5C2E; color:#fff;}

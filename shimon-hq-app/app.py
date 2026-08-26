@@ -171,6 +171,16 @@ def init_db():
         con.execute("ALTER TABLE items ADD COLUMN project_id INTEGER REFERENCES projects(id)")
     if "remind_at" not in cols:
         con.execute("ALTER TABLE items ADD COLUMN remind_at TEXT")
+    if "thread_key" not in cols:
+        con.execute("ALTER TABLE items ADD COLUMN thread_key TEXT")
+    ncols = [r[1] for r in con.execute("PRAGMA table_info(item_notes)")]
+    if ncols and "source" not in ncols:
+        con.execute("ALTER TABLE item_notes ADD COLUMN source TEXT DEFAULT ''")
+    if ncols and "ext_id" not in ncols:
+        con.execute("ALTER TABLE item_notes ADD COLUMN ext_id TEXT")
+    bcols = [r[1] for r in con.execute("PRAGMA table_info(brief_items)")]
+    if bcols and "target_item_id" not in bcols:
+        con.execute("ALTER TABLE brief_items ADD COLUMN target_item_id INTEGER")
     ecols = [r[1] for r in con.execute("PRAGMA table_info(events)")]
     if ecols and "source" not in ecols:
         con.execute("ALTER TABLE events ADD COLUMN source TEXT DEFAULT 'outlook'")
@@ -629,8 +639,10 @@ def briefing_view(day=None):
     days = [r["day"] for r in con.execute(
         "SELECT DISTINCT day FROM brief_items ORDER BY day DESC LIMIT 14")]
     sections = con.execute("SELECT * FROM sections ORDER BY pos, id").fetchall()
+    titles = {r["id"]: r["title"] for r in con.execute("SELECT id, title FROM items")}
     return render_template("briefing.html", d=d, day=iso, lines=lines, days=days,
-                           sections=sections, is_today=(iso == today.isoformat()),
+                           sections=sections, titles=titles,
+                           is_today=(iso == today.isoformat()),
                            pretty=d.strftime("%A, %B %d"),
                            prev_day=(d - timedelta(days=1)).isoformat(),
                            next_day=(d + timedelta(days=1)).isoformat())
@@ -685,6 +697,31 @@ def brief_to_task(bid):
     con.execute("UPDATE brief_items SET item_id=?, is_read=1 WHERE id=?", (iid, bid))
     con.commit()
     return redirect(url_for("briefing_view", day=row["day"]))
+
+
+@app.route("/brief/<int:bid>/file", methods=["POST"])
+@login_required
+def brief_file(bid):
+    """Accept a suggested update: it becomes a response on the task it points at."""
+    con = db()
+    b = con.execute("SELECT * FROM brief_items WHERE id=?", (bid,)).fetchone()
+    if not b:
+        abort(404)
+    target = b["target_item_id"]
+    if not target or not con.execute("SELECT 1 FROM items WHERE id=?", (target,)).fetchone():
+        abort(400)
+    body = b["text"]
+    if b["detail"]:
+        body += "  " + b["detail"]
+    now = _now_local().isoformat(timespec="seconds")
+    con.execute("INSERT INTO item_notes(item_id, body, source, created_at)"
+                " VALUES(?,?,?,?)", (target, body, "email", now))
+    con.execute("UPDATE items SET updated_at=? WHERE id=?", (now, target))
+    con.execute("UPDATE brief_items SET item_id=?, is_read=1 WHERE id=?", (target, bid))
+    con.commit()
+    if request.headers.get("X-Requested-With") == "fetch":
+        return jsonify(ok=True, item_id=target)
+    return redirect(url_for("board", _anchor="item-%d" % target))
 
 
 @app.route("/brief/<int:bid>/dismiss", methods=["POST"])
@@ -1132,17 +1169,25 @@ def api_brief():
         return "ERROR: text required", 400, {"Content-Type": "text/plain; charset=utf-8"}
     day = (request.args.get("day") or _now_local().strftime("%Y-%m-%d")).strip()
     kind = (request.args.get("kind") or "note").strip().lower()
-    if kind not in ("meeting", "email", "due", "added", "note"):
+    if kind not in ("meeting", "email", "due", "added", "note", "update"):
         kind = "note"
     con = db()
+    target = None
+    tgt = (request.args.get("target") or "").strip()
+    if tgt:
+        row = _find_item(con, tgt)
+        if not row:
+            return "ERROR: no task matches " + tgt, 404, \
+                {"Content-Type": "text/plain; charset=utf-8"}
+        target = row["id"]
     dup = con.execute("SELECT 1 FROM brief_items WHERE day=? AND lower(text)=lower(?)",
                       (day, text)).fetchone()
     if dup:
         return "SKIPPED (duplicate): " + text, 200, {"Content-Type": "text/plain; charset=utf-8"}
-    con.execute("INSERT INTO brief_items(day, kind, text, detail, link, created_at)"
-                " VALUES(?,?,?,?,?,?)",
+    con.execute("INSERT INTO brief_items(day, kind, text, detail, link, target_item_id,"
+                " created_at) VALUES(?,?,?,?,?,?,?)",
                 (day, kind, text, (request.args.get("detail") or "").strip(),
-                 (request.args.get("link") or "").strip(),
+                 (request.args.get("link") or "").strip(), target,
                  datetime.now().isoformat(timespec="seconds")))
     con.commit()
     return "BRIEFED: " + text, 200, {"Content-Type": "text/plain; charset=utf-8"}
@@ -1225,8 +1270,115 @@ def api_quickadd():
         (sid, pid, title, request.args.get("note", ""), request.args.get("waiting_on", ""),
          "open", pos, request.args.get("due") or None,
          datetime.now().isoformat(timespec="seconds")))
+    key = thread_key(request.args.get("subject"))
+    if key:
+        con.execute("UPDATE items SET thread_key=? WHERE id=(SELECT MAX(id) FROM items)", (key,))
     con.commit()
     return "ADDED: " + title + (" [%s]" % proj if proj else ""), 200, \
+        {"Content-Type": "text/plain; charset=utf-8"}
+
+
+# ---------- filing email traffic onto the task it belongs to ----------
+
+_RE_PREFIX = re.compile(r"^\s*(?:re|fw|fwd|aw|antw|tr|rv|sv|vs)\s*(?:\[\d+\])?\s*:\s*", re.I)
+# subjects too generic to identify anything
+_WEAK_SUBJECTS = {"", "re", "fw", "fwd", "hi", "hello", "question", "update", "balance",
+                  "invoice", "check", "checks", "payment", "thanks", "thank you", "info",
+                  "follow up", "quick question", "documents", "docs", "please review"}
+
+
+def thread_key(subject):
+    """A stable id for an email conversation: the subject with every Re:/Fw: peeled off.
+
+    Returns '' when the subject is too generic to identify anything - better to file
+    nothing than to file it on the wrong task."""
+    t = (subject or "").strip()
+    for _ in range(8):
+        t2 = _RE_PREFIX.sub("", t)
+        if t2 == t:
+            break
+        t = t2
+    t = re.sub(r"\s+", " ", t).strip().lower()
+    if len(t) < 8 or t in _WEAK_SUBJECTS:
+        return ""
+    return t[:200]
+
+
+def _find_item(con, needle):
+    """Resolve a task by id, exact title, or a distinctive substring."""
+    n = (needle or "").strip()
+    if not n:
+        return None
+    if n.isdigit():
+        return con.execute("SELECT * FROM items WHERE id=?", (int(n),)).fetchone()
+    row = con.execute("SELECT * FROM items WHERE lower(title)=lower(?)", (n,)).fetchone()
+    if row:
+        return row
+    hits = con.execute("SELECT * FROM items WHERE lower(title) LIKE lower(?)"
+                       " ORDER BY status='done', id", ("%" + n + "%",)).fetchall()
+    return hits[0] if len(hits) == 1 else (hits[0] if hits else None)
+
+
+@app.route("/api/threads")
+def api_threads():
+    """Every task that is anchored to an email conversation, for the sweep to match against."""
+    if not _api_auth():
+        abort(401)
+    rows = db().execute(
+        "SELECT items.id, items.thread_key, items.status, items.title FROM items"
+        " WHERE thread_key IS NOT NULL AND thread_key != '' AND status != 'done'"
+        " ORDER BY items.id").fetchall()
+    out = ["%d\t%s\t%s" % (r["id"], r["thread_key"], r["title"]) for r in rows]
+    return ("\n".join(out) or "NONE"), 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+
+@app.route("/api/link")
+def api_link():
+    """Tie a task to an email conversation. Every later reply on it files itself."""
+    if not _api_auth():
+        abort(401)
+    con = db()
+    it = _find_item(con, request.args.get("find") or request.args.get("id"))
+    if not it:
+        return "ERROR: no such task", 404, {"Content-Type": "text/plain; charset=utf-8"}
+    key = thread_key(request.args.get("subject"))
+    if not key:
+        return "SKIPPED (subject too generic): " + it["title"], 200, \
+            {"Content-Type": "text/plain; charset=utf-8"}
+    con.execute("UPDATE items SET thread_key=? WHERE id=?", (key, it["id"]))
+    con.commit()
+    return "LINKED: %s <- %s" % (it["title"], key), 200, \
+        {"Content-Type": "text/plain; charset=utf-8"}
+
+
+@app.route("/api/note")
+def api_note():
+    """File one line of email traffic onto a task as a response."""
+    if not _api_auth():
+        abort(401)
+    text = (request.args.get("text") or "").strip()
+    if not text:
+        return "ERROR: text required", 400, {"Content-Type": "text/plain; charset=utf-8"}
+    con = db()
+    it = _find_item(con, request.args.get("find") or request.args.get("id"))
+    if not it:
+        return "ERROR: no such task", 404, {"Content-Type": "text/plain; charset=utf-8"}
+    msg = (request.args.get("msg") or "").strip()
+    if msg and con.execute("SELECT 1 FROM item_notes WHERE item_id=? AND ext_id=?",
+                           (it["id"], msg)).fetchone():
+        return "SKIPPED (already filed): " + it["title"], 200, \
+            {"Content-Type": "text/plain; charset=utf-8"}
+    who = (request.args.get("who") or "").strip()
+    body = ("%s: %s" % (who, text)) if who else text
+    now = _now_local().isoformat(timespec="seconds")
+    con.execute("INSERT INTO item_notes(item_id, body, source, ext_id, created_at)"
+                " VALUES(?,?,?,?,?)", (it["id"], body, "email", msg or None, now))
+    con.execute("UPDATE items SET updated_at=? WHERE id=?", (now, it["id"]))
+    key = thread_key(request.args.get("subject"))
+    if key and not it["thread_key"]:
+        con.execute("UPDATE items SET thread_key=? WHERE id=?", (key, it["id"]))
+    con.commit()
+    return "FILED on %s: %s" % (it["title"], body[:60]), 200, \
         {"Content-Type": "text/plain; charset=utf-8"}
 
 

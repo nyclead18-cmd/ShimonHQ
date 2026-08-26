@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS items (
   status TEXT NOT NULL DEFAULT 'open',  -- open | waiting | done
   pos INTEGER NOT NULL DEFAULT 0,
   due_date TEXT,
+  thread_key TEXT,          -- the email conversation this task belongs to
   updated_at TEXT
 );
 
@@ -28,6 +29,8 @@ CREATE TABLE IF NOT EXISTS item_notes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
   body TEXT NOT NULL,
+  source TEXT DEFAULT '',   -- '' = you typed it | 'email' = filed automatically
+  ext_id TEXT,              -- the message it came from, so a re-run never doubles it
   created_at TEXT
 );
 
@@ -83,5 +86,6 @@ CREATE TABLE IF NOT EXISTS brief_items (
   link TEXT DEFAULT '',
   is_read INTEGER NOT NULL DEFAULT 0,
   item_id INTEGER,                -- set once pushed to a task
+  target_item_id INTEGER,         -- the task this update is offering to file onto
   created_at TEXT
 );
