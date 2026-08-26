@@ -450,7 +450,71 @@ def calendar_view():
 
 def _api_auth():
     tok = os.environ.get("API_TOKEN")
-    return tok and request.headers.get("Authorization") == "Bearer " + tok
+    if not tok:
+        return False
+    auth = request.headers.get("Authorization", "")
+    supplied = auth[7:] if auth.startswith("Bearer ") else request.args.get("token", "")
+    return supplied == tok
+
+
+@app.route("/api/titles")
+def api_titles():
+    """Plain-text task list for the morning sweep: STATUS <tab> TITLE per line."""
+    if not _api_auth():
+        abort(401)
+    rows = db().execute("SELECT status, title FROM items ORDER BY id").fetchall()
+    body = "\n".join("%s\t%s" % (r["status"], r["title"]) for r in rows)
+    return body, 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+
+@app.route("/api/digest")
+def api_digest():
+    """Plain-text overdue / due-today digest for the morning sweep."""
+    if not _api_auth():
+        abort(401)
+    today = datetime.now().date().isoformat()
+    rows = db().execute(
+        "SELECT items.*, sections.title AS sec FROM items"
+        " JOIN sections ON items.section_id = sections.id"
+        " WHERE items.status != 'done' AND COALESCE(items.due_date,'') != ''"
+        " ORDER BY items.due_date").fetchall()
+    over = ["%s | %s%s" % (r["due_date"], r["title"],
+                           (" (waiting on %s)" % r["waiting_on"]) if r["waiting_on"] else "")
+            for r in rows if r["due_date"] < today]
+    due = ["%s%s" % (r["title"],
+                     (" (waiting on %s)" % r["waiting_on"]) if r["waiting_on"] else "")
+           for r in rows if r["due_date"] == today]
+    body = "OVERDUE (%d):\n%s\n\nDUE TODAY (%d):\n%s" % (
+        len(over), "\n".join(over) or "-", len(due), "\n".join(due) or "-")
+    return body, 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+
+@app.route("/api/quickadd")
+def api_quickadd():
+    """GET-based add for the morning sweep (params: token, title, note, waiting_on, section, due)."""
+    if not _api_auth():
+        abort(401)
+    title = (request.args.get("title") or "").strip()
+    if not title:
+        return "ERROR: title required", 400, {"Content-Type": "text/plain; charset=utf-8"}
+    con = db()
+    sec_title = request.args.get("section", "Inbox")
+    sec = con.execute("SELECT id FROM sections WHERE title=?", (sec_title,)).fetchone()
+    sid = sec["id"] if sec else con.execute(
+        "INSERT INTO sections(title, pos) VALUES(?, 99)", (sec_title,)).lastrowid
+    dup = con.execute("SELECT 1 FROM items WHERE lower(title)=lower(?)", (title,)).fetchone()
+    if dup:
+        return "SKIPPED (duplicate): " + title, 200, {"Content-Type": "text/plain; charset=utf-8"}
+    pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM items WHERE section_id=?",
+                      (sid,)).fetchone()[0]
+    con.execute(
+        "INSERT INTO items(section_id, title, note, waiting_on, status, pos, due_date, updated_at)"
+        " VALUES(?,?,?,?,?,?,?,?)",
+        (sid, title, request.args.get("note", ""), request.args.get("waiting_on", ""),
+         "open", pos, request.args.get("due") or None,
+         datetime.now().isoformat(timespec="seconds")))
+    con.commit()
+    return "ADDED: " + title, 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
 @app.route("/api/board")
