@@ -112,14 +112,17 @@ STATUSES = ("open", "waiting", "done")
 
 # ---------- db ----------
 
-def _tune(con):
-    """WAL lets the reminder thread and the web workers share the file without
-    tripping over each other; busy_timeout waits for a lock instead of failing."""
+def _tune(con, set_wal=False):
+    """busy_timeout waits for a lock instead of failing outright.
+
+    WAL is a property of the database file, not the connection - setting it takes a
+    brief exclusive lock, so it is done once at startup and never per request."""
     con.execute("PRAGMA busy_timeout = 8000")
-    try:
-        con.execute("PRAGMA journal_mode = WAL")
-    except sqlite3.Error:
-        pass
+    if set_wal:
+        try:
+            con.execute("PRAGMA journal_mode = WAL")
+        except sqlite3.Error:
+            pass
     con.execute("PRAGMA foreign_keys = ON")
     return con
 
@@ -171,7 +174,7 @@ def _stamp_responses_in_new_york(con):
 def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True) if os.path.dirname(DB_PATH) else None
     con = sqlite3.connect(DB_PATH, timeout=15)
-    _tune(con)
+    _tune(con, set_wal=True)
     with open(os.path.join(BASE, "schema.sql"), encoding="utf-8") as f:
         con.executescript(f.read())
     cols = [r[1] for r in con.execute("PRAGMA table_info(items)")]
