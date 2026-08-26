@@ -11,6 +11,7 @@ import re
 import threading
 import time
 import urllib.parse
+import urllib.error
 import urllib.request
 
 KEY = (os.environ.get("GOOGLE_MAPS_KEY") or "").strip()
@@ -140,15 +141,44 @@ def pretty_minutes(secs):
     return "%dh %02dm" % (h, m) if m else "%dh" % h
 
 
-def status():
-    """For the setup screen: is the key in place and does it actually work?"""
+def embed_check(timeout=8):
+    """Ask Google directly whether the Embed API will serve this key.
+
+    A key restricted by HTTP referrer would refuse a server-side probe even though
+    it works in a browser - so the message is reported, never guessed at."""
     if not KEY:
-        return {"key": False, "works": False,
+        return {"ok": False, "detail": "no key"}
+    url = embed("885 3rd Ave, New York, NY")
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "ShimonHQ/1.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            body = r.read(4000).decode("utf-8", "replace")
+        low = body.lower()
+        if "not authorized" in low or "api key" in low and "error" in low:
+            return {"ok": False, "detail": body.strip()[:200]}
+        return {"ok": True, "detail": "Embed API answered %s." % r.status}
+    except urllib.error.HTTPError as e:
+        try:
+            msg = e.read(1000).decode("utf-8", "replace").strip()
+        except Exception:
+            msg = ""
+        return {"ok": False, "detail": "HTTP %s %s" % (e.code, msg[:200])}
+    except Exception as e:
+        return {"ok": False, "detail": "could not reach Google: %s" % e}
+
+
+def status():
+    """For the setup screen: is the key in place, and does each API actually answer?"""
+    if not KEY:
+        return {"key": False, "routes": False, "embed": False,
                 "detail": "No GOOGLE_MAPS_KEY set - tap-to-open links only."}
     secs = drive_seconds("Brooklyn, NY", "885 3rd Ave, New York, NY")
+    emb = embed_check()
+    bits = []
     if secs:
-        return {"key": True, "works": True,
-                "detail": "Key is live (test route: %s)." % pretty_minutes(secs)}
-    return {"key": True, "works": False,
-            "detail": "Key is set but the Routes API refused it - check that "
-                      "Routes API is enabled and billing is on."}
+        bits.append("Routes API live (test route %s)." % pretty_minutes(secs))
+    else:
+        bits.append("Routes API refused the key - enable Routes API and check billing.")
+    bits.append("Embed API: " + ("live." if emb["ok"] else emb["detail"]))
+    return {"key": True, "routes": bool(secs), "embed": emb["ok"],
+            "works": bool(secs), "detail": "  ".join(bits)}
