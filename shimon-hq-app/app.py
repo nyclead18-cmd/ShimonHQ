@@ -1754,10 +1754,12 @@ def _api_auth():
         return True
 
     # The board-wide token is the admin's. Only it may act as somebody else, which
-    # is how one task can serve several people.
+    # is how one task can serve several people. The parameter is "acting", NOT "who" -
+    # "who" already means "who said this" on /api/note, and reusing it would turn
+    # every note the sweep files into a 401.
     if not (tok and hmac.compare_digest(supplied, tok)):
         return False
-    who = (request.args.get("who") or "").strip().lower()
+    who = (request.args.get("acting") or "").strip().lower()
     if who:
         row = con.execute("SELECT id FROM users WHERE lower(username)=?", (who,)).fetchone()
         if not row:
