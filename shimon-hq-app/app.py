@@ -3216,6 +3216,47 @@ def bump_to_top(item_id):
     return jsonify(ok=True)
 
 
+@app.route("/items/<int:item_id>/move", methods=["POST"])
+@login_required
+def move_item(item_id):
+    """Drag a task into another box - or another project - and it lives there now.
+
+    Both ends are checked: the task must be one you may touch, the destination
+    a section you can see. before_id says which task it should sit above;
+    the whole destination list is renumbered so positions stay honest.
+    """
+    con = db()
+    require_item(con, item_id)
+    try:
+        sec_id = int(request.form.get("section_id") or 0)
+    except ValueError:
+        abort(400)
+    require_section(con, sec_id)
+    proj_raw = (request.form.get("project_id") or "").strip()
+    proj_id = None
+    if proj_raw.isdigit():
+        p = con.execute("SELECT id FROM projects WHERE id=? AND section_id=?",
+                        (int(proj_raw), sec_id)).fetchone()
+        if not p:
+            abort(400)
+        proj_id = p["id"]
+    before_raw = (request.form.get("before_id") or "").strip()
+    rows = [r["id"] for r in con.execute(
+        "SELECT id FROM items WHERE section_id=? AND id!=? ORDER BY pos, id",
+        (sec_id, item_id))]
+    if before_raw.isdigit() and int(before_raw) in rows:
+        rows.insert(rows.index(int(before_raw)), item_id)
+    else:
+        rows.append(item_id)
+    con.execute("UPDATE items SET section_id=?, project_id=?, updated_at=? WHERE id=?",
+                (sec_id, proj_id,
+                 datetime.now().isoformat(timespec="seconds"), item_id))
+    for pos, iid in enumerate(rows):
+        con.execute("UPDATE items SET pos=? WHERE id=?", (pos, iid))
+    commit_retry(con)
+    return jsonify(ok=True)
+
+
 @app.route("/sections/order", methods=["POST"])
 @login_required
 def order_sections():

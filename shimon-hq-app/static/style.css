@@ -853,3 +853,43 @@ section.card.dropwait{outline:2px solid var(--accent);}
 .ownchip{max-width:9em; overflow:hidden; text-overflow:ellipsis; vertical-align:middle;
   white-space:nowrap; display:inline-block;}
 section.card.folded .sec-head{border-bottom:none; padding-bottom:9px;}
+
+/* ---------- every row is one line until you tap it ----------
+   'Still too big' - because full mode kept the respond box and file button
+   open on every task. Now the board folds rows for everyone, like Keep:
+   the title, the essentials, and a tap for the rest. */
+.grid.board li.item{padding-top:6px; padding-bottom:6px;}
+.grid.board li.item .respondrow,
+.grid.board li.item .editbox,
+.grid.board li.item ul.notes,
+.grid.board li.item .files{display:none;}
+.grid.board li.item .ncount{display:inline-block; font:inherit; font-size:10.5px;
+  font-weight:700; color:var(--muted); background:var(--row); border:1px solid var(--border);
+  border-radius:999px; padding:0 8px; cursor:pointer; margin-top:3px;}
+.grid.board li.item .body{cursor:pointer;}
+.grid.board li.item.expanded .body{cursor:default;}
+.grid.board li.item.expanded .respondrow{display:flex;}
+.grid.board li.item.expanded .editbox{display:block;}
+.grid.board li.item.expanded ul.notes{display:block;}
+.grid.board li.item.expanded .files{display:flex;}
+.grid.board li.item.expanded .files[hidden]{display:none;}
+.grid.board li.item.expanded .ncount{display:none;}
+.grid.board li.item.expanded{background:var(--row);}
+
+/* tighter still */
+.grid{columns:17rem; column-gap:12px;}
+.grid section.card{margin-bottom:12px;}
+.grid.board li.item{grid-template-columns:64px minmax(0,1fr); gap:8px; padding-left:24px; padding-right:10px;}
+.grid.board li.item .t{font-size:13.5px; line-height:1.35;}
+.grid.board .metaline{font-size:11px; margin-top:1px;}
+.grid.board li.noterow{font-size:12px;}
+.grid.board .pill{padding:2px 6px; font-size:9px;}
+.grid.board .addrow{padding-top:4px; padding-bottom:6px;}
+
+/* the task's own little handle */
+.grid.board li.item{position:relative;}
+.idrag{position:absolute; right:2px; top:4px; border:0; background:none;
+  color:var(--border); font-size:13px; cursor:grab; padding:2px 5px; touch-action:none;}
+.idrag:hover{color:var(--muted);}
+li.item.dragging{opacity:.5; outline:2px dashed var(--accent); background:var(--row);}
+ul.items:empty{min-height:8px;}

@@ -54,7 +54,7 @@
   </div>
 </div>
 
-<div class="grid">
+<div class="grid board">
 {% for sec in sections %}
 {% set items = by_sec.get(sec.id, []) %}
 {% set sec_projects = projects_by_sec.get(sec.id, []) %}
@@ -118,7 +118,7 @@
         <button type="submit" class="del" title="Remove project (tasks stay)">&#x2715;</button>
       </form>
     </div>
-    <ul class="items">
+    <ul class="items" data-proj="{{ p.id }}">
       {% for it in pactive %}{% include "_item.html" %}{% endfor %}
       {% for it in pdone %}{% set hidden = true %}{% include "_item.html" %}{% endfor %}
     </ul>
@@ -141,13 +141,11 @@
 
   {% set loose_active = active | selectattr('project_id', 'none') | list %}
   {% set loose_done = done | selectattr('project_id', 'none') | list %}
-  {% if loose_active or loose_done %}
-  {% if sec_projects %}<div class="proj-head loose"><h3>Single tasks</h3></div>{% endif %}
-  <ul class="items">
+  {% if sec_projects and (loose_active or loose_done) %}<div class="proj-head loose"><h3>Single tasks</h3></div>{% endif %}
+  <ul class="items loose" data-proj="">
     {% for it in loose_active %}{% include "_item.html" %}{% endfor %}
     {% for it in loose_done %}{% set hidden = true %}{% include "_item.html" %}{% endfor %}
   </ul>
-  {% endif %}
 
   <div class="addrow">
     <details>

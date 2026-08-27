@@ -467,9 +467,8 @@ document.addEventListener('click', function (ev) {
   });
 })();
 
-/* ---------- simple mode: tap a row to open it ---------- */
+/* ---------- tap a row to open it (every mode, now that rows fold) ---------- */
 (function () {
-  if (!document.body.classList.contains('simple')) { return; }
   document.addEventListener('click', function (ev) {
     // a tap on a real control is that control's business
     if (ev.target.closest('button, a, input, select, textarea, label, summary, form')) {
@@ -580,3 +579,70 @@ document.addEventListener('click', function (ev) {
     if (!d.contains(ev.target)) { d.removeAttribute('open'); }
   });
 });
+
+/* ---------- drag a task to another box, or another project ----------
+   Same pointer-event pattern as box dragging: the little handle is the only
+   place a drag can start, so swipes and holds on the row keep working.
+   Dropping tells the server which section, which project, and which task it
+   now sits above - the server renumbers and both ends are permission-checked. */
+(function () {
+  var li = null;
+  function clear() {
+    document.querySelectorAll('.dropline').forEach(function (x) { x.classList.remove('dropline'); });
+    document.querySelectorAll('section.card.dropwait').forEach(function (x) { x.classList.remove('dropwait'); });
+  }
+  document.addEventListener('pointerdown', function (ev) {
+    var h = ev.target.closest && ev.target.closest('.idrag');
+    if (!h) { return; }
+    ev.preventDefault();
+    li = h.closest('li.item');
+    li.classList.add('dragging');
+    try { h.setPointerCapture(ev.pointerId); } catch (e) {}
+  });
+  document.addEventListener('pointermove', function (ev) {
+    if (!li) { return; }
+    ev.preventDefault();
+    clear();
+    // near an edge, the page walks along so far-away boxes can be reached
+    if (ev.clientY < 90) { window.scrollBy(0, -14); }
+    else if (ev.clientY > window.innerHeight - 90) { window.scrollBy(0, 14); }
+    var els = document.elementsFromPoint(ev.clientX, ev.clientY);
+    var row = els.map(function (el) { return el.closest && el.closest('.grid.board li.item'); })
+      .filter(function (x) { return x && x !== li; })[0];
+    if (row) {
+      var r = row.getBoundingClientRect();
+      row.parentNode.insertBefore(li, ev.clientY < r.top + r.height / 2 ? row : row.nextSibling);
+      return;
+    }
+    var card = els.map(function (el) { return el.closest && el.closest('.grid.board section.card'); })
+      .filter(Boolean)[0];
+    if (card && !card.contains(li)) {
+      // an empty stretch of another box - land at the end of its loose list
+      var ul = card.querySelector('ul.items.loose') || card.querySelector('ul.items');
+      if (ul) { ul.appendChild(li); card.classList.add('dropwait'); }
+    }
+  }, {passive: false});
+  document.addEventListener('pointerup', function () {
+    if (!li) { return; }
+    var moved = li;
+    li.classList.remove('dragging');
+    li = null;
+    clear();
+    var ul = moved.closest('ul.items');
+    var card = moved.closest('section.card');
+    if (!ul || !card) { return; }
+    var next = moved.nextElementSibling;
+    while (next && !next.classList.contains('item')) { next = next.nextElementSibling; }
+    var fd = new FormData();
+    fd.append('section_id', card.getAttribute('data-sec'));
+    fd.append('project_id', ul.getAttribute('data-proj') || '');
+    fd.append('before_id', next ? next.id.replace('item-', '') : '');
+    fetch('/items/' + moved.querySelector('.idrag').getAttribute('data-idrag') + '/move',
+      {method: 'POST', body: fd}).then(function (r) {
+        if (!r.ok) { alert('That move did not save - it is back where it was on reload.'); return; }
+        moved.setAttribute('data-sec', card.getAttribute('data-sec'));
+        var sa = card.style.getPropertyValue('--sa');
+        if (sa && moved.style.getPropertyValue('--sa')) { moved.style.setProperty('--sa', sa); }
+      });
+  });
+})();
