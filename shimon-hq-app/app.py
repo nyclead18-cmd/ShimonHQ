@@ -1531,40 +1531,37 @@ def people_view():
 @app.route("/joel")
 @login_required
 def joel_view():
-    """The Joel section as a live board (same controls as everywhere) + a print sheet."""
-    from datetime import timedelta
+    """One printable page of everything open on YOUR board, bucket by bucket,
+    project by project, with the latest word on each. What used to be the
+    Joel/Shimon review page grew up: whoever is signed in gets their own."""
     con = db()
-    where, args = sec_clause(con, "id", first=True)
-    sections = con.execute("SELECT * FROM sections" + where + " ORDER BY pos, id",
-                           args).fetchall()
-    where, args = sec_clause(con, "id")
-    sec = con.execute("SELECT * FROM sections WHERE title LIKE '%Joel%'" + where
-                      + " ORDER BY id LIMIT 1", args).fetchone()
-    where, args = sec_clause(con, "section_id", first=True)
-    projects = con.execute("SELECT * FROM projects" + where + " ORDER BY pos, id",
-                           args).fetchall()
+    uid = me()
+    sections = con.execute(
+        "SELECT * FROM sections WHERE owner_id=? ORDER BY pos, id", (uid,)).fetchall()
+    sec_ids = [s["id"] for s in sections]
+    q = ",".join("?" * len(sec_ids)) if sec_ids else "NULL"
+    projects = con.execute(
+        "SELECT * FROM projects WHERE section_id IN (%s) ORDER BY pos, id" % q,
+        sec_ids).fetchall() if sec_ids else []
     projects_by_sec = {}
     for p in projects:
         projects_by_sec.setdefault(p["section_id"], []).append(p)
-    items, notes_by_item, files_by_item = [], {}, {}
-    if sec:
-        items = con.execute(
-            "SELECT * FROM items WHERE section_id=? ORDER BY pos, id", (sec["id"],)).fetchall()
-        ids = [str(it["id"]) for it in items]
-        if ids:
-            joined = ",".join(ids)
-            for n in con.execute("SELECT * FROM item_notes WHERE item_id IN (%s) ORDER BY id" % joined):
-                notes_by_item.setdefault(n["item_id"], []).append(n)
-            for f in con.execute("SELECT * FROM item_files WHERE item_id IN (%s) ORDER BY id" % joined):
-                files_by_item.setdefault(f["item_id"], []).append(f)
-    return render_template("joel.html", sec=sec, items=items, sections=sections,
-                           projects_by_sec=projects_by_sec, names=known_names(con),
-                           sec_kind={r["id"]: r["kind"] for r in sections},
-                           tenures=TENURES, stages=STAGES,
-                           notes_by_item=notes_by_item, files_by_item=files_by_item,
-                           today_iso=datetime.now().date().isoformat(),
-                           soon_iso=(datetime.now().date() + timedelta(days=3)).isoformat(),
-                           today=datetime.now().strftime("%B %d, %Y"))
+    items = con.execute(
+        "SELECT * FROM items WHERE section_id IN (%s)"
+        " ORDER BY status='done', pos, id" % q, sec_ids).fetchall() if sec_ids else []
+    keep = {it["id"] for it in items}
+    latest, done_count = {}, sum(1 for it in items if it["status"] == "done")
+    for n in con.execute("SELECT item_id, body, created_at FROM item_notes ORDER BY id"):
+        if n["item_id"] in keep:
+            latest[n["item_id"]] = n
+    by_sec = {}
+    for it in items:
+        by_sec.setdefault(it["section_id"], []).append(it)
+    return render_template("joel.html", sections=sections, by_sec=by_sec,
+                           projects_by_sec=projects_by_sec, latest=latest,
+                           done_count=done_count,
+                           today=_now_local().strftime("%B %-d, %Y")
+                           if os.name != "nt" else _now_local().strftime("%B %d, %Y"))
 
 
 # ---------- an agenda for sitting down with anyone ----------

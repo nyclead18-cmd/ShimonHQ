@@ -959,3 +959,6 @@ form.listrespond button{font:inherit; font-size:13px; border:1px solid var(--bor
 .pfoldbtn{order:0; margin-left:0; padding:2px 4px; font-size:12px;}
 .project.pfolded ul.items, .project.pfolded .addrow{display:none;}
 .project.pfolded .proj-head{border-bottom:none;}
+
+/* the review sheet's project lines */
+.rev-proj{font-weight:700; font-size:14px; margin:12px 0 2px; color:var(--ink);}
