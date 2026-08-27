@@ -1925,7 +1925,9 @@ def _actor_name(con, uid=None):
 def account_view():
     con = db()
     folk = people_list(con)
+    home, work = _origins(con)
     return render_template("account.html",
+                           home=home, work=work, maps_key=bool(maps.KEY),
                            who=user_row(con), folk=folk,
                            titles={r["id"]: board_title(con, r["id"]) for r in folk},
                            taglines={r["id"]: uset(con, "tagline", r["id"]) for r in folk},

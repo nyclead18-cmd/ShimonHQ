@@ -40,6 +40,21 @@
   </form>
 </section>
 
+{% if maps_key %}
+<section class="card acct">
+  <div class="sec-head"><h2>Your addresses</h2></div>
+  <form method="post" action="{{ url_for('set_origin') }}" class="stack">
+    <input type="hidden" name="back" value="{{ url_for('account_view') }}">
+    <label>Home<input name="origin_home" value="{{ home }}" placeholder="Street, town" dir="auto"></label>
+    <label>Office<input name="origin_work" value="{{ work }}" placeholder="Street, town" dir="auto"></label>
+    <button type="submit">Save</button>
+  </form>
+  <p class="caveat">Only for drive times on the Calendar &mdash; leave now, traffic, when to set
+  out. Yours alone: nobody else on the board can see them. Leave both empty and travel times
+  simply stay off.</p>
+</section>
+{% endif %}
+
 {% if notify_kinds %}
 <section class="card acct">
   <div class="sec-head"><h2>What buzzes your phone</h2></div>
