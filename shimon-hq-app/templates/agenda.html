@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Agenda · {{ who }} · Pinta HQ{% endblock %}
+{% block body %}
+<div class="wrap">
+<header class="top noprint">
+  <div>
+    <div class="eyebrow">Sitting down with</div>
+    <h1>{{ who }}</h1>
+  </div>
+  <div class="right">
+    <nav class="tabs">
+      <a class="tab" href="{{ url_for('today_view') }}">Today</a>
+      <a class="tab" href="{{ url_for('board') }}">Board</a>
+      <a class="tab on" href="{{ url_for('people_view') }}">People</a>
+    </nav>
+    <button type="button" class="printbtn" onclick="window.print()">&#128424; Print</button>
+    <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
+  </div>
+</header>
+
+<div class="agsheet">
+  <div class="sheet-top">
+    <div>
+      <div class="sheet-kicker">Pinta HQ &middot; agenda</div>
+      <h2 class="sheet-name">{{ who }}</h2>
+    </div>
+    <div class="sheet-date">{{ today }}</div>
+  </div>
+  {% if rows %}
+  <ol class="sheet-items">
+    {% for it in rows %}
+    <li>
+      <div class="si-head">
+        <span class="si-title" dir="auto">{{ it.title }}</span>
+        {% if it.due_date %}<span class="si-due">due {{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}</span>{% endif %}
+        <span class="si-sec">{{ it.sec_title }}</span>
+      </div>
+      {% if it.note %}<div class="si-note" dir="auto">{{ it.note }}</div>{% endif %}
+      {% set n = latest.get(it.id) %}
+      {% if n %}<div class="si-last" dir="auto">Last: {{ n.body }} <span class="si-when">({{ n.created_at|stamp }})</span></div>{% endif %}
+      <div class="si-outcome">Outcome:</div>
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p class="empty">Nothing is waiting on {{ who }} right now.</p>
+  {% endif %}
+  <div class="sheet-foot">{{ rows|length }} open item{{ '' if rows|length == 1 else 's' }} &middot; printed from Pinta HQ</div>
+</div>
+</div>
+{% endblock %}

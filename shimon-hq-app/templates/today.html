@@ -42,6 +42,29 @@ lands here &mdash; it stays where it lives, so there is only ever one copy of it
 {% endif %}
 {% endmacro %}
 
+{% if evs or timed %}
+<section class="card" style="--sa:#1F3A5F">
+  <div class="sec-head"><h2><span class="dot"></span>Today&rsquo;s schedule</h2>
+    <span class="counts">{{ evs|length + timed|length }}</span></div>
+  <ul class="prows">
+    {% for e in evs %}
+    <li class="prow rhythm">
+      <span class="pwho">{{ e.start_time|fmt12 if e.start_time else 'all day' }}</span>
+      <span class="ptitle">{{ e.subject }}</span>
+      <span class="psec">{{ e.location or '' }}</span>
+    </li>
+    {% endfor %}
+    {% for it in timed %}
+    <li class="prow rhythm">
+      <span class="pwho">&#9200; {{ it.remind_at[11:16]|fmt12 }}</span>
+      <span class="ptitle"><a class="plain" href="{{ url_for('board', _anchor='item-%d' % it.id) }}">{{ it.title }}</a></span>
+      <span class="psec">reminder</span>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
 {{ lane('On you', on_me, '') }}
 {{ lane('Waiting on someone', waiting, 'Starred, but the next move is not yours. Open People to see everything that person owes you before you call them.') }}
 

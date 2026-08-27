@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Briefing · Shimon HQ{% endblock %}
+{% block title %}Briefing · Pinta HQ{% endblock %}
 {% block body %}
 <div class="wrap">
 <header class="top">
@@ -65,7 +65,7 @@
         <a class="dirlink" data-sheet="Directions" href="{{ b.detail|mapdir }}" target="_blank" rel="noopener">Directions</a>
         {% endif %}
         <div class="briefacts">
-          {% if b.link %}<a class="outlookbtn" href="{{ b.link }}" target="_blank" rel="noopener">Open</a>{% endif %}
+          {% if b.link %}<a class="outlookbtn mailopen" href="{{ b.link }}" target="_blank" rel="noopener">Open email &#8599;</a>{% endif %}
           {% if b.item_id %}
           <a class="outlookbtn done" href="{{ url_for('board', _anchor='item-' ~ b.item_id) }}">On the board &rarr;</a>
           {% else %}

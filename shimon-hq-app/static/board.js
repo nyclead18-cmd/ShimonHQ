@@ -503,3 +503,16 @@ document.addEventListener('click', function (ev) {
     }
   });
 }, false);
+
+
+/* ---------- team chips: one tap names who you are waiting on ---------- */
+document.addEventListener('click', function (ev) {
+  var chip = ev.target.closest && ev.target.closest('.tchip');
+  if (!chip) { return; }
+  ev.preventDefault();
+  var form = chip.closest('form');
+  var field = form && form.querySelector('[name=waiting_on]');
+  if (field) {
+    field.value = field.value === chip.getAttribute('data-team') ? '' : chip.getAttribute('data-team');
+  }
+}, false);

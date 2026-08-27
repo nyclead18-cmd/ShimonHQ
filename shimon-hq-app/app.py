@@ -440,6 +440,8 @@ def init_db():
         con.execute("ALTER TABLE sections ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'")
     if "kind" not in scols:
         con.execute("ALTER TABLE sections ADD COLUMN kind TEXT NOT NULL DEFAULT 'tasks'")
+    if "board" not in scols:
+        con.execute("ALTER TABLE sections ADD COLUMN board TEXT NOT NULL DEFAULT ''")
     if "color" not in scols:
         con.execute("ALTER TABLE sections ADD COLUMN color TEXT")
     if "cur" not in scols:
@@ -624,8 +626,14 @@ def board():
     where, args = sec_clause(con, "id", first=True)
     sections = con.execute("SELECT * FROM sections" + where + " ORDER BY pos, id",
                            args).fetchall()
+    cur_board = (request.args.get("b") or "").strip()
+    if cur_board:
+        sections = [r for r in sections if (r["board"] or "").strip() == cur_board]
     where, args = sec_clause(con, "section_id", first=True)
     items = con.execute("SELECT * FROM items" + where + " ORDER BY pos, id", args).fetchall()
+    if cur_board:
+        keep_secs = {r["id"] for r in sections}
+        items = [it for it in items if it["section_id"] in keep_secs]
     keep = set(it["id"] for it in items)
     notes = [n for n in con.execute("SELECT * FROM item_notes ORDER BY id")
              if n["item_id"] in keep]
@@ -655,6 +663,7 @@ def board():
         "done": sum(1 for it in items if it["status"] == "done"),
     }
     return render_template("board.html", sections=sections, by_sec=by_sec,
+                           cur_board=cur_board,
                            projects_by_sec=projects_by_sec,
                            people={r["id"]: r["display_name"] for r in people_list(con)},
                            names=known_names(con),
@@ -709,6 +718,14 @@ def _money(n, cur="\u00a3"):
 # Section colors: distinct at a glance on cream and on dark, and stable - a
 # section keeps its color whatever position it sits in. Recognition beats
 # reading, which matters most for the people this board is for.
+def team_list(con):
+    """The internal people work waits on. One tap instead of typing a name -
+    typing is why the field goes empty, and an empty field hides work."""
+    row = con.execute("SELECT v FROM settings WHERE k='org:team'").fetchone()
+    raw = row["v"] if row else "Joel,Shimon,Yanky,Varun,Polina,Simon"
+    return [t.strip() for t in raw.split(",") if t.strip()]
+
+
 SECTION_PALETTE = ("#C24E2A", "#1F3A5F", "#3A6B3E", "#B8892E",
                    "#6B4A8A", "#2A6B6B", "#A33B63", "#41586E")
 
@@ -849,7 +866,15 @@ def today_view():
         projects_by_sec.setdefault(p["section_id"], []).append(p)
     on_me = [r for r in rows if r["status"] == "open"]
     waiting = [r for r in rows if r["status"] == "waiting"]
+    evs = con.execute("SELECT * FROM events WHERE day=? AND owner_id=?"
+                      " ORDER BY COALESCE(start_time,'99:99'), id", (iso, me())).fetchall()
+    where2, args2 = sec_clause(con, "section_id")
+    timed = con.execute(
+        "SELECT * FROM items WHERE status != 'done'"
+        " AND COALESCE(remind_at,'') != '' AND substr(remind_at,1,10) = ?"
+        + where2 + " ORDER BY remind_at", [iso] + args2).fetchall()
     return render_template("today.html", rows=rows, on_me=on_me, waiting=waiting,
+                           evs=evs, timed=timed,
                            sections=sections, projects_by_sec=projects_by_sec,
                            sec_kind={r["id"]: r["kind"] for r in sections},
                            tenures=TENURES, stages=STAGES,
@@ -1216,6 +1241,42 @@ def joel_view():
                            today=datetime.now().strftime("%B %d, %Y"))
 
 
+# ---------- an agenda for sitting down with anyone ----------
+
+@app.route("/agenda/<who>")
+@login_required
+def agenda_view(who):
+    """Everything waiting on one person, ready to walk through and to print.
+
+    The Joel sheet stopped being special: an agenda is assembled from the tag,
+    for whoever you are about to sit with."""
+    who = (who or "").strip()[:60]
+    con = db()
+    where, args = sec_clause(con, "items.section_id")
+    rows = con.execute(
+        "SELECT items.*, sections.title AS sec_title FROM items"
+        " JOIN sections ON items.section_id = sections.id"
+        " WHERE items.status != 'done' AND lower(trim(items.waiting_on)) = lower(?)"
+        + where + " ORDER BY items.due_date IS NULL, items.due_date, items.id",
+        [who] + args).fetchall()
+    if not rows:
+        rows = con.execute(
+            "SELECT items.*, sections.title AS sec_title FROM items"
+            " JOIN sections ON items.section_id = sections.id"
+            " WHERE items.status != 'done'"
+            " AND lower(items.waiting_on) LIKE lower(?)"
+            + where + " ORDER BY items.due_date IS NULL, items.due_date, items.id",
+            ["%" + who + "%"] + args).fetchall()
+    keep = {r["id"] for r in rows}
+    latest = {}
+    for n in con.execute("SELECT item_id, body, created_at FROM item_notes ORDER BY id"):
+        if n["item_id"] in keep:
+            latest[n["item_id"]] = n           # ordered ascending - last one wins
+    return render_template("agenda.html", who=who, rows=rows, latest=latest,
+                           today=_now_local().strftime("%B %-d, %Y")
+                           if os.name != "nt" else _now_local().strftime("%B %d, %Y"))
+
+
 # ---------- calendar ----------
 
 @app.route("/calendar")
@@ -1305,8 +1366,9 @@ def inject_identity():
     """The board is named for the person looking at it, not for the person who
     happens to have built it - and dressed for them too: a tab with nothing
     behind it is furniture, so it is not shown."""
-    blank = {"board_name": "HQ", "tagline": "", "display_mode": "full",
-             "has_brief": False, "has_cal": False, "has_pipe": False}
+    blank = {"board_name": "Pinta HQ", "tagline": "", "display_mode": "full",
+             "has_brief": False, "has_cal": False, "has_pipe": False,
+             "boards": [], "team": []}
     try:
         if not me():
             return blank
@@ -1314,12 +1376,20 @@ def inject_identity():
         ids = visible_ids(con)
         q = ",".join("?" * len(ids)) if ids else "NULL"
         secrows = con.execute(
-            "SELECT id, color FROM sections WHERE id IN (%s)" % q, ids).fetchall() if ids else []
+            "SELECT id, color, board FROM sections WHERE id IN (%s)" % q,
+            ids).fetchall() if ids else []
+        boards = []
+        for r in secrows:
+            b = (r["board"] or "").strip()
+            if b and b not in boards:
+                boards.append(b)
         return {
             "board_name": board_title(con),
             "tagline": uset(con, "tagline"),
             "display_mode": display_mode(con),
             "sec_colors": {r["id"]: sec_color(r) for r in secrows},
+            "boards": boards,
+            "team": team_list(con),
             "has_brief": bool(con.execute(
                 "SELECT 1 FROM brief_items WHERE owner_id=? LIMIT 1", (me(),)).fetchone()),
             "has_cal": bool(con.execute(
@@ -1801,7 +1871,7 @@ def build_ics(con, feed_uid):
     now = datetime.now()
     stamp = now.strftime("%Y%m%dT%H%M%SZ")
     horizon = (now.date() - _td(days=60)).isoformat()
-    L = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Shimon HQ//EN",
+    L = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Pinta HQ//EN",
          "CALSCALE:GREGORIAN", "METHOD:PUBLISH",
          "X-WR-CALNAME:HQ", "X-WR-TIMEZONE:" + TZ_NAME,
          "X-PUBLISHED-TTL:PT1H", "REFRESH-INTERVAL;VALUE=DURATION:PT1H"]
@@ -1882,7 +1952,7 @@ def event_ics(ev_id):
     if not e:
         abort(404)
     stamp = datetime.now().strftime("%Y%m%dT%H%M%SZ")
-    L = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Shimon HQ//EN", "METHOD:PUBLISH",
+    L = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Pinta HQ//EN", "METHOD:PUBLISH",
          "BEGIN:VEVENT", "UID:hq-ev-%s@shimonhq" % e["ext_key"], "DTSTAMP:" + stamp]
     if e["start_time"]:
         end_h = (int(e["start_time"][:2]) + 1) % 24
@@ -2208,6 +2278,25 @@ def api_section_kind():
     return "SET %s: %s" % (kind, title), 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
+@app.route("/api/secboard")
+def api_section_board():
+    """Put one of the acting person's sections on a board (or off, with board empty)."""
+    if not _api_auth():
+        abort(401)
+    title = (request.args.get("title") or "").strip()
+    if not title:
+        return "ERROR: title required", 400, {"Content-Type": "text/plain; charset=utf-8"}
+    con = db()
+    row = con.execute("SELECT id FROM sections WHERE lower(title)=lower(?) AND owner_id=?",
+                      (title, me())).fetchone()
+    if not row:
+        return "NOT FOUND: " + title, 404, {"Content-Type": "text/plain; charset=utf-8"}
+    b = (request.args.get("board") or "").strip()[:30]
+    con.execute("UPDATE sections SET board=? WHERE id=?", (b, row["id"]))
+    commit_retry(con)
+    return "BOARD %s: %s" % (b or "(none)", title), 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+
 @app.route("/api/pulsereq")
 def api_pulse_requests():
     """Who has asked for a written read, for the sweep to pick up.
@@ -2430,7 +2519,7 @@ def api_notify():
     """Send a push to Shimon's devices (used when email capture lands something new)."""
     if not _api_auth():
         abort(401)
-    title = (request.args.get("title") or "Shimon HQ").strip()
+    title = (request.args.get("title") or "Pinta HQ").strip()
     body = (request.args.get("body") or "").strip()
     if not body:
         return "ERROR: body required", 400, {"Content-Type": "text/plain; charset=utf-8"}
@@ -2530,8 +2619,9 @@ def api_quickadd():
                           + " ORDER BY id LIMIT 1",
                           ["%" + sec_title + "%"] + args).fetchone()
     sid = sec["id"] if sec else con.execute(
-        "INSERT INTO sections(title, pos, owner_id, visibility) VALUES(?,99,?,'private')",
-        (sec_title, me())).lastrowid
+        "INSERT INTO sections(title, pos, owner_id, visibility, board)"
+        " VALUES(?,99,?,'private',?)",
+        (sec_title, me(), (request.args.get("board") or "").strip()[:30])).lastrowid
     where, args = sec_clause(con, "section_id")
     dup = con.execute("SELECT 1 FROM items WHERE lower(title)=lower(?)" + where,
                       [title] + args).fetchone()
@@ -3004,8 +3094,10 @@ def add_section():
         con = db()
         pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM sections").fetchone()[0]
         shared = 'shared' if request.form.get("shared") else 'private'
-        con.execute("INSERT INTO sections(title, pos, owner_id, visibility) VALUES(?,?,?,?)",
-                    (title, pos, me(), shared))
+        con.execute("INSERT INTO sections(title, pos, owner_id, visibility, board)"
+                    " VALUES(?,?,?,?,?)",
+                    (title, pos, me(), shared,
+                     (request.form.get("board") or "").strip()[:30]))
         commit_retry(con)
     return redirect(url_for("board"))
 
@@ -3025,6 +3117,19 @@ def delete_section(sec_id):
         con.execute("DELETE FROM sections WHERE id=?", (sec_id,))
         commit_retry(con)
     return redirect(url_for("board"))
+
+
+@app.route("/sections/<int:sec_id>/board", methods=["POST"])
+@login_required
+def set_section_board(sec_id):
+    con = db()
+    if not con.execute("SELECT 1 FROM sections WHERE id=? AND owner_id=?",
+                       (sec_id, me())).fetchone():
+        abort(404)
+    b = (request.form.get("board") or "").strip()[:30]
+    con.execute("UPDATE sections SET board=? WHERE id=?", (b, sec_id))
+    commit_retry(con)
+    return redirect(url_for("board", b=b or None))
 
 
 @app.route("/sections/<int:sec_id>/color", methods=["POST"])

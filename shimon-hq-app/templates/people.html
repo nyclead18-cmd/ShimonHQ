@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}People · Shimon HQ{% endblock %}
+{% block title %}People · Pinta HQ{% endblock %}
 {% block body %}
 <div class="wrap wide">
 <header class="top">
@@ -32,7 +32,8 @@
 <section class="card" style="--sa: {{ palette[loop.index0 % 6] }}">
   <div class="sec-head">
     <h2><span class="dot"></span><span dir="auto">{{ who }}</span></h2>
-    <span class="counts">{{ its | length }}</span>
+    <span class="counts">{{ its | length }} &middot;
+      <a class="linky" href="{{ url_for('agenda_view', who=who) }}">agenda &#8599;</a></span>
   </div>
   <ul class="items">
     {% for it in its %}

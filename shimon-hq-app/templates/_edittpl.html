@@ -3,6 +3,9 @@
   <form class="edit" method="post" action="">
     <input name="title" dir="auto" required>
     <input name="note" dir="auto" placeholder="Next step / note">
+    <div class="teamchips">
+      {% for t in team or [] %}<button type="button" class="tchip" data-team="{{ t }}">{{ t }}</button>{% endfor %}
+    </div>
     <input name="waiting_on" dir="auto" placeholder="Waiting on (who)" list="knownnames"
            autocomplete="off">
     <label class="taglabel">Section

@@ -670,6 +670,9 @@ table.dealtable{width:100%; border-collapse:collapse; font-size:14px;}
 .stagechip.dead{background:var(--border); color:var(--muted);}
 .dealfields{display:grid; grid-template-columns:repeat(2,1fr); gap:10px;
   border-top:1px solid var(--border); padding-top:12px; margin-top:4px;}
+/* display:grid silently beats the hidden attribute - which is how EBITDA boxes
+   ended up on a signage task. Deal fields exist only where the section is a pipeline. */
+.dealfields[hidden]{display:none;}
 .dealfields .taglabel{margin:0;}
 @media (max-width:520px){ .dealfields{grid-template-columns:1fr;} }
 
@@ -708,3 +711,59 @@ li.item.done{border-left-color:color-mix(in srgb, var(--sa, transparent) 35%, tr
 button.dotbtn2{border:none; padding:0; cursor:pointer; width:14px; height:14px;
   vertical-align:1px; transition:transform .12s ease;}
 button.dotbtn2:active{transform:scale(1.5);}
+
+/* ---------- the agenda sheet: reads on a phone, prints on a page ---------- */
+.printbtn{font:inherit; font-size:12.5px; font-weight:700; letter-spacing:.04em;
+  background:var(--btn-bg); color:var(--btn-tx); border:0; border-radius:999px;
+  padding:8px 18px; cursor:pointer;}
+/* .sheet is taken by the press-and-hold action sheet, whose position:fixed rules
+   would drag this to the bottom of the page - hence its own name. */
+.agsheet{background:var(--card); border:1px solid var(--border); border-radius:16px;
+  padding:26px 28px; margin-top:20px; box-shadow:var(--shadow);}
+.sheet-top{display:flex; justify-content:space-between; align-items:flex-end; gap:12px;
+  border-bottom:2px solid var(--ink); padding-bottom:12px;}
+.sheet-kicker{color:var(--muted); font-size:11px; font-weight:700; letter-spacing:.12em;
+  text-transform:uppercase;}
+.sheet-name{font-family:'Playfair Display',Georgia,serif; font-size:30px; font-weight:700;
+  margin:2px 0 0;}
+.sheet-date{color:var(--muted); font-size:13px;}
+.sheet-items{list-style:none; margin:0; padding:0; counter-reset:ag;}
+.sheet-items > li{counter-increment:ag; padding:14px 0 12px 40px; position:relative;
+  border-bottom:1px solid var(--border);}
+.sheet-items > li::before{content:counter(ag); position:absolute; left:2px; top:14px;
+  width:26px; height:26px; border-radius:50%; border:1.5px solid var(--ink);
+  display:flex; align-items:center; justify-content:center;
+  font-weight:700; font-size:13px; font-variant-numeric:tabular-nums;}
+.si-head{display:flex; gap:10px; align-items:baseline; flex-wrap:wrap;}
+.si-title{font-weight:700; font-size:16px;}
+.si-due{color:var(--danger); font-weight:700; font-size:12px;}
+.si-sec{color:var(--muted); font-size:11.5px; margin-left:auto; text-transform:uppercase;
+  letter-spacing:.06em;}
+.si-note{color:var(--ink); font-size:14px; margin-top:3px;}
+.si-last{color:var(--muted); font-size:13px; margin-top:4px; font-style:italic;}
+.si-when{font-style:normal; font-size:11.5px;}
+.si-outcome{margin-top:12px; color:var(--muted); font-size:12px;
+  border-bottom:1px dotted var(--muted); padding-bottom:16px; max-width:34em;}
+.sheet-foot{color:var(--muted); font-size:11.5px; margin-top:16px; text-align:right;}
+@media print{
+  .noprint, nav.tabs, .notifbtn, .logout{display:none !important;}
+  body{background:#fff; color:#111;}
+  .wrap{padding:0; max-width:none;}
+  .agsheet{border:none; box-shadow:none; border-radius:0; padding:0;}
+  .sheet-wrap{display:none !important;}
+  .sheet-items > li{break-inside:avoid;}
+}
+
+/* ---------- boards and team chips ---------- */
+.boardchips{display:flex; gap:8px; margin:0 0 16px; flex-wrap:wrap;}
+.bchip{font-size:13px; font-weight:700; letter-spacing:.03em; text-decoration:none;
+  color:var(--muted); background:var(--card); border:1px solid var(--border);
+  border-radius:999px; padding:7px 18px;}
+.bchip.on{background:var(--navy, #1F3A5F); border-color:transparent; color:#FFFEFB;}
+body:not([data-x]) .bchip.on{background:#1F3A5F;}
+.teamchips{display:flex; gap:6px; flex-wrap:wrap;}
+.tchip{font:inherit; font-size:12px; font-weight:700; background:var(--pill-wait-bg);
+  color:var(--pill-wait-tx); border:0; border-radius:999px; padding:4px 12px; cursor:pointer;}
+.tchip:active{transform:scale(1.08);}
+.bform select{font:inherit; font-size:11px; color:var(--muted); background:transparent;
+  border:none; text-transform:uppercase; letter-spacing:.04em; cursor:pointer; max-width:110px;}
