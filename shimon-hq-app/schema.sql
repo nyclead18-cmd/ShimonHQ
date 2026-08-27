@@ -168,3 +168,18 @@ CREATE TABLE IF NOT EXISTS pulse_notes (
   body TEXT NOT NULL,
   created_at TEXT
 );
+
+-- ---------- people ----------
+-- The board was built for one person and every row belonged to him by default.
+-- Now that two people share it, "who may see this" has to be written down, and
+-- the default has to be no. A section is the unit of sharing: private means the
+-- owner alone, shared means everyone on the board. Items inherit from their
+-- section, which is why there is no per-item permission to get wrong.
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT UNIQUE NOT NULL,
+  display_name TEXT NOT NULL,
+  pw_hash TEXT NOT NULL,
+  is_admin INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT
+);

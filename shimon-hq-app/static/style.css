@@ -591,3 +591,28 @@ li.prow .ptitle + .psec{justify-self:end;}
   .tabs::-webkit-scrollbar{display:none;}
   .tab{flex:0 0 auto; padding:6px 11px; font-size:11.5px; letter-spacing:.03em; white-space:nowrap;}
 }
+
+/* ---------- who owns what ---------- */
+.ownchip{font-family:'Assistant',sans-serif; font-size:10.5px; font-weight:700;
+  letter-spacing:.07em; text-transform:uppercase; vertical-align:middle;
+  background:var(--pill-wait-bg); color:var(--pill-wait-tx);
+  border-radius:999px; padding:2px 8px; margin-left:8px;}
+.ownchip.shared{background:var(--pill-done-bg); color:var(--pill-done-tx);}
+.shareform{display:inline;}
+.shareform .linky{font-size:inherit;}
+
+/* ---------- account ---------- */
+.acct{margin-bottom:20px;}
+.stack{display:flex; flex-direction:column; gap:12px; padding:6px 2px 2px; max-width:420px;}
+.stack label{display:flex; flex-direction:column; gap:5px; color:var(--muted);
+  font-size:11.5px; letter-spacing:.07em; text-transform:uppercase; font-weight:700;}
+.stack input{background:var(--bg); border:1px solid var(--border); border-radius:10px;
+  color:var(--ink); font:inherit; font-size:15px; text-transform:none; letter-spacing:0;
+  padding:9px 12px;}
+.stack button{align-self:flex-start; font:inherit; font-weight:700; font-size:13px;
+  letter-spacing:.04em; background:var(--btn-bg); color:var(--btn-tx);
+  border:0; border-radius:999px; padding:9px 20px; cursor:pointer;}
+.feedurl{width:100%; background:var(--bg); border:1px solid var(--border);
+  border-radius:10px; color:var(--muted); font:inherit; font-size:12.5px; padding:9px 12px;}
+.okline{background:var(--pill-done-bg); color:var(--pill-done-tx); border-radius:10px;
+  padding:10px 14px; margin:16px 0; font-weight:600;}

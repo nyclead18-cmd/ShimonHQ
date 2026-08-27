@@ -3,8 +3,8 @@
 <div class="wrap wide">
 <header class="top">
   <div>
-    <div class="eyebrow">Pinta &middot; Ohr Chaim &middot; Personal</div>
-    <h1>Shimon HQ</h1>
+    <div class="eyebrow">{% if shared_with %}Shared with {{ shared_with }}{% else %}Pinta &middot; Ohr Chaim &middot; Personal{% endif %}</div>
+    <h1>{{ (session.get('name') ~ ' HQ') if session.get('name') else 'HQ' }}</h1>
   </div>
   <div class="right">
     <nav class="tabs">
@@ -12,10 +12,11 @@
       <a class="tab" href="{{ url_for('briefing_view') }}">Brief{% if brief_unread %} <span class="badge">{{ brief_unread }}</span>{% endif %}</a>
       <a class="tab" href="{{ url_for('calendar_view') }}">Calendar</a>
       <a class="tab" href="{{ url_for('people_view') }}">People</a>
-      <a class="tab" href="{{ url_for('joel_view') }}">Joel</a>
+      {% if session.get('admin') %}<a class="tab" href="{{ url_for('joel_view') }}">Joel</a>{% endif %}
       <a class="tab" href="{{ url_for('pulse_view') }}">Pulse</a>
     </nav>
     <button type="button" class="notifbtn" id="notifbtn" title="Reminders on this device">&#9200;</button>
+    <a class="logout" href="{{ url_for('account_view') }}">{{ session.get('name') or 'Account' }}</a>
     <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
   </div>
 </header>
@@ -50,9 +51,20 @@
 {% set active = items | rejectattr('status', 'equalto', 'done') | list %}
 <section class="card" id="sec-{{ sec.id }}" style="--sa: {{ palette[loop.index0 % 6] }}">
   <div class="sec-head">
-    <h2><span class="dot"></span>{{ sec.title }}</h2>
+    <h2><span class="dot"></span>{{ sec.title }}
+      {%- if sec.owner_id and sec.owner_id != session.get('uid') %}
+      <span class="ownchip" title="{{ people.get(sec.owner_id, 'someone else') }}'s section">{{ people.get(sec.owner_id, '?') }}</span>
+      {%- elif sec.visibility == 'shared' %}
+      <span class="ownchip shared" title="Everyone on the board can see this">shared</span>
+      {%- endif %}
+    </h2>
     <span class="counts">{{ active | length }}
       {% if done %}&middot; <button type="button" class="linky" data-toggle-done="{{ sec.id }}">{{ done | length }} done</button>{% endif %}
+      {% if sec.owner_id == session.get('uid') %}
+      &middot; <form method="post" action="{{ url_for('share_section', sec_id=sec.id) }}" class="shareform">
+        <button type="submit" class="linky" title="{{ 'Make this private again' if sec.visibility == 'shared' else 'Let everyone on the board see this' }}">{{ 'unshare' if sec.visibility == 'shared' else 'share' }}</button>
+      </form>
+      {% endif %}
     </span>
   </div>
 

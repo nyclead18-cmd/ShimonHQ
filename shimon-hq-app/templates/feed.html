@@ -5,15 +5,16 @@
 <header class="top">
   <div>
     <div class="eyebrow">Push to Outlook</div>
-    <h1>Shimon HQ</h1>
+    <h1>{{ (session.get('name') ~ ' HQ') if session.get('name') else 'HQ' }}</h1>
   </div>
   <div class="right">
     <nav class="tabs">
       <a class="tab" href="{{ url_for('board') }}">Board</a>
       <a class="tab on" href="{{ url_for('calendar_view') }}">Calendar</a>
       <a class="tab" href="{{ url_for('people_view') }}">People</a>
-      <a class="tab" href="{{ url_for('joel_view') }}">Joel</a>
+      {% if session.get('admin') %}<a class="tab" href="{{ url_for('joel_view') }}">Joel</a>{% endif %}
     </nav>
+    <a class="logout" href="{{ url_for('account_view') }}">{{ session.get('name') or 'Account' }}</a>
     <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
   </div>
 </header>

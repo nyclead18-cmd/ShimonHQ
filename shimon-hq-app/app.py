@@ -248,6 +248,61 @@ def _seed_history(con):
             (iid, at, status or "", waiting_on or "", title))
 
 
+def _pulse_notes_per_person(con):
+    """A weekly read belongs to whoever it is about, so the week alone is no
+    longer a unique key. SQLite cannot change a primary key in place."""
+    try:
+        cols = [r[1] for r in con.execute("PRAGMA table_info(pulse_notes)")]
+    except sqlite3.Error:
+        return
+    if not cols or "user_id" in cols:
+        return
+    con.executescript(
+        "CREATE TABLE pulse_notes_new ("
+        " week TEXT NOT NULL, user_id INTEGER NOT NULL DEFAULT 0,"
+        " body TEXT NOT NULL, created_at TEXT, PRIMARY KEY(week, user_id));"
+        "INSERT INTO pulse_notes_new(week, user_id, body, created_at)"
+        " SELECT week, 0, body, created_at FROM pulse_notes;"
+        "DROP TABLE pulse_notes;"
+        "ALTER TABLE pulse_notes_new RENAME TO pulse_notes;")
+
+
+def _make_people(con):
+    """Turn the single hard-coded login into a real account, once.
+
+    Everything that already exists becomes Shimon's and PRIVATE - not shared.
+    Opening the board to a second person must never be the thing that exposes
+    what was on it, so sharing is a decision he makes afterwards, one section at
+    a time. The only exception is the tracker that carries his name and Joel's;
+    that one was always joint work.
+    """
+    from werkzeug.security import generate_password_hash
+    n = con.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    if n:
+        return
+    now = datetime.now().isoformat(timespec="seconds")
+    cur = con.execute(
+        "INSERT INTO users(username, display_name, pw_hash, is_admin, created_at)"
+        " VALUES(?,?,?,1,?)",
+        (HQ_USER.lower(), os.environ.get("HQ_NAME", "Shimon"),
+         generate_password_hash(HQ_PASSWORD), now))
+    me = cur.lastrowid
+    con.execute("UPDATE sections SET owner_id=? WHERE owner_id IS NULL", (me,))
+    con.execute("UPDATE sections SET visibility='private'")
+    con.execute("UPDATE events SET owner_id=? WHERE owner_id IS NULL", (me,))
+    con.execute("UPDATE brief_items SET owner_id=? WHERE owner_id IS NULL", (me,))
+    con.execute("UPDATE push_subs SET user_id=? WHERE user_id IS NULL", (me,))
+    con.execute("UPDATE pulse_notes SET user_id=? WHERE user_id=0", (me,))
+    # settings that describe a person rather than the board move under his key
+    for k in ("origin_home", "origin_work", "origin_address", "last_pos", "last_pos_at",
+              "feed_token"):
+        row = con.execute("SELECT v FROM settings WHERE k=?", (k,)).fetchone()
+        if row:
+            con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES(?,?)",
+                        ("u%d:%s" % (me, k), row[0]))
+    con.execute("UPDATE sections SET visibility='shared' WHERE title LIKE '%Joel%'")
+
+
 def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True) if os.path.dirname(DB_PATH) else None
     con = sqlite3.connect(DB_PATH, timeout=10)
@@ -298,6 +353,20 @@ def init_db():
         con.execute("ALTER TABLE events ADD COLUMN note TEXT DEFAULT ''")
     if ecols and "dur_min" not in ecols:
         con.execute("ALTER TABLE events ADD COLUMN dur_min INTEGER")
+    scols = [r[1] for r in con.execute("PRAGMA table_info(sections)")]
+    if "owner_id" not in scols:
+        con.execute("ALTER TABLE sections ADD COLUMN owner_id INTEGER")
+    if "visibility" not in scols:
+        con.execute("ALTER TABLE sections ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'")
+    if ecols and "owner_id" not in ecols:
+        con.execute("ALTER TABLE events ADD COLUMN owner_id INTEGER")
+    if bcols and "owner_id" not in bcols:
+        con.execute("ALTER TABLE brief_items ADD COLUMN owner_id INTEGER")
+    pcols = [r[1] for r in con.execute("PRAGMA table_info(push_subs)")]
+    if pcols and "user_id" not in pcols:
+        con.execute("ALTER TABLE push_subs ADD COLUMN user_id INTEGER")
+    _pulse_notes_per_person(con)
+    _make_people(con)
     os.makedirs(FILES_DIR, exist_ok=True)
     _stamp_responses_in_new_york(con)
     n = con.execute("SELECT COUNT(*) FROM sections").fetchone()[0]
@@ -305,9 +374,12 @@ def init_db():
         with open(os.path.join(BASE, "seed_data.json"), encoding="utf-8") as f:
             data = json.load(f)
         now = datetime.now().isoformat(timespec="seconds")
+        owner = con.execute("SELECT id FROM users ORDER BY id LIMIT 1").fetchone()
+        owner = owner[0] if owner else None
         for si, sec in enumerate(data["sections"]):
-            cur = con.execute("INSERT INTO sections(title, pos) VALUES(?, ?)",
-                              (sec["title"], si))
+            cur = con.execute(
+                "INSERT INTO sections(title, pos, owner_id, visibility) VALUES(?,?,?,'private')",
+                (sec["title"], si, owner))
             sid = cur.lastrowid
             for pi, it in enumerate(sec["items"]):
                 con.execute(
@@ -319,11 +391,104 @@ def init_db():
     con.close()
 
 
+# ---------- who is looking ----------
+# One rule, in one place. A section is either yours or shared with the board;
+# anything else is invisible. Every list narrows to these ids and every single
+# row lookup is checked against them, so adding a route cannot quietly widen
+# what somebody can see - a route that forgets to ask simply sees nothing.
+
+def me():
+    """Whoever this request is acting as - a signed-in person, or the account an
+    API token stands for. Zero means nobody, and nobody sees nothing."""
+    return session.get("uid") or getattr(g, "api_uid", 0) or 0
+
+
+def user_row(con, uid=None):
+    return con.execute("SELECT * FROM users WHERE id=?", (uid or me(),)).fetchone()
+
+
+def people_list(con):
+    return con.execute("SELECT id, username, display_name, is_admin FROM users"
+                       " ORDER BY id").fetchall()
+
+
+def visible_ids(con, uid=None):
+    """Section ids this person may see. An empty list is a real answer."""
+    uid = uid if uid is not None else me()
+    return [r[0] for r in con.execute(
+        "SELECT id FROM sections WHERE owner_id=? OR visibility='shared'", (uid,))]
+
+
+def sec_clause(con, col="section_id", uid=None, first=False):
+    """A fragment to bolt onto any query that reaches items or sections.
+
+    Returns a clause that matches nothing when the person can see nothing -
+    never one that matches everything. That asymmetry is the whole point.
+    """
+    ids = visible_ids(con, uid)
+    kw = " WHERE " if first else " AND "
+    if not ids:
+        return kw + "0=1", []
+    return kw + "%s IN (%s)" % (col, ",".join("?" * len(ids))), ids
+
+
+def may_touch(con, item_id, uid=None):
+    row = con.execute("SELECT section_id FROM items WHERE id=?", (item_id,)).fetchone()
+    return bool(row) and row["section_id"] in visible_ids(con, uid)
+
+
+def require_item(con, item_id, uid=None):
+    """404, not 403: refusing by name would confirm the task exists."""
+    if not may_touch(con, item_id, uid):
+        abort(404)
+
+
+def require_section(con, sec_id, uid=None):
+    if sec_id not in visible_ids(con, uid):
+        abort(404)
+
+
+def my_inbox(con, uid=None):
+    """Everyone captures into their own Inbox, never into somebody else's."""
+    uid = uid if uid is not None else me()
+    row = con.execute("SELECT id FROM sections WHERE title='Inbox' AND owner_id=?",
+                      (uid,)).fetchone()
+    if row:
+        return row["id"]
+    return con.execute(
+        "INSERT INTO sections(title, pos, owner_id, visibility) VALUES('Inbox', -1, ?, 'private')",
+        (uid,)).lastrowid
+
+
+def uset(con, key, uid=None, default=""):
+    """A setting that describes a person, not the board."""
+    uid = uid if uid is not None else me()
+    row = con.execute("SELECT v FROM settings WHERE k=?", ("u%d:%s" % (uid, key),)).fetchone()
+    return row[0] if row else default
+
+
+def uset_put(con, key, value, uid=None):
+    uid = uid if uid is not None else me()
+    con.execute("INSERT INTO settings(k, v) VALUES(?,?)"
+                " ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+                ("u%d:%s" % (uid, key), value))
+
+
+def uset_del(con, keys, uid=None):
+    uid = uid if uid is not None else me()
+    for k in keys:
+        con.execute("DELETE FROM settings WHERE k=?", ("u%d:%s" % (uid, k),))
+
+
 # ---------- auth ----------
 
 def login_required(f):
     @wraps(f)
     def wrapped(*a, **k):
+        if session.get("user") and not session.get("uid"):
+            # signed in before accounts existed - the cookie has a name but no
+            # person behind it, which would scope every query to nobody
+            session.clear()
         if not session.get("user"):
             if request.method == "POST" or request.path.startswith("/api/"):
                 return jsonify(error="login required"), 401
@@ -334,13 +499,21 @@ def login_required(f):
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    from werkzeug.security import check_password_hash
     error = None
     if request.method == "POST":
-        if (request.form.get("username", "").strip().lower() == HQ_USER.lower()
-                and request.form.get("password", "") == HQ_PASSWORD):
-            session["user"] = HQ_USER
+        name = request.form.get("username", "").strip().lower()
+        con = db()
+        row = con.execute("SELECT * FROM users WHERE username=?", (name,)).fetchone()
+        if row and check_password_hash(row["pw_hash"], request.form.get("password", "")):
+            session.clear()
+            session["user"] = row["username"]
+            session["uid"] = row["id"]
+            session["name"] = row["display_name"]
+            session["admin"] = bool(row["is_admin"])
             session.permanent = True
             return redirect(url_for("board"))
+        # one message for both cases - never reveal which usernames exist
         error = "Wrong username or password."
     return render_template("login.html", error=error)
 
@@ -358,17 +531,25 @@ def logout():
 def board():
     from datetime import timedelta
     con = db()
-    sections = con.execute("SELECT * FROM sections ORDER BY pos, id").fetchall()
-    items = con.execute("SELECT * FROM items ORDER BY pos, id").fetchall()
-    notes = con.execute("SELECT * FROM item_notes ORDER BY id").fetchall()
+    where, args = sec_clause(con, "id", first=True)
+    sections = con.execute("SELECT * FROM sections" + where + " ORDER BY pos, id",
+                           args).fetchall()
+    where, args = sec_clause(con, "section_id", first=True)
+    items = con.execute("SELECT * FROM items" + where + " ORDER BY pos, id", args).fetchall()
+    keep = set(it["id"] for it in items)
+    notes = [n for n in con.execute("SELECT * FROM item_notes ORDER BY id")
+             if n["item_id"] in keep]
     notes_by_item = {}
     for n in notes:
         notes_by_item.setdefault(n["item_id"], []).append(n)
-    files = con.execute("SELECT * FROM item_files ORDER BY id").fetchall()
+    files = [f for f in con.execute("SELECT * FROM item_files ORDER BY id")
+             if f["item_id"] in keep]
     files_by_item = {}
     for f in files:
         files_by_item.setdefault(f["item_id"], []).append(f)
-    projects = con.execute("SELECT * FROM projects ORDER BY pos, id").fetchall()
+    where, args = sec_clause(con, "section_id", first=True)
+    projects = con.execute("SELECT * FROM projects" + where + " ORDER BY pos, id",
+                           args).fetchall()
     projects_by_sec = {}
     for p in projects:
         projects_by_sec.setdefault(p["section_id"], []).append(p)
@@ -385,6 +566,7 @@ def board():
     }
     return render_template("board.html", sections=sections, by_sec=by_sec,
                            projects_by_sec=projects_by_sec,
+                           people={r["id"]: r["display_name"] for r in people_list(con)},
                            notes_by_item=notes_by_item, files_by_item=files_by_item,
                            today_iso=today_iso, soon_iso=soon_iso,
                            total_active=total_active, stats=stats,
@@ -402,6 +584,7 @@ def add_item():
     if not sid or not title:
         return redirect(url_for("board"))
     con = db()
+    require_section(con, sid)
     pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM items WHERE section_id=?",
                       (sid,)).fetchone()[0]
     con.execute(
@@ -425,10 +608,10 @@ def edit_item(item_id):
     if not title:
         return redirect(url_for("board"))
     con = db()
+    require_item(con, item_id)
     cur_row = con.execute("SELECT section_id FROM items WHERE id=?", (item_id,)).fetchone()
-    if not cur_row:
-        abort(404)
     sid = request.form.get("section_id", type=int) or cur_row["section_id"]
+    require_section(con, sid)
     pid = request.form.get("project_id", type=int) or None
     if pid:
         # a project decides the section it lives in
@@ -458,6 +641,7 @@ def add_note(item_id):
     note_id, created = None, None
     if body:
         con = db()
+        require_item(con, item_id)
         created = _now_local().isoformat(timespec="seconds")
         cur = con.execute("INSERT INTO item_notes(item_id, body, created_at) VALUES(?,?,?)",
                           (item_id, body, created))
@@ -477,6 +661,9 @@ def add_note(item_id):
 @login_required
 def delete_note(note_id):
     con = db()
+    owner = con.execute("SELECT item_id FROM item_notes WHERE id=?", (note_id,)).fetchone()
+    if owner:
+        require_item(con, owner["item_id"])
     con.execute("DELETE FROM item_notes WHERE id=?", (note_id,))
     commit_retry(con)
     if request.headers.get("X-Requested-With") == "fetch":
@@ -488,9 +675,8 @@ def delete_note(note_id):
 @login_required
 def cycle_item(item_id):
     con = db()
+    require_item(con, item_id)
     row = con.execute("SELECT status FROM items WHERE id=?", (item_id,)).fetchone()
-    if not row:
-        abort(404)
     nxt = STATUSES[(STATUSES.index(row["status"]) + 1) % 3] \
         if row["status"] in STATUSES else "open"
     con.execute("UPDATE items SET status=?, updated_at=? WHERE id=?",
@@ -507,8 +693,7 @@ def set_item_status(item_id):
     if st not in STATUSES:
         abort(400)
     con = db()
-    if not con.execute("SELECT 1 FROM items WHERE id=?", (item_id,)).fetchone():
-        abort(404)
+    require_item(con, item_id)
     con.execute("UPDATE items SET status=?, updated_at=? WHERE id=?",
                 (st, datetime.now().isoformat(timespec="seconds"), item_id))
     commit_retry(con)
@@ -519,6 +704,7 @@ def set_item_status(item_id):
 @login_required
 def delete_item(item_id):
     con = db()
+    require_item(con, item_id)
     con.execute("DELETE FROM items WHERE id=?", (item_id,))
     commit_retry(con)
     return redirect(url_for("board"))
@@ -532,11 +718,7 @@ def capture():
     if not title:
         return redirect(url_for("board"))
     con = db()
-    row = con.execute("SELECT id FROM sections WHERE title='Inbox'").fetchone()
-    if row:
-        sid = row["id"]
-    else:
-        sid = con.execute("INSERT INTO sections(title, pos) VALUES('Inbox', -1)").lastrowid
+    sid = my_inbox(con)
     pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM items WHERE section_id=?",
                       (sid,)).fetchone()[0]
     con.execute(
@@ -552,6 +734,7 @@ def upload_file(item_id):
     f = request.files.get("file")
     if not f or not f.filename:
         return jsonify(error="no file"), 400
+    require_item(db(), item_id)
     ext = os.path.splitext(f.filename)[1][:12]
     stored = uuid.uuid4().hex + ext
     f.save(os.path.join(FILES_DIR, stored))
@@ -568,9 +751,11 @@ def upload_file(item_id):
 @app.route("/files/<int:file_id>")
 @login_required
 def get_file(file_id):
-    row = db().execute("SELECT * FROM item_files WHERE id=?", (file_id,)).fetchone()
+    con = db()
+    row = con.execute("SELECT * FROM item_files WHERE id=?", (file_id,)).fetchone()
     if not row:
         abort(404)
+    require_item(con, row["item_id"])
     return send_from_directory(FILES_DIR, row["stored_name"],
                                download_name=row["filename"], as_attachment=False)
 
@@ -581,6 +766,7 @@ def delete_file(file_id):
     con = db()
     row = con.execute("SELECT * FROM item_files WHERE id=?", (file_id,)).fetchone()
     if row:
+        require_item(con, row["item_id"])
         try:
             os.remove(os.path.join(FILES_DIR, row["stored_name"]))
         except OSError:
@@ -601,6 +787,7 @@ def add_project():
     title = (request.form.get("title") or "").strip()
     if sid and title:
         con = db()
+        require_section(con, sid)
         pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM projects WHERE section_id=?",
                           (sid,)).fetchone()[0]
         con.execute("INSERT INTO projects(section_id, title, pos, created_at) VALUES(?,?,?,?)",
@@ -613,6 +800,9 @@ def add_project():
 @login_required
 def delete_project(proj_id):
     con = db()
+    prow = con.execute("SELECT section_id FROM projects WHERE id=?", (proj_id,)).fetchone()
+    if prow:
+        require_section(con, prow["section_id"])
     con.execute("UPDATE items SET project_id=NULL WHERE project_id=?", (proj_id,))
     con.execute("DELETE FROM projects WHERE id=?", (proj_id,))
     commit_retry(con)
@@ -625,11 +815,13 @@ def delete_project(proj_id):
 @login_required
 def people_view():
     con = db()
+    where, args = sec_clause(con, "items.section_id")
     rows = con.execute(
         "SELECT items.*, sections.title AS sec_title FROM items"
         " JOIN sections ON items.section_id = sections.id"
         " WHERE items.status != 'done' AND COALESCE(items.waiting_on,'') != ''"
-        " ORDER BY items.due_date IS NULL, items.due_date, items.id").fetchall()
+        + where +
+        " ORDER BY items.due_date IS NULL, items.due_date, items.id", args).fetchall()
     groups = {}
     for r in rows:
         key = r["waiting_on"].strip()
@@ -647,9 +839,15 @@ def joel_view():
     """The Joel section as a live board (same controls as everywhere) + a print sheet."""
     from datetime import timedelta
     con = db()
-    sections = con.execute("SELECT * FROM sections ORDER BY pos, id").fetchall()
-    sec = con.execute("SELECT * FROM sections WHERE title LIKE '%Joel%' ORDER BY id LIMIT 1").fetchone()
-    projects = con.execute("SELECT * FROM projects ORDER BY pos, id").fetchall()
+    where, args = sec_clause(con, "id", first=True)
+    sections = con.execute("SELECT * FROM sections" + where + " ORDER BY pos, id",
+                           args).fetchall()
+    where, args = sec_clause(con, "id")
+    sec = con.execute("SELECT * FROM sections WHERE title LIKE '%Joel%'" + where
+                      + " ORDER BY id LIMIT 1", args).fetchone()
+    where, args = sec_clause(con, "section_id", first=True)
+    projects = con.execute("SELECT * FROM projects" + where + " ORDER BY pos, id",
+                           args).fetchall()
     projects_by_sec = {}
     for p in projects:
         projects_by_sec.setdefault(p["section_id"], []).append(p)
@@ -688,11 +886,12 @@ def calendar_view():
     start = first - timedelta(days=(first.weekday() + 1) % 7)  # back to Sunday
     days = [start + timedelta(days=i) for i in range(42)]
     con = db()
+    where, args = sec_clause(con, "items.section_id")
     rows = con.execute(
         "SELECT items.*, sections.title AS sec_title FROM items"
         " JOIN sections ON items.section_id = sections.id"
-        " WHERE due_date IS NOT NULL AND due_date != ''"
-        " ORDER BY due_date").fetchall()
+        " WHERE due_date IS NOT NULL AND due_date != ''" + where +
+        " ORDER BY due_date", args).fetchall()
     by_day, overdue, upcoming = {}, [], []
     t_iso = today.isoformat()
     horizon = (today + timedelta(days=14)).isoformat()
@@ -703,7 +902,8 @@ def calendar_view():
                 overdue.append(r)
             elif r["due_date"] <= horizon:
                 upcoming.append(r)
-    evs = con.execute("SELECT * FROM events ORDER BY day, COALESCE(start_time,'')").fetchall()
+    evs = con.execute("SELECT * FROM events WHERE owner_id=?"
+                      " ORDER BY day, COALESCE(start_time,'')", (me(),)).fetchall()
     ev_by_day = {}
     for e in evs:
         ev_by_day.setdefault(e["day"], []).append(e)
@@ -716,8 +916,7 @@ def calendar_view():
                            overdue=overdue, upcoming=upcoming,
                            month_label=first.strftime("%B %Y"),
                            prev_m=prev_m, next_m=next_m,
-                           home=_setting_ro(con, "origin_home", "") or "",
-                           work=_setting_ro(con, "origin_work", "") or "",
+                           home=uset(con, "origin_home"), work=uset(con, "origin_work"),
                            maps_key=bool(maps.KEY),
                            today_iso=t_iso, cur_month=mo)
 
@@ -725,8 +924,22 @@ def calendar_view():
 # ---------- daily briefing ----------
 
 def _unread_count(con):
-    row = con.execute("SELECT COUNT(*) c FROM brief_items WHERE is_read=0").fetchone()
+    row = con.execute("SELECT COUNT(*) c FROM brief_items WHERE is_read=0 AND owner_id=?",
+                      (me(),)).fetchone()
     return row["c"] if row else 0
+
+
+@app.context_processor
+def inject_people():
+    """Whose board this is, and who else is on it - shown in the eyebrow so nobody
+    has to wonder whether what they are typing is visible to the other person."""
+    try:
+        if not me():
+            return {"shared_with": ""}
+        others = [r["display_name"] for r in people_list(db()) if r["id"] != me()]
+        return {"shared_with": ", ".join(others)}
+    except Exception:
+        return {"shared_with": ""}
 
 
 @app.context_processor
@@ -750,13 +963,18 @@ def briefing_view(day=None):
     iso = d.isoformat()
     con = db()
     lines = con.execute(
-        "SELECT * FROM brief_items WHERE day=? ORDER BY"
+        "SELECT * FROM brief_items WHERE day=? AND owner_id=? ORDER BY"
         " CASE kind WHEN 'due' THEN 0 WHEN 'meeting' THEN 1 WHEN 'email' THEN 2"
-        " WHEN 'added' THEN 3 ELSE 4 END, id", (iso,)).fetchall()
+        " WHEN 'added' THEN 3 ELSE 4 END, id", (iso, me())).fetchall()
     days = [r["day"] for r in con.execute(
-        "SELECT DISTINCT day FROM brief_items ORDER BY day DESC LIMIT 14")]
-    sections = con.execute("SELECT * FROM sections ORDER BY pos, id").fetchall()
-    titles = {r["id"]: r["title"] for r in con.execute("SELECT id, title FROM items")}
+        "SELECT DISTINCT day FROM brief_items WHERE owner_id=?"
+        " ORDER BY day DESC LIMIT 14", (me(),))]
+    where, args = sec_clause(con, "id", first=True)
+    sections = con.execute("SELECT * FROM sections" + where + " ORDER BY pos, id",
+                           args).fetchall()
+    where, args = sec_clause(con, "section_id", first=True)
+    titles = {r["id"]: r["title"]
+              for r in con.execute("SELECT id, title FROM items" + where, args)}
     return render_template("briefing.html", d=d, day=iso, lines=lines, days=days,
                            sections=sections, titles=titles,
                            is_today=(iso == today.isoformat()),
@@ -769,7 +987,8 @@ def briefing_view(day=None):
 @login_required
 def brief_read(bid):
     con = db()
-    row = con.execute("SELECT is_read, day FROM brief_items WHERE id=?", (bid,)).fetchone()
+    row = con.execute("SELECT is_read, day FROM brief_items WHERE id=? AND owner_id=?",
+                      (bid, me())).fetchone()
     if not row:
         abort(404)
     new = 0 if row["is_read"] else 1
@@ -784,7 +1003,8 @@ def brief_read(bid):
 @login_required
 def brief_read_all(day):
     con = db()
-    con.execute("UPDATE brief_items SET is_read=1 WHERE day=?", (day,))
+    con.execute("UPDATE brief_items SET is_read=1 WHERE day=? AND owner_id=?",
+                (day, me()))
     commit_retry(con)
     return redirect(url_for("briefing_view", day=day))
 
@@ -793,15 +1013,16 @@ def brief_read_all(day):
 @login_required
 def brief_to_task(bid):
     con = db()
-    row = con.execute("SELECT * FROM brief_items WHERE id=?", (bid,)).fetchone()
+    row = con.execute("SELECT * FROM brief_items WHERE id=? AND owner_id=?",
+                      (bid, me())).fetchone()
     if not row:
         abort(404)
     title = (request.form.get("title") or row["text"]).strip()[:120]
     sid = request.form.get("section_id", type=int)
-    if not sid:
-        sec = con.execute("SELECT id FROM sections WHERE title='Inbox'").fetchone()
-        sid = sec["id"] if sec else con.execute(
-            "INSERT INTO sections(title, pos) VALUES('Inbox', 99)").lastrowid
+    if sid:
+        require_section(con, sid)
+    else:
+        sid = my_inbox(con)
     note = (request.form.get("note") or row["detail"] or "").strip()[:200]
     pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM items WHERE section_id=?",
                       (sid,)).fetchone()[0]
@@ -821,11 +1042,12 @@ def brief_to_task(bid):
 def brief_file(bid):
     """Accept a suggested update: it becomes a response on the task it points at."""
     con = db()
-    b = con.execute("SELECT * FROM brief_items WHERE id=?", (bid,)).fetchone()
+    b = con.execute("SELECT * FROM brief_items WHERE id=? AND owner_id=?",
+                    (bid, me())).fetchone()
     if not b:
         abort(404)
     target = b["target_item_id"]
-    if not target or not con.execute("SELECT 1 FROM items WHERE id=?", (target,)).fetchone():
+    if not target or not may_touch(con, target):
         abort(400)
     body = b["text"]
     if b["detail"]:
@@ -845,7 +1067,10 @@ def brief_file(bid):
 @login_required
 def brief_dismiss(bid):
     con = db()
-    row = con.execute("SELECT day FROM brief_items WHERE id=?", (bid,)).fetchone()
+    row = con.execute("SELECT day FROM brief_items WHERE id=? AND owner_id=?",
+                      (bid, me())).fetchone()
+    if not row:
+        abort(404)
     con.execute("DELETE FROM brief_items WHERE id=?", (bid,))
     commit_retry(con)
     if request.headers.get("X-Requested-With") == "fetch":
@@ -861,16 +1086,16 @@ BUFFER_MIN = 10          # padding either side of a drive so you are not sprinti
 FIX_MAX_AGE_MIN = 25     # a location fix older than this is not where you are any more
 
 
-def _origins(con):
-    home = _setting_ro(con, "origin_home", "") or _setting_ro(con, "origin_address", "") or ""
-    work = _setting_ro(con, "origin_work", "") or ""
+def _origins(con, uid=None):
+    home = uset(con, "origin_home", uid) or uset(con, "origin_address", uid) or ""
+    work = uset(con, "origin_work", uid) or ""
     return home, work
 
 
-def live_fix(con, max_age_min=FIX_MAX_AGE_MIN):
+def live_fix(con, max_age_min=FIX_MAX_AGE_MIN, uid=None):
     """Where the phone last said you were, if that was recent enough to trust."""
-    pos = _setting_ro(con, "last_pos", "") or ""
-    at = _setting_ro(con, "last_pos_at", "") or ""
+    pos = uset(con, "last_pos", uid) or ""
+    at = uset(con, "last_pos_at", uid) or ""
     if not (pos and at):
         return ""
     try:
@@ -953,11 +1178,9 @@ def _leave_by(hhmm, secs):
 def set_origin():
     """The two addresses travel times are measured from."""
     con = db()
-    for field, key in (("origin_home", "origin_home"), ("origin_work", "origin_work")):
+    for field in ("origin_home", "origin_work"):
         if field in request.form:
-            con.execute("INSERT INTO settings(k, v) VALUES(?, ?)"
-                        " ON CONFLICT(k) DO UPDATE SET v=excluded.v",
-                        (key, (request.form.get(field) or "").strip()))
+            uset_put(con, field, (request.form.get(field) or "").strip())
     commit_retry(con)
     return redirect(request.form.get("back") or url_for("calendar_view"))
 
@@ -976,10 +1199,8 @@ def set_where():
     if not (-90 <= lat <= 90 and -180 <= lng <= 180):
         return jsonify(ok=False), 400
     con = db()
-    for k, v in (("last_pos", "%.5f,%.5f" % (lat, lng)),
-                 ("last_pos_at", _now_local().isoformat(timespec="seconds"))):
-        con.execute("INSERT INTO settings(k, v) VALUES(?, ?)"
-                    " ON CONFLICT(k) DO UPDATE SET v=excluded.v", (k, v))
+    uset_put(con, "last_pos", "%.5f,%.5f" % (lat, lng))
+    uset_put(con, "last_pos_at", _now_local().isoformat(timespec="seconds"))
     commit_retry(con)
     return jsonify(ok=True)
 
@@ -988,7 +1209,7 @@ def set_where():
 @login_required
 def forget_where():
     con = db()
-    con.execute("DELETE FROM settings WHERE k IN ('last_pos','last_pos_at')")
+    uset_del(con, ("last_pos", "last_pos_at"))
     commit_retry(con)
     return jsonify(ok=True)
 
@@ -1045,13 +1266,17 @@ def day_view(day):
         return redirect(url_for("calendar_view"))
     con = db()
     evs = con.execute(
-        "SELECT * FROM events WHERE day=? ORDER BY COALESCE(start_time,'99:99'), id",
-        (day,)).fetchall()
+        "SELECT * FROM events WHERE day=? AND owner_id=?"
+        " ORDER BY COALESCE(start_time,'99:99'), id", (day, me())).fetchall()
+    where, args = sec_clause(con, "items.section_id")
     tasks = con.execute(
         "SELECT items.*, sections.title AS sec_title FROM items"
         " JOIN sections ON items.section_id = sections.id"
-        " WHERE items.due_date = ? ORDER BY items.status='done', items.id", (day,)).fetchall()
-    sections = con.execute("SELECT * FROM sections ORDER BY pos, id").fetchall()
+        " WHERE items.due_date = ?" + where +
+        " ORDER BY items.status='done', items.id", [day] + args).fetchall()
+    where, args = sec_clause(con, "id", first=True)
+    sections = con.execute("SELECT * FROM sections" + where + " ORDER BY pos, id",
+                           args).fetchall()
     home, work = _origins(con)
     fix = live_fix(con) if day == _now_local().strftime("%Y-%m-%d") else ""
     travel = {}
@@ -1086,12 +1311,12 @@ def add_event():
         return redirect(url_for("calendar_view"))
     con = db()
     con.execute(
-        "INSERT INTO events(ext_key, subject, day, start_time, location, note, source, synced_at)"
-        " VALUES(?,?,?,?,?,?,'manual',?)",
+        "INSERT INTO events(ext_key, subject, day, start_time, location, note, source,"
+        " owner_id, synced_at) VALUES(?,?,?,?,?,?,'manual',?,?)",
         ("m-" + uuid.uuid4().hex[:12], subj, day,
          (request.form.get("start_time") or "").strip() or None,
          (request.form.get("location") or "").strip(),
-         (request.form.get("note") or "").strip(),
+         (request.form.get("note") or "").strip(), me(),
          datetime.now().isoformat(timespec="seconds")))
     commit_retry(con)
     return redirect(url_for("day_view", day=day))
@@ -1108,10 +1333,10 @@ def edit_event(ev_id):
     # editing an Outlook event pins it: the daily sync stops overwriting your version
     con.execute(
         "UPDATE events SET subject=?, day=?, start_time=?, location=?, note=?, source='manual'"
-        " WHERE id=?",
+        " WHERE id=? AND owner_id=?",
         (subj, day, (request.form.get("start_time") or "").strip() or None,
          (request.form.get("location") or "").strip(),
-         (request.form.get("note") or "").strip(), ev_id))
+         (request.form.get("note") or "").strip(), ev_id, me()))
     commit_retry(con)
     return redirect(url_for("day_view", day=day))
 
@@ -1120,7 +1345,8 @@ def edit_event(ev_id):
 @login_required
 def delete_event(ev_id):
     con = db()
-    row = con.execute("SELECT * FROM events WHERE id=?", (ev_id,)).fetchone()
+    row = con.execute("SELECT * FROM events WHERE id=? AND owner_id=?",
+                      (ev_id, me())).fetchone()
     if not row:
         return redirect(url_for("calendar_view"))
     if (row["source"] or "outlook") == "outlook" and row["ext_key"]:
@@ -1133,11 +1359,13 @@ def delete_event(ev_id):
 
 # ---------- outbound: publish HQ to Outlook (ICS) ----------
 
-def _feed_token(con):
-    tok = _setting_ro(con, "feed_token")
+def _feed_token(con, uid=None):
+    """One private URL each - a shared one would hand over the other person's diary."""
+    uid = uid if uid is not None else me()
+    tok = uset(con, "feed_token", uid) or ""
     if not tok:
         tok = uuid.uuid4().hex
-        con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES('feed_token', ?)", (tok,))
+        uset_put(con, "feed_token", tok, uid)
         commit_retry(con)
     return tok
 
@@ -1178,19 +1406,19 @@ def _to_utc_stamp(day, hhmm):
         return _dt.strptime("%s %s" % (day, hhmm), "%Y-%m-%d %H:%M").strftime("%Y%m%dT%H%M%SZ")
 
 
-def build_ics(con):
+def build_ics(con, feed_uid):
     from datetime import timedelta as _td
     now = datetime.now()
     stamp = now.strftime("%Y%m%dT%H%M%SZ")
     horizon = (now.date() - _td(days=60)).isoformat()
     L = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Shimon HQ//EN",
          "CALSCALE:GREGORIAN", "METHOD:PUBLISH",
-         "X-WR-CALNAME:Shimon HQ", "X-WR-TIMEZONE:" + TZ_NAME,
+         "X-WR-CALNAME:HQ", "X-WR-TIMEZONE:" + TZ_NAME,
          "X-PUBLISHED-TTL:PT1H", "REFRESH-INTERVAL;VALUE=DURATION:PT1H"]
 
     # your own events (Outlook ones are skipped - they already live in Outlook)
     for e in con.execute("SELECT * FROM events WHERE COALESCE(source,'outlook')='manual'"
-                         " AND day >= ?", (horizon,)):
+                         " AND owner_id=? AND day >= ?", (feed_uid, horizon)):
         L += ["BEGIN:VEVENT", "UID:hq-ev-%s@shimonhq" % e["ext_key"], "DTSTAMP:" + stamp]
         if e["start_time"]:
             start = _to_utc_stamp(e["day"], e["start_time"])
@@ -1208,11 +1436,12 @@ def build_ics(con):
         L.append("END:VEVENT")
 
     # task deadlines as all-day entries
+    where, args = sec_clause(con, "items.section_id", uid=feed_uid)
     for it in con.execute(
             "SELECT items.*, sections.title AS sec FROM items"
             " JOIN sections ON items.section_id = sections.id"
             " WHERE COALESCE(items.due_date,'') != '' AND items.due_date >= ?"
-            " AND items.status != 'done'", (horizon,)):
+            " AND items.status != 'done'" + where, [horizon] + args):
         d = it["due_date"].replace("-", "")
         desc = it["note"] or ""
         if it["waiting_on"]:
@@ -1231,9 +1460,17 @@ def build_ics(con):
 def ics_feed(token):
     """Subscribe to this URL in Outlook - no login, so the token is the key."""
     con = db()
-    if not token or token != _setting_ro(con, "feed_token"):
+    if not token:
         abort(404)
-    return build_ics(con), 200, {"Content-Type": "text/calendar; charset=utf-8"}
+    row = con.execute("SELECT k FROM settings WHERE v=? AND k LIKE 'u%:feed_token'",
+                      (token,)).fetchone()
+    if not row:
+        abort(404)
+    try:
+        feed_uid = int(row["k"].split(":")[0][1:])
+    except (ValueError, IndexError):
+        abort(404)
+    return build_ics(con, feed_uid), 200, {"Content-Type": "text/calendar; charset=utf-8"}
 
 
 @app.route("/feed")
@@ -1250,7 +1487,8 @@ def feed_info():
 def event_ics(ev_id):
     """One event as a file - open it and Outlook adds it to your real calendar."""
     con = db()
-    e = con.execute("SELECT * FROM events WHERE id=?", (ev_id,)).fetchone()
+    e = con.execute("SELECT * FROM events WHERE id=? AND owner_id=?",
+                    (ev_id, me())).fetchone()
     if not e:
         abort(404)
     stamp = datetime.now().strftime("%Y%m%dT%H%M%SZ")
@@ -1284,6 +1522,77 @@ def _int_or_none(v):
     return n if 0 < n < 24 * 60 else None
 
 
+# ---------- account ----------
+
+@app.route("/account")
+@login_required
+def account_view():
+    con = db()
+    return render_template("account.html",
+                           who=user_row(con), folk=people_list(con),
+                           feed_url=request.url_root.rstrip("/")
+                           + url_for("ics_feed", token=_feed_token(con)))
+
+
+@app.route("/account/password", methods=["POST"])
+@login_required
+def change_password():
+    from werkzeug.security import check_password_hash, generate_password_hash
+    con = db()
+    row = user_row(con)
+    old = request.form.get("current", "")
+    new = request.form.get("new", "")
+    if not row or not check_password_hash(row["pw_hash"], old):
+        return render_template("account.html", who=row, folk=people_list(con),
+                               feed_url="", error="That is not your current password.")
+    if len(new) < 8:
+        return render_template("account.html", who=row, folk=people_list(con),
+                               feed_url="", error="Use at least 8 characters.")
+    con.execute("UPDATE users SET pw_hash=? WHERE id=?",
+                (generate_password_hash(new), row["id"]))
+    commit_retry(con)
+    return render_template("account.html", who=row, folk=people_list(con),
+                           feed_url="", ok="Password changed.")
+
+
+@app.route("/account/add", methods=["POST"])
+@login_required
+def add_person():
+    """Only an admin adds people, and a new person starts with nothing visible."""
+    from werkzeug.security import generate_password_hash
+    con = db()
+    if not session.get("admin"):
+        abort(403)
+    username = (request.form.get("username") or "").strip().lower()
+    display = (request.form.get("display_name") or "").strip() or username.title()
+    pw = request.form.get("password") or ""
+    err = None
+    if not re.match(r"^[a-z0-9_.-]{2,32}$", username):
+        err = "Username: letters, digits, dot, dash or underscore."
+    elif len(pw) < 8:
+        err = "Give them a password of at least 8 characters."
+    elif con.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone():
+        err = "That username is taken."
+    if err:
+        return render_template("account.html", who=user_row(con), folk=people_list(con),
+                               feed_url="", error=err)
+    uid = con.execute(
+        "INSERT INTO users(username, display_name, pw_hash, is_admin, created_at)"
+        " VALUES(?,?,?,0,?)",
+        (username, display, generate_password_hash(pw),
+         datetime.now().isoformat(timespec="seconds"))).lastrowid
+    # a board with nothing on it is useless, so they get one section to work in,
+    # shared - which is the point of them being here
+    pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM sections").fetchone()[0]
+    con.execute("INSERT INTO sections(title, pos, owner_id, visibility)"
+                " VALUES(?,?,?,'shared')", ("%s / Tracker" % display, pos, uid))
+    con.execute("INSERT INTO sections(title, pos, owner_id, visibility)"
+                " VALUES('Inbox',?,?,'private')", (pos + 1, uid))
+    commit_retry(con)
+    return render_template("account.html", who=user_row(con), folk=people_list(con),
+                           feed_url="", ok="%s can sign in now." % display)
+
+
 # ---------- pulse ----------
 
 @app.route("/pulse")
@@ -1296,7 +1605,7 @@ def pulse_view(day=None):
     except ValueError:
         d = None
     con = db()
-    data = pulse.week(con, d)
+    data = pulse.week(con, d, me())
     mon = date.fromisoformat(data["from"])
     return render_template("pulse.html",
                            p=data,
@@ -1319,7 +1628,7 @@ def api_pulse():
     except ValueError:
         d = None
     con = db()
-    p = pulse.week(con, d)
+    p = pulse.week(con, d, me())
     m, prev = p["movement"], p["previous"]
     L = ["WEEK\t%s to %s" % (p["from"], p["to"]),
          "MOVED\topened %d\tclosed %d\treopened %d\t(last week opened %d closed %d)"
@@ -1364,10 +1673,10 @@ def api_read():
         d = None
     mon = pulse.week_of(d)[0].isoformat()
     con = db()
-    con.execute("INSERT INTO pulse_notes(week, body, created_at) VALUES(?,?,?)"
-                " ON CONFLICT(week) DO UPDATE SET body=excluded.body,"
+    con.execute("INSERT INTO pulse_notes(week, user_id, body, created_at) VALUES(?,?,?,?)"
+                " ON CONFLICT(week, user_id) DO UPDATE SET body=excluded.body,"
                 " created_at=excluded.created_at",
-                (mon, body, datetime.now().isoformat(timespec="seconds")))
+                (mon, me(), body, datetime.now().isoformat(timespec="seconds")))
     commit_retry(con)
     return "SAVED for week of " + mon, 200, {"Content-Type": "text/plain; charset=utf-8"}
 
@@ -1380,7 +1689,21 @@ def _api_auth():
         return False
     auth = request.headers.get("Authorization", "")
     supplied = auth[7:] if auth.startswith("Bearer ") else request.args.get("token", "")
-    return supplied == tok
+    if supplied != tok:
+        return False
+    # The token belongs to the board owner. Naming someone else with ?who= lets one
+    # scheduled task serve several people without handing out a token each.
+    con = db()
+    who = (request.args.get("who") or "").strip().lower()
+    if who:
+        row = con.execute("SELECT id FROM users WHERE lower(username)=?", (who,)).fetchone()
+        if not row:
+            return False
+    else:
+        row = (con.execute("SELECT id FROM users WHERE is_admin=1 ORDER BY id LIMIT 1").fetchone()
+               or con.execute("SELECT id FROM users ORDER BY id LIMIT 1").fetchone())
+    g.api_uid = row["id"] if row else 0
+    return True
 
 
 @app.route("/api/titles")
@@ -1388,7 +1711,10 @@ def api_titles():
     """Plain-text task list for the morning sweep: STATUS <tab> TITLE per line."""
     if not _api_auth():
         abort(401)
-    rows = db().execute("SELECT status, title FROM items ORDER BY id").fetchall()
+    con = db()
+    where, args = sec_clause(con, "section_id", first=True)
+    rows = con.execute("SELECT status, title FROM items" + where + " ORDER BY id",
+                       args).fetchall()
     body = "\n".join("%s\t%s" % (r["status"], r["title"]) for r in rows)
     return body, 200, {"Content-Type": "text/plain; charset=utf-8"}
 
@@ -1402,10 +1728,13 @@ def api_rm():
     if not title:
         return "ERROR: title required", 400, {"Content-Type": "text/plain; charset=utf-8"}
     con = db()
-    cur = con.execute("DELETE FROM items WHERE lower(title)=lower(?)", (title,))
+    where, args = sec_clause(con, "section_id")
+    cur = con.execute("DELETE FROM items WHERE lower(title)=lower(?)" + where,
+                      [title] + args)
     con.execute("DELETE FROM sections WHERE id NOT IN (SELECT DISTINCT section_id FROM items)"
+                " AND owner_id=?"
                 " AND title NOT IN ('Joel / Shimon Tracker','Pinta / Office','Shul + Tzedaka',"
-                "'Personal / Family','Inbox')")
+                "'Personal / Family','Inbox')", (me(),))
     commit_retry(con)
     return "REMOVED %d: %s" % (cur.rowcount, title), 200, {"Content-Type": "text/plain; charset=utf-8"}
 
@@ -1426,15 +1755,16 @@ def api_event():
     if con.execute("SELECT 1 FROM events WHERE ext_key=? AND source='manual'", (key,)).fetchone():
         return "SKIPPED (edited here): " + subj, 200, {"Content-Type": "text/plain; charset=utf-8"}
     con.execute(
-        "INSERT INTO events(ext_key, subject, day, start_time, location, dur_min, synced_at)"
-        " VALUES(?,?,?,?,?,?,?)"
+        "INSERT INTO events(ext_key, subject, day, start_time, location, dur_min,"
+        " owner_id, synced_at) VALUES(?,?,?,?,?,?,?,?)"
         " ON CONFLICT(ext_key) DO UPDATE SET subject=excluded.subject, day=excluded.day,"
         " start_time=excluded.start_time, location=excluded.location,"
-        " dur_min=excluded.dur_min, synced_at=excluded.synced_at",
+        " dur_min=excluded.dur_min, owner_id=excluded.owner_id,"
+        " synced_at=excluded.synced_at",
         (key, subj, day,
          (request.args.get("time") or request.args.get("t") or "").strip() or None,
          (request.args.get("loc") or request.args.get("l") or "").strip(),
-         _int_or_none(request.args.get("mins")),
+         _int_or_none(request.args.get("mins")), me(),
          datetime.now().isoformat(timespec="seconds")))
     commit_retry(con)
     return "SYNCED: " + subj, 200, {"Content-Type": "text/plain; charset=utf-8"}
@@ -1447,8 +1777,8 @@ def api_events_clear():
         abort(401)
     frm = (request.args.get("from") or datetime.now().date().isoformat()).strip()
     con = db()
-    cur = con.execute("DELETE FROM events WHERE day >= ? AND COALESCE(source,'outlook')='outlook'",
-                      (frm,))
+    cur = con.execute("DELETE FROM events WHERE day >= ? AND owner_id=?"
+                      " AND COALESCE(source,'outlook')='outlook'", (frm, me()))
     commit_retry(con)
     return "CLEARED %d from %s" % (cur.rowcount, frm), 200, {"Content-Type": "text/plain; charset=utf-8"}
 
@@ -1463,8 +1793,9 @@ def api_retag():
     if not (frm and to):
         return "ERROR: from and to required", 400, {"Content-Type": "text/plain; charset=utf-8"}
     con = db()
-    cur = con.execute("UPDATE items SET waiting_on=? WHERE lower(trim(waiting_on))=lower(?)",
-                      (to, frm))
+    where, args = sec_clause(con, "section_id")
+    cur = con.execute("UPDATE items SET waiting_on=? WHERE lower(trim(waiting_on))=lower(?)"
+                      + where, [to, frm] + args)
     commit_retry(con)
     return "RETAGGED %d: %s -> %s" % (cur.rowcount, frm, to), 200, \
         {"Content-Type": "text/plain; charset=utf-8"}
@@ -1479,7 +1810,9 @@ def api_set():
     if not find:
         return "ERROR: t required", 400, {"Content-Type": "text/plain; charset=utf-8"}
     con = db()
-    row = con.execute("SELECT * FROM items WHERE lower(title)=lower(?)", (find,)).fetchone()
+    where, args = sec_clause(con, "section_id")
+    row = con.execute("SELECT * FROM items WHERE lower(title)=lower(?)" + where,
+                      [find] + args).fetchone()
     if not row:
         return "NOT FOUND: " + find, 200, {"Content-Type": "text/plain; charset=utf-8"}
     title = request.args.get("title")
@@ -1503,7 +1836,7 @@ def api_notify():
     body = (request.args.get("body") or "").strip()
     if not body:
         return "ERROR: body required", 400, {"Content-Type": "text/plain; charset=utf-8"}
-    n = send_push(title, body, request.args.get("url") or "/")
+    n = send_push(title, body, request.args.get("url") or "/", uid=me())
     return "PUSHED to %d device(s)" % n, 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
@@ -1560,11 +1893,13 @@ def api_digest():
     if not _api_auth():
         abort(401)
     today = datetime.now().date().isoformat()
-    rows = db().execute(
+    con = db()
+    where, args = sec_clause(con, "items.section_id")
+    rows = con.execute(
         "SELECT items.*, sections.title AS sec FROM items"
         " JOIN sections ON items.section_id = sections.id"
-        " WHERE items.status != 'done' AND COALESCE(items.due_date,'') != ''"
-        " ORDER BY items.due_date").fetchall()
+        " WHERE items.status != 'done' AND COALESCE(items.due_date,'') != ''" + where +
+        " ORDER BY items.due_date", args).fetchall()
     over = ["%s | %s%s" % (r["due_date"], r["title"],
                            (" (waiting on %s)" % r["waiting_on"]) if r["waiting_on"] else "")
             for r in rows if r["due_date"] < today]
@@ -1586,14 +1921,21 @@ def api_quickadd():
         return "ERROR: title required", 400, {"Content-Type": "text/plain; charset=utf-8"}
     con = db()
     sec_title = request.args.get("section", "Inbox")
-    # exact match first, then a forgiving prefix/substring match ("Joel" -> "Joel / Shimon Tracker")
-    sec = con.execute("SELECT id FROM sections WHERE title=?", (sec_title,)).fetchone()
+    # exact match first, then a forgiving prefix/substring match ("Joel" -> "Joel / Shimon Tracker"),
+    # and only ever among the sections this account may write to
+    where, args = sec_clause(con, "id")
+    sec = con.execute("SELECT id FROM sections WHERE title=?" + where,
+                      [sec_title] + args).fetchone()
     if not sec and sec_title:
-        sec = con.execute("SELECT id FROM sections WHERE title LIKE ? ORDER BY id LIMIT 1",
-                          ("%" + sec_title + "%",)).fetchone()
+        sec = con.execute("SELECT id FROM sections WHERE title LIKE ?" + where
+                          + " ORDER BY id LIMIT 1",
+                          ["%" + sec_title + "%"] + args).fetchone()
     sid = sec["id"] if sec else con.execute(
-        "INSERT INTO sections(title, pos) VALUES(?, 99)", (sec_title,)).lastrowid
-    dup = con.execute("SELECT 1 FROM items WHERE lower(title)=lower(?)", (title,)).fetchone()
+        "INSERT INTO sections(title, pos, owner_id, visibility) VALUES(?,99,?,'private')",
+        (sec_title, me())).lastrowid
+    where, args = sec_clause(con, "section_id")
+    dup = con.execute("SELECT 1 FROM items WHERE lower(title)=lower(?)" + where,
+                      [title] + args).fetchone()
     if dup:
         return "SKIPPED (duplicate): " + title, 200, {"Content-Type": "text/plain; charset=utf-8"}
     pid = None
@@ -1618,12 +1960,13 @@ def api_quickadd():
         (sid, pid, title, request.args.get("note", ""), request.args.get("waiting_on", ""),
          "open", pos, request.args.get("due") or None,
          datetime.now().isoformat(timespec="seconds")))
+    new_id = con.execute("SELECT last_insert_rowid()").fetchone()[0]
     key = thread_key(request.args.get("subject"))
     if key:
-        con.execute("UPDATE items SET thread_key=? WHERE id=(SELECT MAX(id) FROM items)", (key,))
+        con.execute("UPDATE items SET thread_key=? WHERE id=?", (key, new_id))
     chat = (request.args.get("wachat") or "").strip()
     if chat:
-        con.execute("UPDATE items SET wa_chat_id=? WHERE id=(SELECT MAX(id) FROM items)", (chat,))
+        con.execute("UPDATE items SET wa_chat_id=? WHERE id=?", (chat, new_id))
     commit_retry(con)
     return "ADDED: " + title + (" [%s]" % proj if proj else ""), 200, \
         {"Content-Type": "text/plain; charset=utf-8"}
@@ -1656,18 +1999,24 @@ def thread_key(subject):
 
 
 def _find_item(con, needle):
-    """Resolve a task by id, exact title, or a distinctive substring."""
+    """Resolve a task by id, exact title, or a distinctive substring.
+
+    Only ever within what the caller may see - otherwise a lucky guess at a title
+    would file a note onto somebody else's private work."""
     n = (needle or "").strip()
     if not n:
         return None
+    where, args = sec_clause(con, "section_id")
     if n.isdigit():
-        return con.execute("SELECT * FROM items WHERE id=?", (int(n),)).fetchone()
-    row = con.execute("SELECT * FROM items WHERE lower(title)=lower(?)", (n,)).fetchone()
+        return con.execute("SELECT * FROM items WHERE id=?" + where,
+                           [int(n)] + args).fetchone()
+    row = con.execute("SELECT * FROM items WHERE lower(title)=lower(?)" + where,
+                      [n] + args).fetchone()
     if row:
         return row
-    hits = con.execute("SELECT * FROM items WHERE lower(title) LIKE lower(?)"
-                       " ORDER BY status='done', id", ("%" + n + "%",)).fetchall()
-    return hits[0] if len(hits) == 1 else (hits[0] if hits else None)
+    hits = con.execute("SELECT * FROM items WHERE lower(title) LIKE lower(?)" + where
+                       + " ORDER BY status='done', id", ["%" + n + "%"] + args).fetchall()
+    return hits[0] if hits else None
 
 
 @app.route("/api/threads")
@@ -1675,10 +2024,13 @@ def api_threads():
     """Every task that is anchored to an email conversation, for the sweep to match against."""
     if not _api_auth():
         abort(401)
-    rows = db().execute(
+    con = db()
+    where, args = sec_clause(con, "section_id")
+    rows = con.execute(
         "SELECT id, thread_key, wa_chat_id, title FROM items"
         " WHERE status != 'done' AND ((thread_key IS NOT NULL AND thread_key != '')"
-        "   OR (wa_chat_id IS NOT NULL AND wa_chat_id != '')) ORDER BY id").fetchall()
+        "   OR (wa_chat_id IS NOT NULL AND wa_chat_id != ''))" + where
+        + " ORDER BY id", args).fetchall()
     out = ["%d\t%s\t%s\t%s" % (r["id"], r["thread_key"] or "-",
                                  ("wa:" + r["wa_chat_id"]) if r["wa_chat_id"] else "-",
                                  r["title"]) for r in rows]
@@ -1990,7 +2342,8 @@ def api_board():
         abort(401)
     con = db()
     out = []
-    for s in con.execute("SELECT * FROM sections ORDER BY pos, id"):
+    where, args = sec_clause(con, "id", first=True)
+    for s in con.execute("SELECT * FROM sections" + where + " ORDER BY pos, id", args):
         sec = {"id": s["id"], "title": s["title"], "projects": [], "tasks": []}
         for p in con.execute("SELECT * FROM projects WHERE section_id=? ORDER BY pos, id",
                              (s["id"],)):
@@ -2016,11 +2369,12 @@ def api_add_item():
     if not title:
         return jsonify(error="title required"), 400
     con = db()
-    sec = con.execute("SELECT id FROM sections WHERE title=?",
-                      (d.get("section", "Inbox"),)).fetchone()
+    where, args = sec_clause(con, "id")
+    sec = con.execute("SELECT id FROM sections WHERE title=?" + where,
+                      [d.get("section", "Inbox")] + args).fetchone()
     sid = sec["id"] if sec else con.execute(
-        "INSERT INTO sections(title, pos) VALUES(?, 99)",
-        (d.get("section", "Inbox"),)).lastrowid
+        "INSERT INTO sections(title, pos, owner_id, visibility) VALUES(?,99,?,'private')",
+        (d.get("section", "Inbox"), me())).lastrowid
     pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM items WHERE section_id=?",
                       (sid,)).fetchone()[0]
     cur = con.execute(
@@ -2039,7 +2393,9 @@ def add_section():
     if title:
         con = db()
         pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM sections").fetchone()[0]
-        con.execute("INSERT INTO sections(title, pos) VALUES(?,?)", (title, pos))
+        shared = 'shared' if request.form.get("shared") else 'private'
+        con.execute("INSERT INTO sections(title, pos, owner_id, visibility) VALUES(?,?,?,?)",
+                    (title, pos, me(), shared))
         commit_retry(con)
     return redirect(url_for("board"))
 
@@ -2047,13 +2403,35 @@ def add_section():
 @app.route("/sections/<int:sec_id>/delete", methods=["POST"])
 @login_required
 def delete_section(sec_id):
+    """Only the owner can remove a section - sharing it does not give it away."""
     con = db()
+    own = con.execute("SELECT 1 FROM sections WHERE id=? AND owner_id=?",
+                      (sec_id, me())).fetchone()
+    if not own:
+        abort(404)
     n = con.execute("SELECT COUNT(*) FROM items WHERE section_id=? AND status!='done'",
                     (sec_id,)).fetchone()[0]
     if n == 0:
         con.execute("DELETE FROM sections WHERE id=?", (sec_id,))
         commit_retry(con)
     return redirect(url_for("board"))
+
+
+@app.route("/sections/<int:sec_id>/share", methods=["POST"])
+@login_required
+def share_section(sec_id):
+    """Open a section to the other people on the board, or close it again."""
+    con = db()
+    row = con.execute("SELECT visibility FROM sections WHERE id=? AND owner_id=?",
+                      (sec_id, me())).fetchone()
+    if not row:
+        abort(404)
+    new = "private" if row["visibility"] == "shared" else "shared"
+    con.execute("UPDATE sections SET visibility=? WHERE id=?", (new, sec_id))
+    commit_retry(con)
+    if request.headers.get("X-Requested-With") == "fetch":
+        return jsonify(visibility=new)
+    return redirect(url_for("board", _anchor="sec-%d" % sec_id))
 
 
 # ---------- pwa ----------
@@ -2136,9 +2514,9 @@ def push_subscribe():
     if not d.get("endpoint") or not keys.get("p256dh"):
         return jsonify(error="bad subscription"), 400
     con = db()
-    con.execute("INSERT OR REPLACE INTO push_subs(endpoint, p256dh, auth, created_at)"
-                " VALUES(?,?,?,?)",
-                (d["endpoint"], keys["p256dh"], keys.get("auth", ""),
+    con.execute("INSERT OR REPLACE INTO push_subs(endpoint, p256dh, auth, user_id, created_at)"
+                " VALUES(?,?,?,?,?)",
+                (d["endpoint"], keys["p256dh"], keys.get("auth", ""), me(),
                  datetime.now().isoformat(timespec="seconds")))
     commit_retry(con)
     return jsonify(ok=True)
@@ -2147,12 +2525,16 @@ def push_subscribe():
 @app.route("/push/test", methods=["POST"])
 @login_required
 def push_test():
-    n = send_push("Shimon HQ", "Notifications are on. This is what a reminder looks like.")
+    n = send_push("HQ", "Notifications are on. This is what a reminder looks like.",
+                  uid=me())
     return jsonify(sent=n)
 
 
-def send_push(title, body, url="/"):
-    """Fire one notification to every subscribed device. Returns how many got it."""
+def send_push(title, body, url="/", uid=None):
+    """Fire one notification to a person's devices. Returns how many got it.
+
+    uid=None means everyone, which is only ever right for a board-wide message -
+    a reminder about somebody's task must name them or it goes to both phones."""
     try:
         import webpush_lite
     except Exception as e:
@@ -2160,7 +2542,8 @@ def send_push(title, body, url="/"):
         return 0
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
-    subs = con.execute("SELECT * FROM push_subs").fetchall()
+    subs = (con.execute("SELECT * FROM push_subs WHERE user_id=?", (uid,)).fetchall()
+            if uid else con.execute("SELECT * FROM push_subs").fetchall())
     payload = json.dumps({"title": title, "body": body, "url": url})
     sent = 0
     for sub in subs:
@@ -2200,54 +2583,63 @@ def reminder_tick():
     now_s = now.strftime("%Y-%m-%dT%H:%M")
     today = now.strftime("%Y-%m-%d")
 
-    # 1. per-task reminders that have come due (within the last 2 hours, so a restart never misses one)
-    from datetime import timedelta as _td
-    back = (now - _td(hours=2)).strftime("%Y-%m-%dT%H:%M")
-    for it in con.execute(
-            "SELECT * FROM items WHERE remind_at IS NOT NULL AND remind_at != ''"
-            " AND remind_at <= ? AND remind_at >= ? AND status != 'done'", (now_s, back)):
-        ref = "item:%d:%s" % (it["id"], it["remind_at"])
+    # Everything below is per person: one shared "already sent" marker would let the
+    # first phone silence the second, and a reminder must reach whose task it is.
+    for _u in con.execute("SELECT id FROM users ORDER BY id"):
+      uid = _u["id"]
+      vis = [r[0] for r in con.execute(
+          "SELECT id FROM sections WHERE owner_id=? OR visibility='shared'", (uid,))]
+      inq = ",".join("?" * len(vis)) if vis else "NULL"
+
+      # 1. per-task reminders that have come due (within the last 2 hours, so a restart never misses one)
+      from datetime import timedelta as _td
+      back = (now - _td(hours=2)).strftime("%Y-%m-%dT%H:%M")
+      for it in con.execute(
+              "SELECT * FROM items WHERE remind_at IS NOT NULL AND remind_at != ''"
+              " AND remind_at <= ? AND remind_at >= ? AND status != 'done'"
+              " AND section_id IN (%s)" % inq, [now_s, back] + vis):
+        ref = "u%d:item:%d:%s" % (uid, it["id"], it["remind_at"])
         if _already_sent(con, ref):
             continue
         body = it["title"]
         if it["waiting_on"]:
             body += "  (waiting on %s)" % it["waiting_on"]
-        send_push("Reminder", body, "/#item-%d" % it["id"])
+        send_push("Reminder", body, "/#item-%d" % it["id"], uid=uid)
         _mark_sent(con, ref)
 
-    # 2. meetings starting in the next 15 minutes
-    soon = (now + _td(minutes=15)).strftime("%H:%M")
-    for e in con.execute(
-            "SELECT * FROM events WHERE day=? AND start_time IS NOT NULL"
-            " AND start_time > ? AND start_time <= ?",
-            (today, now.strftime("%H:%M"), soon)):
-        ref = "ev:%s:%s" % (e["ext_key"], e["day"])
+      # 2. meetings starting in the next 15 minutes
+      soon = (now + _td(minutes=15)).strftime("%H:%M")
+      for e in con.execute(
+              "SELECT * FROM events WHERE day=? AND owner_id=? AND start_time IS NOT NULL"
+              " AND start_time > ? AND start_time <= ?",
+              (today, uid, now.strftime("%H:%M"), soon)):
+        ref = "u%d:ev:%s:%s" % (uid, e["ext_key"], e["day"])
         if _already_sent(con, ref):
             continue
         body = "%s starts %s" % (e["subject"], e["start_time"])
         if e["location"]:
             body += "  ·  " + e["location"]
-        send_push("Coming up", body, "/calendar")
+        send_push("Coming up", body, "/calendar", uid=uid)
         _mark_sent(con, ref)
 
-    # 2b. "leave now" - only when there is a key and a from-address to measure from
-    home = _setting(con, "origin_home", "") or _setting(con, "origin_address", "") or ""
-    work = _setting(con, "origin_work", "") or ""
-    if maps.KEY and (home or work):
+      # 2b. "leave now" - only when there is a key and a from-address to measure from
+      home, work = _origins(con, uid)
+      if maps.KEY and (home or work):
         ahead = (now + _td(minutes=120)).strftime("%H:%M")
         day_evs = con.execute(
-            "SELECT * FROM events WHERE day=? ORDER BY COALESCE(start_time,'99:99'), id",
-            (today,)).fetchall()
+            "SELECT * FROM events WHERE day=? AND owner_id=?"
+            " ORDER BY COALESCE(start_time,'99:99'), id", (today, uid)).fetchall()
         for i, e in enumerate(day_evs):
             hhmm = (e["start_time"] or "")[:5]
             if not hhmm or hhmm <= now.strftime("%H:%M") or hhmm > ahead:
                 continue
             if not maps.is_place(e["location"]):
                 continue
-            ref = "leave:%s:%s" % (e["ext_key"] or e["id"], e["day"])
+            ref = "u%d:leave:%s:%s" % (uid, e["ext_key"] or e["id"], e["day"])
             if _already_sent(con, ref):
                 continue
-            src, _label = origin_for(day_evs, i, home, work, live_fix(con), now.strftime("%H:%M"))
+            src, _label = origin_for(day_evs, i, home, work, live_fix(con, uid=uid),
+                                     now.strftime("%H:%M"))
             if not src:
                 continue
             secs = maps.drive_seconds(src, e["location"],
@@ -2262,21 +2654,23 @@ def reminder_tick():
             send_push("Leave now",
                       "%s at %s  -  %s drive" % (e["subject"], fmt12(e["start_time"]),
                                                  maps.pretty_minutes(secs)),
-                      "/day/" + e["day"])
+                      "/day/" + e["day"], uid=uid)
             _mark_sent(con, ref)
 
-    # 3. one morning digest at 8am on weekdays
-    if now.weekday() < 5 and now.strftime("%H:%M") >= "08:00" and now.strftime("%H:%M") < "09:00":
-        ref = "digest:" + today
+      # 3. one morning digest at 8am on weekdays
+      if now.weekday() < 5 and "08:00" <= now.strftime("%H:%M") < "09:00":
+        ref = "u%d:digest:%s" % (uid, today)
         if not _already_sent(con, ref):
             due = con.execute(
-                "SELECT COUNT(*) c FROM items WHERE status != 'done' AND due_date = ?",
-                (today,)).fetchone()["c"]
+                "SELECT COUNT(*) c FROM items WHERE status != 'done' AND due_date = ?"
+                " AND section_id IN (%s)" % inq, [today] + vis).fetchone()["c"]
             over = con.execute(
                 "SELECT COUNT(*) c FROM items WHERE status != 'done'"
-                " AND COALESCE(due_date,'') != '' AND due_date < ?", (today,)).fetchone()["c"]
+                " AND COALESCE(due_date,'') != '' AND due_date < ?"
+                " AND section_id IN (%s)" % inq, [today] + vis).fetchone()["c"]
             meetings = con.execute(
-                "SELECT COUNT(*) c FROM events WHERE day = ?", (today,)).fetchone()["c"]
+                "SELECT COUNT(*) c FROM events WHERE day = ? AND owner_id = ?",
+                (today, uid)).fetchone()["c"]
             bits = []
             if meetings:
                 bits.append("%d meeting%s" % (meetings, "" if meetings == 1 else "s"))
@@ -2285,7 +2679,7 @@ def reminder_tick():
             if over:
                 bits.append("%d overdue" % over)
             if bits:
-                send_push("Today", "  ·  ".join(bits), "/calendar")
+                send_push("Today", "  ·  ".join(bits), "/calendar", uid=uid)
             _mark_sent(con, ref)
 
     con.execute("DELETE FROM reminders_sent WHERE sent_at < ?",

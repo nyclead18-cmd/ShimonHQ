@@ -17,6 +17,7 @@
       <a class="tab" href="{{ url_for('pulse_view') }}">Pulse</a>
     </nav>
     <button type="button" class="notifbtn" id="notifbtn" title="Reminders on this device">&#9200;</button>
+    <a class="logout" href="{{ url_for('account_view') }}">{{ session.get('name') or 'Account' }}</a>
     <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
   </div>
 </header>

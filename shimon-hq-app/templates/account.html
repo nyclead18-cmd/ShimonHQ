@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Account · Shimon HQ{% endblock %}
+{% block body %}
+<div class="wrap">
+<header class="top">
+  <div>
+    <div class="eyebrow">{{ who.display_name if who else '' }}</div>
+    <h1>Account</h1>
+  </div>
+  <div class="right">
+    <nav class="tabs">
+      <a class="tab" href="{{ url_for('board') }}">Board</a>
+      <a class="tab" href="{{ url_for('pulse_view') }}">Pulse</a>
+    </nav>
+    <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
+  </div>
+</header>
+
+{% if error %}<div class="savewarn">{{ error }}</div>{% endif %}
+{% if ok %}<div class="okline">{{ ok }}</div>{% endif %}
+
+<section class="card acct">
+  <div class="sec-head"><h2>Your password</h2></div>
+  <form method="post" action="{{ url_for('change_password') }}" class="stack">
+    <label>Current password<input type="password" name="current" autocomplete="current-password" required></label>
+    <label>New password<input type="password" name="new" autocomplete="new-password" minlength="8" required></label>
+    <button type="submit">Change it</button>
+  </form>
+</section>
+
+{% if feed_url %}
+<section class="card acct">
+  <div class="sec-head"><h2>Your calendar feed</h2></div>
+  <p class="caveat">Private to you. Anyone with this link can read your diary, so treat it like a password.</p>
+  <input class="feedurl" value="{{ feed_url }}" readonly onclick="this.select()">
+</section>
+{% endif %}
+
+<section class="card acct">
+  <div class="sec-head"><h2>On the board</h2></div>
+  <ul class="prows">
+    {% for f in folk %}
+    <li class="prow rhythm">
+      <span class="pwho">{{ f.display_name }}</span>
+      <span class="ptitle">{{ f.username }}{% if f.is_admin %} &middot; admin{% endif %}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="caveat">Sections you own are private until you tap <b>share</b> on them.
+  Shared sections are visible to everyone here, and they can close and comment on those tasks.</p>
+</section>
+
+{% if session.get('admin') %}
+<section class="card acct">
+  <div class="sec-head"><h2>Add someone</h2></div>
+  <form method="post" action="{{ url_for('add_person') }}" class="stack">
+    <label>Username<input name="username" autocomplete="off" placeholder="joel" required></label>
+    <label>Name<input name="display_name" autocomplete="off" placeholder="Joel"></label>
+    <label>First password<input name="password" autocomplete="off" minlength="8" required></label>
+    <button type="submit">Add</button>
+  </form>
+  <p class="caveat">They get their own tracker section, shared, and a private Inbox.
+  Tell them to change this password the first time they sign in.</p>
+</section>
+{% endif %}
+</div>
+{% endblock %}
