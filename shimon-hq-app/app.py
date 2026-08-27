@@ -268,6 +268,39 @@ def _pulse_notes_per_person(con):
         "ALTER TABLE pulse_notes_new RENAME TO pulse_notes;")
 
 
+def _events_unique_per_person(con):
+    """An Outlook event id is unique inside one mailbox, not across two.
+
+    ext_key was globally unique, which was right while one person synced. With a
+    second calendar arriving, a collision would not duplicate a meeting - the
+    upsert would quietly move it from one person's board to the other's. Make the
+    key unique per owner instead.
+    """
+    try:
+        cols = [r[1] for r in con.execute("PRAGMA table_info(events)")]
+    except sqlite3.Error:
+        return
+    if not cols or "owner_id" not in cols:
+        return
+    idx = con.execute("SELECT name FROM sqlite_master WHERE type='index'"
+                      " AND tbl_name='events' AND name='events_key_owner'").fetchone()
+    if idx:
+        return
+    con.executescript(
+        "CREATE TABLE events_new ("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT, ext_key TEXT, subject TEXT NOT NULL,"
+        " day TEXT NOT NULL, start_time TEXT, location TEXT DEFAULT '',"
+        " source TEXT DEFAULT 'outlook', note TEXT DEFAULT '', dur_min INTEGER,"
+        " owner_id INTEGER, synced_at TEXT);"
+        "INSERT INTO events_new(id, ext_key, subject, day, start_time, location,"
+        " source, note, dur_min, owner_id, synced_at)"
+        " SELECT id, ext_key, subject, day, start_time, location,"
+        " source, note, dur_min, owner_id, synced_at FROM events;"
+        "DROP TABLE events;"
+        "ALTER TABLE events_new RENAME TO events;"
+        "CREATE UNIQUE INDEX events_key_owner ON events(ext_key, owner_id);")
+
+
 def _make_people(con):
     """Turn the single hard-coded login into a real account, once.
 
@@ -368,6 +401,7 @@ def init_db():
         con.execute("ALTER TABLE push_subs ADD COLUMN user_id INTEGER")
     _pulse_notes_per_person(con)
     _make_people(con)
+    _events_unique_per_person(con)
     os.makedirs(FILES_DIR, exist_ok=True)
     _stamp_responses_in_new_york(con)
     n = con.execute("SELECT COUNT(*) FROM sections").fetchone()[0]
@@ -1790,14 +1824,17 @@ def api_event():
     if not (key and subj and day):
         return "ERROR: k, s and d required", 400, {"Content-Type": "text/plain; charset=utf-8"}
     con = db()
-    if con.execute("SELECT 1 FROM hidden_events WHERE ext_key=?", (key,)).fetchone():
+    if con.execute("SELECT 1 FROM hidden_events WHERE ext_key=?", (key,)).fetchone() \
+            and con.execute("SELECT 1 FROM events WHERE ext_key=? AND owner_id<>?",
+                            (key, me())).fetchone() is None:
         return "SKIPPED (deleted here): " + subj, 200, {"Content-Type": "text/plain; charset=utf-8"}
     if con.execute("SELECT 1 FROM events WHERE ext_key=? AND source='manual'", (key,)).fetchone():
         return "SKIPPED (edited here): " + subj, 200, {"Content-Type": "text/plain; charset=utf-8"}
     con.execute(
         "INSERT INTO events(ext_key, subject, day, start_time, location, dur_min,"
         " owner_id, synced_at) VALUES(?,?,?,?,?,?,?,?)"
-        " ON CONFLICT(ext_key) DO UPDATE SET subject=excluded.subject, day=excluded.day,"
+        " ON CONFLICT(ext_key, owner_id) DO UPDATE SET"
+        " subject=excluded.subject, day=excluded.day,"
         " start_time=excluded.start_time, location=excluded.location,"
         " dur_min=excluded.dur_min, owner_id=excluded.owner_id,"
         " synced_at=excluded.synced_at",
