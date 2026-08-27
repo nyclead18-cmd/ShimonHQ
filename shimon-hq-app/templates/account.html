@@ -11,6 +11,7 @@
     <nav class="tabs">
       <a class="tab" href="{{ url_for('today_view') }}">Today</a>
       <a class="tab" href="{{ url_for('board') }}">Board</a>
+      {% if has_pipe %}<a class="tab" href="{{ url_for('pipeline_view') }}">Pipeline</a>{% endif %}
       <a class="tab" href="{{ url_for('pulse_view') }}">Pulse</a>
     </nav>
     <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
@@ -26,6 +27,12 @@
     <label>Your name<input name="display_name" value="{{ who.display_name if who else '' }}" maxlength="40"></label>
     <label>What this board is called<input name="board_title" value="{{ my_title }}" placeholder="{{ board_name }}" maxlength="40"></label>
     <label>Small line above it<input name="tagline" value="{{ tagline }}" placeholder="leave empty for none" maxlength="60"></label>
+    <label>How it reads
+      <select name="display">
+        <option value="simple" {% if display_mode == 'simple' %}selected{% endif %}>Simple &mdash; one line per task, tap to open</option>
+        <option value="full" {% if display_mode == 'full' %}selected{% endif %}>Full &mdash; everything on the row</option>
+      </select>
+    </label>
     <button type="submit">Save</button>
   </form>
   <p class="caveat">Leave the board name empty and it uses your name.</p>

@@ -24,6 +24,7 @@
     </div>
     {% set inotes = notes_by_item.get(it.id, []) %}
     {% if inotes %}
+    <button type="button" class="ncount" title="Show the conversation">{{ inotes|length }} update{{ '' if inotes|length == 1 else 's' }}</button>
     <ul class="notes">
       {% for n in inotes %}
       <li class="noterow" id="note-{{ n.id }}"><span class="nd">{{ n.created_at|stamp }}</span>

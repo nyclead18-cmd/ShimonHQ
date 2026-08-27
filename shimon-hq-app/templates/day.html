@@ -11,8 +11,9 @@
     <nav class="tabs">
       <a class="tab" href="{{ url_for('today_view') }}">Today</a>
       <a class="tab" href="{{ url_for('board') }}">Board</a>
-      <a class="tab" href="{{ url_for('briefing_view') }}">Brief{% if brief_unread %} <span class="badge">{{ brief_unread }}</span>{% endif %}</a>
-      <a class="tab on" href="{{ url_for('calendar_view') }}">Calendar</a>
+      {% if has_pipe %}<a class="tab" href="{{ url_for('pipeline_view') }}">Pipeline</a>{% endif %}
+      {% if has_brief %}<a class="tab" href="{{ url_for('briefing_view') }}">Brief{% if brief_unread %} <span class="badge">{{ brief_unread }}</span>{% endif %}</a>{% endif %}
+      {% if has_cal %}<a class="tab on" href="{{ url_for('calendar_view') }}">Calendar</a>{% endif %}
       <a class="tab" href="{{ url_for('people_view') }}">People</a>
       <a class="tab" href="{{ url_for('joel_view') }}">Joel</a>
       <a class="tab" href="{{ url_for('pulse_view') }}">Pulse</a>

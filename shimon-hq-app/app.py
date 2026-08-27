@@ -598,7 +598,9 @@ def login():
             session["name"] = row["display_name"]
             session["admin"] = bool(row["is_admin"])
             session.permanent = True
-            return redirect(url_for("board"))
+            g.api_uid = 0
+            return redirect(url_for(
+                "today_view" if display_mode(con, row["id"]) == "simple" else "board"))
         # one message for both cases - never reveal which usernames exist
         error = "Wrong username or password."
     return render_template("login.html", error=error)
@@ -1272,18 +1274,45 @@ def board_title(con, uid=None):
     return "%s' HQ" % name if name.endswith("s") else "%s's HQ" % name
 
 
+def display_mode(con, uid=None):
+    """simple = one line per task, tap for the rest. The default for everyone but
+    the admin, because the person who built the board can stand its density and
+    nobody else should have to."""
+    uid = uid if uid is not None else me()
+    v = uset(con, "display", uid)
+    if v in ("simple", "full"):
+        return v
+    row = con.execute("SELECT is_admin FROM users WHERE id=?", (uid,)).fetchone()
+    return "full" if (row and row["is_admin"]) else "simple"
+
+
 @app.context_processor
 def inject_identity():
     """The board is named for the person looking at it, not for the person who
-    happens to have built it. Somebody using this with a dozen other people
-    should never see another person's name over their own work."""
+    happens to have built it - and dressed for them too: a tab with nothing
+    behind it is furniture, so it is not shown."""
+    blank = {"board_name": "HQ", "tagline": "", "display_mode": "full",
+             "has_brief": False, "has_cal": False, "has_pipe": False}
     try:
         if not me():
-            return {"board_name": "HQ", "tagline": ""}
+            return blank
         con = db()
-        return {"board_name": board_title(con), "tagline": uset(con, "tagline")}
+        ids = visible_ids(con)
+        q = ",".join("?" * len(ids)) if ids else "NULL"
+        return {
+            "board_name": board_title(con),
+            "tagline": uset(con, "tagline"),
+            "display_mode": display_mode(con),
+            "has_brief": bool(con.execute(
+                "SELECT 1 FROM brief_items WHERE owner_id=? LIMIT 1", (me(),)).fetchone()),
+            "has_cal": bool(con.execute(
+                "SELECT 1 FROM events WHERE owner_id=? LIMIT 1", (me(),)).fetchone()),
+            "has_pipe": bool(ids) and bool(con.execute(
+                "SELECT 1 FROM sections WHERE kind='pipeline' AND id IN (%s) LIMIT 1"
+                % q, ids).fetchone()),
+        }
     except Exception:
-        return {"board_name": "HQ", "tagline": ""}
+        return blank
 
 
 @app.context_processor
@@ -1980,6 +2009,9 @@ def set_identity():
     uset_put(con, "board_title", title, target)      # empty falls back to "<Name>'s HQ"
     if "tagline" in request.form:
         uset_put(con, "tagline", (request.form.get("tagline") or "").strip()[:60], target)
+    d = (request.form.get("display") or "").strip()
+    if d in ("simple", "full"):
+        uset_put(con, "display", d, target)
     commit_retry(con)
     return redirect(url_for("account_view"))
 

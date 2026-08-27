@@ -672,3 +672,29 @@ table.dealtable{width:100%; border-collapse:collapse; font-size:14px;}
   border-top:1px solid var(--border); padding-top:12px; margin-top:4px;}
 .dealfields .taglabel{margin:0;}
 @media (max-width:520px){ .dealfields{grid-template-columns:1fr;} }
+
+/* ---------- simple mode: a row is one line until you touch it ----------
+   Keep is simple because it shows the list and trusts you to tap for more.
+   Nothing is removed here - the respond box, the files, the edit form are all
+   still in the page - they just wait behind a tap instead of shouting. */
+.ncount{display:none;}
+body.simple .stats{display:none;}
+body.simple .addrow details summary{font-size:12px;}
+body.simple .addrow details:nth-child(2){display:none;}   /* projects are power furniture */
+body.simple .addsec{display:none;}
+body.simple li.item{padding-top:9px; padding-bottom:9px;}
+body.simple li.item .respondrow,
+body.simple li.item .editbox,
+body.simple li.item ul.notes,
+body.simple li.item .files{display:none;}
+body.simple li.item .ncount{display:inline-block; font:inherit; font-size:11px;
+  font-weight:700; color:var(--muted); background:var(--row); border:1px solid var(--border);
+  border-radius:999px; padding:1px 9px; cursor:pointer; margin-top:4px;}
+body.simple li.item .body{cursor:pointer;}
+body.simple li.item.expanded .body{cursor:default;}
+body.simple li.item.expanded .respondrow{display:flex;}
+body.simple li.item.expanded .editbox{display:block;}
+body.simple li.item.expanded ul.notes{display:block;}
+body.simple li.item.expanded .files{display:flex;}
+body.simple li.item.expanded .ncount{display:none;}
+body.simple li.item.expanded{background:var(--row);}

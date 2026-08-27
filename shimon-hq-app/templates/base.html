@@ -28,7 +28,7 @@ addEventListener('load', function () {
 </script>
 <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600&family=Frank+Ruhl+Libre:wght@500;700&family=Assistant:wght@400;600;700&display=swap"></noscript>
 </head>
-<body>
+<body class="{{ 'simple' if display_mode == 'simple' else '' }}">
 {% block body %}{% endblock %}
 <script>
 if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/sw.js'); }

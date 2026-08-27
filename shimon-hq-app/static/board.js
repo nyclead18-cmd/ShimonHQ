@@ -466,3 +466,21 @@ document.addEventListener('click', function (ev) {
     });
   });
 })();
+
+/* ---------- simple mode: tap a row to open it ---------- */
+(function () {
+  if (!document.body.classList.contains('simple')) { return; }
+  document.addEventListener('click', function (ev) {
+    // a tap on a real control is that control's business
+    if (ev.target.closest('button, a, input, select, textarea, label, summary, form')) {
+      var chip = ev.target.closest('.ncount');
+      if (!chip) { return; }
+      ev.preventDefault();
+      chip.closest('li.item').classList.add('expanded');
+      return;
+    }
+    var li = ev.target.closest('li.item');
+    if (!li) { return; }
+    li.classList.toggle('expanded');
+  }, false);
+})();
