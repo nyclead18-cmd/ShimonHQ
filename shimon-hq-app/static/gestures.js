@@ -99,10 +99,9 @@
               color2: true, run: function () { dismissInPlace(li, f); }};
     }
     if (k === 'item') {
-      var df = q(li, '.editbox .delform');
-      if (!df) return null;
+      if (!itemId(li)) return null;
       return {label: 'Delete', icon: '✕', color: '#A33B2E',
-              confirm: true, run: function () { df.submit(); }};
+              confirm: true, run: function () { deleteItem(li); }};
     }
     if (k === 'note') {
       var nf = q(li, '.ndelform');
@@ -111,6 +110,21 @@
               run: function () { removeNoteInPlace(li, nf); }};
     }
     return null;
+  }
+
+  function itemId(li) {
+    var pill = q(li, '.pill');
+    return (pill && pill.getAttribute('data-id')) || '';
+  }
+
+  function deleteItem(li) {
+    var id = itemId(li);
+    if (!id) return;
+    var f = document.createElement('form');
+    f.method = 'post';
+    f.action = '/items/' + id + '/delete';
+    document.body.appendChild(f);
+    f.submit();
   }
 
   function setStatus(li, st) {
@@ -212,12 +226,14 @@
         if (t) { out.push({label: t, href: a.href, external: a.target === '_blank'}); }
       });
 
-    var del = k === 'brief' ? q(li, '.delform') : q(li, '.editbox .delform');
-    if (del) {
-      out.push({label: k === 'brief' ? 'Dismiss' : 'Delete', danger: true,
-                run: function () {
-                  if (k === 'brief') { dismissInPlace(li, del); } else { del.submit(); }
-                }});
+    if (k === 'brief') {
+      var bd = q(li, '.delform');
+      if (bd) {
+        out.push({label: 'Dismiss', danger: true,
+                  run: function () { dismissInPlace(li, bd); }});
+      }
+    } else if (itemId(li)) {
+      out.push({label: 'Delete', danger: true, run: function () { deleteItem(li); }});
     }
     return out;
   }

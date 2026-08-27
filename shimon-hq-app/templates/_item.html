@@ -1,9 +1,11 @@
-<li class="item {{ it.status }}{% if hidden %} donerow{% endif %}" id="item-{{ it.id }}">
+<li class="item {{ it.status }}{% if hidden %} donerow{% endif %}" id="item-{{ it.id }}"
+    data-due="{{ it.due_date or '' }}" data-rem="{{ it.remind_at or '' }}"
+    data-sec="{{ it.section_id }}" data-proj="{{ it.project_id or '' }}">
   <button type="button" class="pill {{ it.status }}" data-id="{{ it.id }}">
     {{ 'Open' if it.status == 'open' else 'Waiting' if it.status == 'waiting' else 'Done' }}
   </button>
   <div class="body">
-    <div class="t" dir="auto">{{ it.title }}{% if it.note %} <span class="n" dir="auto">&mdash; {{ it.note }}</span>{% endif %}</div>
+    <div class="t" dir="auto"><span class="tt">{{ it.title }}</span>{% if it.note %} <span class="n" dir="auto">&mdash; {{ it.note }}</span>{% endif %}</div>
     <div class="metaline">
       {% if it.due_date %}
         <span class="due{% if it.status != 'done' %}{% if it.due_date < today_iso %} over{% elif it.due_date <= soon_iso %} soon{% endif %}{% endif %}">due {{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}</span>
@@ -38,33 +40,10 @@
       </form>
       <label class="fadd" title="Attach a file">+ file<input type="file" class="fileinput" data-id="{{ it.id }}" hidden></label>
     </div>
-    <details class="editbox">
+    <!-- The edit form is built on first open. Rendering it 300 times cost more
+         than a third of the page for something almost never looked at. -->
+    <details class="editbox" data-id="{{ it.id }}">
       <summary>edit</summary>
-      <form class="edit" method="post" action="{{ url_for('edit_item', item_id=it.id) }}">
-        <input name="title" dir="auto" value="{{ it.title }}" required>
-        <input name="note" dir="auto" value="{{ it.note }}" placeholder="Next step / note">
-        <input name="waiting_on" dir="auto" value="{{ it.waiting_on }}" placeholder="Waiting on (who)">
-        <label class="taglabel">Section
-          <select name="section_id">
-            {% for s in sections %}<option value="{{ s.id }}"{% if it.section_id == s.id %} selected{% endif %}>{{ s.title }}</option>{% endfor %}
-          </select>
-        </label>
-        <label class="taglabel">Project
-          <select name="project_id">
-            <option value="">&mdash; none &mdash;</option>
-            {% for s in sections %}{% set ps = projects_by_sec.get(s.id, []) %}{% if ps %}
-            <optgroup label="{{ s.title }}">
-              {% for p in ps %}<option value="{{ p.id }}"{% if it.project_id == p.id %} selected{% endif %}>{{ p.title }}</option>{% endfor %}
-            </optgroup>{% endif %}{% endfor %}
-          </select>
-        </label>
-        <label class="duelabel">Due <input type="date" name="due_date" value="{{ it.due_date or '' }}"></label>
-        <label class="duelabel">Remind <input type="datetime-local" name="remind_at" value="{{ it.remind_at or '' }}"></label>
-        <div class="btns"><button type="submit">Save</button></div>
-      </form>
-      <form method="post" action="{{ url_for('delete_item', item_id=it.id) }}" class="delform">
-        <button type="submit" class="del" title="Remove">&#x2715;</button>
-      </form>
     </details>
   </div>
 </li>

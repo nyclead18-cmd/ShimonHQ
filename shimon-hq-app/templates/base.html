@@ -9,8 +9,24 @@
 <link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}?v={{ css_v }}">
 <link rel="icon" href="{{ url_for('static', filename='favicon.png') }}?v={{ css_v }}">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600&family=Frank+Ruhl+Libre:wght@500;700&family=Assistant:wght@400;600;700&display=swap">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Our own stylesheet first, and the web fonts without blocking the first paint.
+     On a phone this is the difference between the board appearing and the screen
+     staying white while Google is asked for a font. -->
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ css_v }}">
+<link id="webfonts" rel="stylesheet" media="print" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600&family=Frank+Ruhl+Libre:wght@500;700&family=Assistant:wght@400;600;700&display=swap"
+      onload="this.media='all'" onerror="this.media='all'">
+<script>
+// Belt and braces: if the onload above never fires - a slow network, a blocked
+// request, a cached sheet - promote the fonts once the page is up anyway. If
+// Google is unreachable entirely the fallback stack simply stands, which is the
+// behaviour we want on a phone with one bar.
+addEventListener('load', function () {
+  var l = document.getElementById('webfonts');
+  if (l && l.media !== 'all') { l.media = 'all'; }
+});
+</script>
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600&family=Frank+Ruhl+Libre:wght@500;700&family=Assistant:wght@400;600;700&display=swap"></noscript>
 </head>
 <body>
 {% block body %}{% endblock %}

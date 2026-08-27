@@ -110,4 +110,5 @@
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='board.js') }}?v={{ css_v }}"></script>
+{% include "_edittpl.html" %}
 {% endblock %}

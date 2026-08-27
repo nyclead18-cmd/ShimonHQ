@@ -272,3 +272,62 @@ jumpToLinkedItem();
     }).catch(function () { setLabel('off'); });
   });
 })();
+
+/* ---------- the edit form, built when you actually open it ----------
+   Rendering it under every row cost more than a third of the page, for a form
+   that is almost never opened. One copy lives in a <template>; opening "edit"
+   clones it and fills it from the row's own data attributes. */
+(function () {
+  // Looked up when first needed, not now: this script is loaded before the
+  // <template> it clones, so grabbing it at startup would find nothing and
+  // silently disable editing everywhere.
+  function template() { return document.getElementById('edittpl'); }
+
+  function build(box) {
+    if (box.dataset.built) { return; }
+    var tpl = template();
+    if (!tpl) { return; }
+    var li = box.closest('li.item');
+    var id = box.dataset.id;
+    if (!li || !id) { return; }
+    box.dataset.built = '1';
+    var frag = tpl.content.cloneNode(true);
+    var edit = frag.querySelector('form.edit');
+    var del = frag.querySelector('form.delform');
+    edit.action = '/items/' + id + '/edit';
+    del.action = '/items/' + id + '/delete';
+    var d = li.dataset;
+    function set(name, value) {
+      var f = edit.querySelector('[name=' + name + ']');
+      if (f) { f.value = value || ''; }
+    }
+    function txt(sel, strip) {
+      var el = li.querySelector(sel);
+      if (!el) { return ''; }
+      var v = (el.textContent || '').trim();
+      return strip && v.indexOf(strip) === 0 ? v.slice(strip.length).trim() : v;
+    }
+    // read these off the row rather than repeating them in an attribute - the
+    // same text twice on every row was a sixth of the page
+    set('title', txt('.t .tt'));
+    set('note', txt('.t .n', '\u2014'));
+    set('waiting_on', txt('.metaline .w b'));
+    set('due_date', d.due); set('remind_at', d.rem);
+    set('section_id', d.sec); set('project_id', d.proj);
+    box.appendChild(frag);
+  }
+
+  // `toggle` does not bubble, so listen in the capture phase
+  document.addEventListener('toggle', function (ev) {
+    var box = ev.target;
+    if (box && box.classList && box.classList.contains('editbox') && box.open) {
+      build(box);
+    }
+  }, true);
+
+  // a tap on the summary should have the form ready before the panel opens
+  document.addEventListener('pointerdown', function (ev) {
+    var sum = ev.target.closest && ev.target.closest('.editbox > summary');
+    if (sum) { build(sum.parentElement); }
+  }, true);
+})();

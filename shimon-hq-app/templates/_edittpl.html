@@ -1,0 +1,28 @@
+{# Rendered once per page and cloned by board.js when someone opens "edit". #}
+<template id="edittpl">
+  <form class="edit" method="post" action="">
+    <input name="title" dir="auto" required>
+    <input name="note" dir="auto" placeholder="Next step / note">
+    <input name="waiting_on" dir="auto" placeholder="Waiting on (who)">
+    <label class="taglabel">Section
+      <select name="section_id">
+        {% for s in sections %}<option value="{{ s.id }}">{{ s.title }}</option>{% endfor %}
+      </select>
+    </label>
+    <label class="taglabel">Project
+      <select name="project_id">
+        <option value="">&mdash; none &mdash;</option>
+        {% for s in sections %}{% set ps = projects_by_sec.get(s.id, []) %}{% if ps %}
+        <optgroup label="{{ s.title }}">
+          {% for p in ps %}<option value="{{ p.id }}">{{ p.title }}</option>{% endfor %}
+        </optgroup>{% endif %}{% endfor %}
+      </select>
+    </label>
+    <label class="duelabel">Due <input type="date" name="due_date"></label>
+    <label class="duelabel">Remind <input type="datetime-local" name="remind_at"></label>
+    <div class="btns"><button type="submit">Save</button></div>
+  </form>
+  <form method="post" class="delform" action="">
+    <button type="submit" class="del" title="Remove">&#x2715;</button>
+  </form>
+</template>

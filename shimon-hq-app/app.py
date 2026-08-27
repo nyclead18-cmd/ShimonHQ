@@ -268,6 +268,36 @@ def _pulse_notes_per_person(con):
         "ALTER TABLE pulse_notes_new RENAME TO pulse_notes;")
 
 
+INDEXES = (
+    # Every one of these was a full table scan. Invisible at fifty tasks, not at
+    # five hundred - and Render's disk is a network disk, where a scan costs far
+    # more than it does on a laptop. They are created here rather than in
+    # schema.sql because several of the columns are added by the migrations above.
+    ("items_section",  "items(section_id)"),
+    ("items_status",   "items(status)"),
+    ("items_due",      "items(due_date)"),
+    ("items_project",  "items(project_id)"),
+    ("items_thread",   "items(thread_key)"),
+    ("notes_item",     "item_notes(item_id)"),
+    ("files_item",     "item_files(item_id)"),
+    ("projects_sec",   "projects(section_id)"),
+    ("sections_owner", "sections(owner_id, visibility)"),
+    ("events_day",     "events(day, owner_id)"),
+    ("events_owner",   "events(owner_id)"),
+    ("brief_day",      "brief_items(owner_id, day)"),
+    ("brief_unread",   "brief_items(owner_id, is_read)"),
+    ("push_user",      "push_subs(user_id)"),
+)
+
+
+def _make_indexes(con):
+    for name, target in INDEXES:
+        try:
+            con.execute("CREATE INDEX IF NOT EXISTS %s ON %s" % (name, target))
+        except sqlite3.Error as e:
+            app.logger.warning("index %s skipped: %s", name, e)
+
+
 def _events_unique_per_person(con):
     """An Outlook event id is unique inside one mailbox, not across two.
 
@@ -402,6 +432,7 @@ def init_db():
     _pulse_notes_per_person(con)
     _make_people(con)
     _events_unique_per_person(con)
+    _make_indexes(con)          # after every ALTER, so the columns exist
     os.makedirs(FILES_DIR, exist_ok=True)
     _stamp_responses_in_new_york(con)
     n = con.execute("SELECT COUNT(*) FROM sections").fetchone()[0]
@@ -2737,6 +2768,22 @@ def send_push(title, body, url="/", uid=None):
     return sent
 
 
+def _claim(con, ref):
+    """Claim the right to send this one notification, or find it already taken.
+
+    With more than one worker process the reminder loop runs in each of them.
+    Checking and then sending leaves a gap where both see nothing and both push,
+    and two buzzes for the same meeting is exactly the kind of thing that makes
+    an app feel broken. The insert IS the claim: whoever writes the row sends.
+    """
+    cur = con.execute("INSERT OR IGNORE INTO reminders_sent(ref, sent_at) VALUES(?,?)",
+                      (ref, datetime.now().isoformat(timespec="seconds")))
+    if not cur.rowcount:
+        return False
+    commit_retry(con)
+    return True
+
+
 def _already_sent(con, ref):
     return con.execute("SELECT 1 FROM reminders_sent WHERE ref=?", (ref,)).fetchone() is not None
 
@@ -2771,13 +2818,12 @@ def reminder_tick():
               " AND remind_at <= ? AND remind_at >= ? AND status != 'done'"
               " AND section_id IN (%s)" % inq, [now_s, back] + vis):
         ref = "u%d:item:%d:%s" % (uid, it["id"], it["remind_at"])
-        if _already_sent(con, ref):
+        if not _claim(con, ref):
             continue
         body = it["title"]
         if it["waiting_on"]:
             body += "  (waiting on %s)" % it["waiting_on"]
         send_push("Reminder", body, "/#item-%d" % it["id"], uid=uid)
-        _mark_sent(con, ref)
 
       # 2. meetings starting in the next 15 minutes
       soon = (now + _td(minutes=15)).strftime("%H:%M")
@@ -2786,13 +2832,12 @@ def reminder_tick():
               " AND start_time > ? AND start_time <= ?",
               (today, uid, now.strftime("%H:%M"), soon)):
         ref = "u%d:ev:%s:%s" % (uid, e["ext_key"], e["day"])
-        if _already_sent(con, ref):
+        if not _claim(con, ref):
             continue
         body = "%s starts %s" % (e["subject"], e["start_time"])
         if e["location"]:
             body += "  ·  " + e["location"]
         send_push("Coming up", body, "/calendar", uid=uid)
-        _mark_sent(con, ref)
 
       # 2b. "leave now" - only when there is a key and a from-address to measure from
       home, work = _origins(con, uid)
@@ -2808,7 +2853,7 @@ def reminder_tick():
             if not maps.is_place(e["location"]):
                 continue
             ref = "u%d:leave:%s:%s" % (uid, e["ext_key"] or e["id"], e["day"])
-            if _already_sent(con, ref):
+            if not _claim(con, ref):
                 continue
             src, _label = origin_for(day_evs, i, home, work, live_fix(con, uid=uid),
                                      now.strftime("%H:%M"))
@@ -2827,12 +2872,11 @@ def reminder_tick():
                       "%s at %s  -  %s drive" % (e["subject"], fmt12(e["start_time"]),
                                                  maps.pretty_minutes(secs)),
                       "/day/" + e["day"], uid=uid)
-            _mark_sent(con, ref)
 
       # 3. one morning digest at 8am on weekdays
       if now.weekday() < 5 and "08:00" <= now.strftime("%H:%M") < "09:00":
         ref = "u%d:digest:%s" % (uid, today)
-        if not _already_sent(con, ref):
+        if _claim(con, ref):
             due = con.execute(
                 "SELECT COUNT(*) c FROM items WHERE status != 'done' AND due_date = ?"
                 " AND section_id IN (%s)" % inq, [today] + vis).fetchone()["c"]
@@ -2852,7 +2896,6 @@ def reminder_tick():
                 bits.append("%d overdue" % over)
             if bits:
                 send_push("Today", "  ·  ".join(bits), "/calendar", uid=uid)
-            _mark_sent(con, ref)
 
     con.execute("DELETE FROM reminders_sent WHERE sent_at < ?",
                 ((now - _td(days=14)).isoformat(timespec="seconds"),))

@@ -142,19 +142,24 @@ def closed_items(con, day_from, day_to, uid=0):
               " LEFT JOIN sections s ON s.id = i.section_id"
               " WHERE e.kind='status' AND e.new='done' AND e.at>=? AND e.at<?" + sc +
               " ORDER BY e.at DESC", [a, b] + sa)
+    ids = list({r[0] for r in rows})
+    born = {}
+    if ids:
+        q = ",".join("?" * len(ids))
+        for row in _q(con, "SELECT item_id, MIN(at) FROM item_events"
+                           " WHERE item_id IN (%s) AND kind='created'"
+                           " GROUP BY item_id" % q, ids):
+            born[row[0]] = row[1]
     out = []
     seen = set()
     for iid, title, at, section in rows:
         if iid in seen:
             continue
         seen.add(iid)
-        born = _q(con, "SELECT at FROM item_events WHERE item_id=? AND kind='created'"
-                       " ORDER BY at LIMIT 1", (iid,))
         age = None
-        if born:
-            d0, d1 = parse(born[0][0]), parse(at)
-            if d0 and d1:
-                age = max(0, (d1 - d0).days)
+        d0, d1 = parse(born.get(iid)), parse(at)
+        if d0 and d1:
+            age = max(0, (d1 - d0).days)
         out.append({"id": iid, "title": title, "section": section or "",
                     "at": at, "age_days": age})
     return out
@@ -175,17 +180,39 @@ def opened_items(con, day_from, day_to, uid=0):
 
 
 def history(con, weeks=8, day=None, uid=0):
-    """Opened against closed, one row a week, oldest first."""
-    _mon, _sun = week_of(day)
-    out = []
+    """Opened against closed, one row a week, oldest first.
+
+    Counted in one pass over the window rather than three queries a week - the
+    chart is eight bars and used to cost twenty-four round trips."""
+    mon, _sun = week_of(day)
+    first = mon - timedelta(days=7 * (weeks - 1))
+    a, b = _bounds(first, mon + timedelta(days=6))
+    sc, sa = scope(con, uid)
+    weeks_out = []
     for back in range(weeks - 1, -1, -1):
-        a = _mon - timedelta(days=7 * back)
-        b = a + timedelta(days=6)
-        m = movement(con, a, b, uid)
-        m["week"] = a.isoformat()
-        m["label"] = a.strftime("%-m/%-d") if hasattr(a, "strftime") else str(a)
-        out.append(m)
-    return out
+        w = mon - timedelta(days=7 * back)
+        weeks_out.append({"week": w.isoformat(), "label": w.strftime("%-m/%-d"),
+                          "opened": 0, "closed": 0, "reopened": 0})
+    index = {w["week"]: w for w in weeks_out}
+    ny = _ny()
+    for at, kind, old, new in _q(con,
+            "SELECT at, kind, old, new FROM item_events e"
+            " WHERE at>=? AND at<?" + sc, [a, b] + sa):
+        d = parse(at)
+        if not d:
+            continue
+        local = d.astimezone(ny).date()
+        key = (local - timedelta(days=local.weekday())).isoformat()
+        bucket = index.get(key)
+        if not bucket:
+            continue
+        if kind == "created":
+            bucket["opened"] += 1
+        elif kind == "status" and new == "done":
+            bucket["closed"] += 1
+        elif kind == "status" and old == "done" and new != "done":
+            bucket["reopened"] += 1
+    return weeks_out
 
 
 # ---------- other people ----------
@@ -202,15 +229,21 @@ def waiting_on(con, uid=0):
               " FROM items i LEFT JOIN sections s ON s.id = i.section_id"
               " WHERE i.status<>'done' AND ifnull(i.waiting_on,'')<>''" + inq, ia)
     now = now_utc()
+    ids = [r[0] for r in rows]
+    handed = {}
+    if ids:
+        q = ",".join("?" * len(ids))
+        for row in _q(con, "SELECT item_id, at, kind FROM item_events"
+                           " WHERE item_id IN (%s) AND kind IN ('waiting','snapshot')"
+                           " AND ifnull(new,'')<>'' ORDER BY at" % q, ids):
+            handed[row[0]] = (row[1], row[2])      # ordered ascending, so last wins
     out = []
     for iid, title, who, section in rows:
-        ev = _q(con, "SELECT at, kind FROM item_events"
-                     " WHERE item_id=? AND kind IN ('waiting','snapshot')"
-                     " AND ifnull(new,'')<>'' ORDER BY at DESC LIMIT 1", (iid,))
+        ev = handed.get(iid)
         since, approx = None, True
         if ev:
-            since = parse(ev[0][0])
-            approx = (ev[0][1] == "snapshot")
+            since = parse(ev[0])
+            approx = (ev[1] == "snapshot")
         days = (now - since).days if since else None
         if approx and not days:
             # The snapshot was written when tracking began, so "0 days" would be a
@@ -225,23 +258,34 @@ def waiting_on(con, uid=0):
 
 # ---------- things going quiet ----------
 
-def _last_touch(con, item_id):
-    """When something last actually happened to this task.
+def _last_touch_all(con, ids):
+    """When something last actually happened to each of these tasks.
+
+    Four queries per task became a thousand queries to draw one page. This asks
+    four times in total and joins the answers in Python.
 
     Snapshot rows are excluded on purpose: they were all written the moment
     tracking began, and counting them would make every old task look freshly
-    handled and nothing would ever show as stalled.
+    handled, so nothing would ever show as stalled.
     """
-    best = None
-    for sql, args in (("SELECT MAX(at) FROM item_events"
-                       " WHERE item_id=? AND kind<>'snapshot'", (item_id,)),
-                      ("SELECT MAX(created_at) FROM item_notes WHERE item_id=?", (item_id,)),
-                      ("SELECT MAX(created_at) FROM item_files WHERE item_id=?", (item_id,)),
-                      ("SELECT updated_at FROM items WHERE id=?", (item_id,))):
-        r = _q(con, sql, args)
-        d = parse(r[0][0]) if r and r[0][0] else None
-        if d and (best is None or d > best):
-            best = d
+    if not ids:
+        return {}
+    q = ",".join("?" * len(ids))
+    best = {}
+    def offer(iid, raw):
+        d = parse(raw)
+        if d and (iid not in best or d > best[iid]):
+            best[iid] = d
+    for row in _q(con, "SELECT item_id, MAX(at) FROM item_events"
+                       " WHERE item_id IN (%s) AND kind<>'snapshot'"
+                       " GROUP BY item_id" % q, ids):
+        offer(row[0], row[1])
+    for table in ("item_notes", "item_files"):
+        for row in _q(con, "SELECT item_id, MAX(created_at) FROM %s"
+                           " WHERE item_id IN (%s) GROUP BY item_id" % (table, q), ids):
+            offer(row[0], row[1])
+    for row in _q(con, "SELECT id, updated_at FROM items WHERE id IN (%s)" % q, ids):
+        offer(row[0], row[1])
     return best
 
 
@@ -253,9 +297,10 @@ def stalled(con, days=STALE_DAYS, uid=0):
               " FROM items i LEFT JOIN sections s ON s.id = i.section_id"
               " WHERE i.status<>'done'" + inq, ia)
     now = now_utc()
+    touched = _last_touch_all(con, [r[0] for r in rows])
     out = []
     for iid, title, section, status, due in rows:
-        t = _last_touch(con, iid)
+        t = touched.get(iid)
         if not t:
             continue
         quiet = (now - t).days

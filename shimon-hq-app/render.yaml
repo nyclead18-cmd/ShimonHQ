@@ -4,7 +4,9 @@ services:
     runtime: python
     plan: starter
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn wsgi:app
+    # One worker served one request at a time, so Joel opening the board could
+    # sit behind Shimon loading the Pulse. Two workers, four threads each.
+    startCommand: gunicorn wsgi:app --workers 2 --threads 4 --timeout 60 --graceful-timeout 30
     disk:
       name: hq-data
       mountPath: /data
