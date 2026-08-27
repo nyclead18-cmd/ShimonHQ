@@ -2140,6 +2140,25 @@ def pulse_refresh():
     return redirect(url_for("pulse_view", day=mon.isoformat()))
 
 
+@app.route("/api/seckind")
+def api_section_kind():
+    """Mark one of the acting person's own sections as a pipeline, or back."""
+    if not _api_auth():
+        abort(401)
+    title = (request.args.get("title") or "").strip()
+    if not title:
+        return "ERROR: title required", 400, {"Content-Type": "text/plain; charset=utf-8"}
+    con = db()
+    row = con.execute("SELECT id FROM sections WHERE lower(title)=lower(?) AND owner_id=?",
+                      (title, me())).fetchone()
+    if not row:
+        return "NOT FOUND: " + title, 404, {"Content-Type": "text/plain; charset=utf-8"}
+    kind = "pipeline" if (request.args.get("kind") or "").strip() == "pipeline" else "tasks"
+    con.execute("UPDATE sections SET kind=? WHERE id=?", (kind, row["id"]))
+    commit_retry(con)
+    return "SET %s: %s" % (kind, title), 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+
 @app.route("/api/pulsereq")
 def api_pulse_requests():
     """Who has asked for a written read, for the sweep to pick up.
@@ -2485,11 +2504,18 @@ def api_quickadd():
                                datetime.now().isoformat(timespec="seconds"))).lastrowid
     pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM items WHERE section_id=?",
                       (sid,)).fetchone()[0]
+    star = 1 if (request.args.get("today") or "").strip() in ("1", "yes") else 0
+    tenure = (request.args.get("tenure") or "").strip().lower()
     con.execute(
         "INSERT INTO items(section_id, project_id, title, note, waiting_on, status, pos,"
-        " due_date, updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+        " due_date, today, today_at, amount, ebitda, units, tenure, updated_at)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (sid, pid, title, request.args.get("note", ""), request.args.get("waiting_on", ""),
          "open", pos, request.args.get("due") or None,
+         star, _now_local().isoformat(timespec="seconds") if star else None,
+         parse_money(request.args.get("amount")), parse_money(request.args.get("ebitda")),
+         request.args.get("units", type=int) or None,
+         tenure if tenure in TENURES else "",
          datetime.now().isoformat(timespec="seconds")))
     new_id = con.execute("SELECT last_insert_rowid()").fetchone()[0]
     key = thread_key(request.args.get("subject"))
