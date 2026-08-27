@@ -573,3 +573,10 @@ document.addEventListener('click', function (ev) {
     fetch('/sections/order', {method: 'POST', body: fd});
   });
 })();
+
+/* ---------- the three-dot menu closes when you look away ---------- */
+document.addEventListener('click', function (ev) {
+  document.querySelectorAll('details.sharepop[open]').forEach(function (d) {
+    if (!d.contains(ev.target)) { d.removeAttribute('open'); }
+  });
+});

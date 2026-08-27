@@ -75,24 +75,21 @@
       <span class="ownchip shared" title="Shared with {{ shares[sec.id]|join(', ') }}">{{ shares[sec.id][:2]|join(' + ') }}{% if shares[sec.id]|length > 2 %} +{{ shares[sec.id]|length - 2 }}{% endif %}</span>
       {%- endif %}
     </h2>
-    <span class="counts">{{ active | length }}
-      {% if done %}&middot; <button type="button" class="linky" data-toggle-done="{{ sec.id }}">{{ done | length }} done</button>{% endif %}
-      {% if sec.owner_id == session.get('uid') %}
-      &middot; <form method="post" action="{{ url_for('set_section_board', sec_id=sec.id) }}" class="shareform bform">
-        <select name="board" onchange="this.form.submit()" title="Which board this section lives on">
-          <option value="">no board</option>
-          {% for b in boards %}<option value="{{ b }}"{% if sec.board == b %} selected{% endif %}>{{ b }}</option>{% endfor %}
-          {% if sec.board and sec.board not in boards %}<option value="{{ sec.board }}" selected>{{ sec.board }}</option>{% endif %}
-        </select>
-      </form>
-      &middot; <form method="post" action="{{ url_for('set_section_kind', sec_id=sec.id) }}" class="shareform">
-        <input type="hidden" name="kind" value="{{ 'tasks' if sec.kind == 'pipeline' else 'pipeline' }}">
-        <input type="hidden" name="cur" value="{{ sec.cur }}">
-        <button type="submit" class="linky" title="{{ 'Treat this as an ordinary list again' if sec.kind == 'pipeline' else 'Give this section deal numbers you can sort and total' }}">{{ 'plain list' if sec.kind == 'pipeline' else 'pipeline' }}</button>
-      </form>
-      &middot; <details class="sharepop">
-        <summary class="linky">share&hellip;</summary>
-        <form method="post" action="{{ url_for('share_section', sec_id=sec.id) }}" class="sharemenu">
+    <span class="counts">{{ active | length }}{% if done %} <button type="button" class="linky donetog" data-toggle-done="{{ sec.id }}" title="Show or hide the {{ done | length }} finished here">&#10003;{{ done | length }}</button>{% endif %}</span>
+    {% if sec.owner_id == session.get('uid') %}
+    <details class="sharepop secmenu">
+      <summary title="Board, sharing&hellip;">&#8943;</summary>
+      <div class="sharemenu">
+        <form method="post" action="{{ url_for('set_section_board', sec_id=sec.id) }}" class="menurow">
+          <label class="checkrow">Board
+          <select name="board" onchange="this.form.submit()" title="Which board this section lives on">
+            <option value="">&mdash;</option>
+            {% for b in boards %}<option value="{{ b }}"{% if sec.board == b %} selected{% endif %}>{{ b }}</option>{% endfor %}
+            {% if sec.board and sec.board not in boards %}<option value="{{ sec.board }}" selected>{{ sec.board }}</option>{% endif %}
+          </select></label>
+        </form>
+        <div class="menusep">Who sees this</div>
+        <form method="post" action="{{ url_for('share_section', sec_id=sec.id) }}" class="menurow">
           <label class="checkrow"><input type="radio" name="scope" value="none"
             {% if sec.visibility == 'private' %}checked{% endif %}> Just me</label>
           {% for pid, pname in people.items() if pid != session.get('uid') %}
@@ -104,9 +101,9 @@
             {% if sec.visibility == 'shared' %}checked{% endif %}> Everyone</label>
           <button type="submit">Save</button>
         </form>
-      </details>
-      {% endif %}
-    </span>
+      </div>
+    </details>
+    {% endif %}
   </div>
 
   {% for p in sec_projects %}

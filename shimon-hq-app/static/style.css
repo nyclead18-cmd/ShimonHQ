@@ -825,3 +825,31 @@ section.card.dropwait{outline:2px solid var(--accent);}
 .sharemenu button{font:inherit; font-size:12px; font-weight:700; background:var(--btn-bg);
   color:var(--btn-tx); border:0; border-radius:999px; padding:6px 14px; cursor:pointer;
   align-self:flex-start;}
+
+/* ---------- one clean line per box ----------
+   The header had grown a second and third row of controls; hard to see.
+   Now: chevron-thought order stays, but everything managerial lives
+   behind one quiet three-dot menu, and the line never wraps. */
+.sec-head{flex-wrap:nowrap; align-items:center; gap:4px; padding:9px 12px 8px;}
+.sec-head h2{flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; font-size:15.5px;}
+.sec-head h2 .dot, .sec-head button.dotbtn2{margin-right:7px;}
+.counts{white-space:nowrap; font-size:11.5px; letter-spacing:.03em;}
+.counts .donetog{font-size:11px; color:var(--pill-done-tx, var(--muted));
+  text-decoration:none; background:var(--pill-done-bg, transparent);
+  border-radius:999px; padding:1px 7px; margin-left:4px;}
+.foldbtn{margin-left:0; padding:2px 4px;}
+.draghandle{padding:2px 4px;}
+.secmenu summary{color:var(--muted); font-size:16px; font-weight:700;
+  padding:0 6px; line-height:1;}
+.secmenu summary:hover{color:var(--ink);}
+.secmenu .sharemenu{min-width:190px; max-height:70vh; overflow:auto;}
+.sharemenu form.menurow{display:flex; flex-direction:column; gap:8px;}
+.menusep{font-size:10.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--muted); border-top:1px solid var(--border); padding-top:8px; margin-top:2px;}
+.sharemenu .checkrow select{font:inherit; font-size:13px; margin-left:6px;
+  background:transparent; color:var(--ink); border:1px solid var(--border);
+  border-radius:8px; padding:3px 6px; max-width:130px;}
+.ownchip{max-width:9em; overflow:hidden; text-overflow:ellipsis; vertical-align:middle;
+  white-space:nowrap; display:inline-block;}
+section.card.folded .sec-head{border-bottom:none; padding-bottom:9px;}
