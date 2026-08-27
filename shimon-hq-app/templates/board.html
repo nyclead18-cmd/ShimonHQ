@@ -8,6 +8,7 @@
   </div>
   <div class="right">
     <nav class="tabs">
+      <a class="tab" href="{{ url_for('today_view') }}">Today</a>
       <a class="tab on" href="{{ url_for('board') }}">Board</a>
       <a class="tab" href="{{ url_for('briefing_view') }}">Brief{% if brief_unread %} <span class="badge">{{ brief_unread }}</span>{% endif %}</a>
       <a class="tab" href="{{ url_for('calendar_view') }}">Calendar</a>
@@ -62,6 +63,11 @@
     <span class="counts">{{ active | length }}
       {% if done %}&middot; <button type="button" class="linky" data-toggle-done="{{ sec.id }}">{{ done | length }} done</button>{% endif %}
       {% if sec.owner_id == session.get('uid') %}
+      &middot; <form method="post" action="{{ url_for('set_section_kind', sec_id=sec.id) }}" class="shareform">
+        <input type="hidden" name="kind" value="{{ 'tasks' if sec.kind == 'pipeline' else 'pipeline' }}">
+        <input type="hidden" name="cur" value="{{ sec.cur }}">
+        <button type="submit" class="linky" title="{{ 'Treat this as an ordinary list again' if sec.kind == 'pipeline' else 'Give this section deal numbers you can sort and total' }}">{{ 'plain list' if sec.kind == 'pipeline' else 'pipeline' }}</button>
+      </form>
       &middot; <form method="post" action="{{ url_for('share_section', sec_id=sec.id) }}" class="shareform">
         <button type="submit" class="linky" title="{{ 'Make this private again' if sec.visibility == 'shared' else 'Let everyone on the board see this' }}">{{ 'unshare' if sec.visibility == 'shared' else 'share' }}</button>
       </form>

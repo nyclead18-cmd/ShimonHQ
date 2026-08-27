@@ -305,6 +305,17 @@ jumpToLinkedItem();
   // silently disable editing everywhere.
   function template() { return document.getElementById('edittpl'); }
 
+  // show him back what he typed - 30000000 in a box he wrote "30m" into is a
+  // small insult every time he opens it
+  function short(v) {
+    var n = parseFloat(v);
+    if (!n) { return ''; }
+    if (n >= 1e9 && n % 1e8 === 0) { return (n / 1e9) + 'b'; }
+    if (n >= 1e6 && n % 1e5 === 0) { return (n / 1e6) + 'm'; }
+    if (n >= 1e3 && n % 1e2 === 0) { return (n / 1e3) + 'k'; }
+    return String(n);
+  }
+
   function build(box) {
     if (box.dataset.built) { return; }
     var tpl = template();
@@ -336,6 +347,16 @@ jumpToLinkedItem();
     set('waiting_on', txt('.metaline .w b'));
     set('due_date', d.due); set('remind_at', d.rem);
     set('section_id', d.sec); set('project_id', d.proj);
+    // deal numbers only where they mean something
+    var deal = edit.querySelector('.dealfields');
+    if (deal && d.kind === 'pipeline') {
+      deal.hidden = false;
+      var amt = edit.querySelector('[name=amount]');
+      var eb = edit.querySelector('[name=ebitda]');
+      if (amt) { amt.value = short(d.amount); }
+      if (eb) { eb.value = short(d.ebitda); }
+      set('units', d.units); set('tenure', d.tenure); set('stage', d.stage);
+    }
     box.appendChild(frag);
   }
 
@@ -384,6 +405,64 @@ jumpToLinkedItem();
       btn.disabled = false;
       btn.textContent = 'try again';
       setTimeout(function () { btn.textContent = 'Update now'; }, 2500);
+    });
+  });
+})();
+
+/* ---------- the Today star ---------- */
+document.addEventListener('click', function (ev) {
+  var b = ev.target.closest && ev.target.closest('.star');
+  if (!b) { return; }
+  ev.preventDefault();
+  var id = b.getAttribute('data-star');
+  if (!id || b.dataset.busy) { return; }
+  b.dataset.busy = '1';
+  fetch('/items/' + id + '/today', {
+    method: 'POST', headers: {'X-Requested-With': 'fetch'}
+  }).then(function (r) {
+    if (!r.ok) { throw new Error('http ' + r.status); }
+    return r.json();
+  }).then(function (d) {
+    b.classList.toggle('on', !!d.today);
+    b.innerHTML = d.today ? '&#9733;' : '&#9734;';
+    b.title = d.today ? 'On today' : 'Put on today';
+    // a star just added has been there no time at all
+    if (!d.today) {
+      var li = b.closest('li.item');
+      var tag = li && li.querySelector('.staleday');
+      if (tag) { tag.remove(); }
+    }
+    delete b.dataset.busy;
+  }).catch(function () {
+    b.title = 'Could not save that';
+    delete b.dataset.busy;
+  });
+}, false);
+
+/* ---------- pipeline: sort by any column ---------- */
+(function () {
+  var table = document.querySelector('table.dealtable');
+  if (!table) { return; }
+  document.querySelectorAll('table.dealtable').forEach(function (t) {
+    t.querySelectorAll('th.sortable').forEach(function (th) {
+      th.addEventListener('click', function () {
+        var k = th.getAttribute('data-k');
+        var num = th.classList.contains('num');
+        var up = th.classList.contains('sorted') && !th.classList.contains('up');
+        t.querySelectorAll('th').forEach(function (x) { x.classList.remove('sorted', 'up'); });
+        th.classList.add('sorted');
+        if (up) { th.classList.add('up'); }
+        var body = t.querySelector('tbody');
+        var rows = Array.prototype.slice.call(body.querySelectorAll('tr'));
+        rows.sort(function (a, b) {
+          var x = a.dataset[k] || '', y = b.dataset[k] || '';
+          if (num) { x = parseFloat(x) || 0; y = parseFloat(y) || 0; return up ? x - y : y - x; }
+          // blanks last whichever way it is pointing - an empty cell is not a small one
+          if (!x !== !y) { return x ? -1 : 1; }
+          return up ? String(y).localeCompare(String(x)) : String(x).localeCompare(String(y));
+        });
+        rows.forEach(function (r) { body.appendChild(r); });
+      });
     });
   });
 })();

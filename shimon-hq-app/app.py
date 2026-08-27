@@ -278,6 +278,7 @@ INDEXES = (
     ("items_due",      "items(due_date)"),
     ("items_project",  "items(project_id)"),
     ("items_thread",   "items(thread_key)"),
+    ("items_today",    "items(today)"),
     ("notes_item",     "item_notes(item_id)"),
     ("files_item",     "item_files(item_id)"),
     ("projects_sec",   "projects(section_id)"),
@@ -411,6 +412,19 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS wa_inbox_open ON wa_inbox(handled, ts);")
     if "created_at" not in cols:
         con.execute("ALTER TABLE items ADD COLUMN created_at TEXT")
+    # Today is a flag, not a list. Keeping "today" and "this week" as two lists
+    # means keeping the same task twice and ticking it off twice.
+    if "today" not in cols:
+        con.execute("ALTER TABLE items ADD COLUMN today INTEGER NOT NULL DEFAULT 0")
+    if "today_at" not in cols:
+        con.execute("ALTER TABLE items ADD COLUMN today_at TEXT")
+    # A pipeline entry is still a task - it has responses, someone it waits on and
+    # an age - but it also has numbers, and numbers buried in a title cannot be
+    # sorted, compared or totalled.
+    for col, decl in (("amount", "INTEGER"), ("ebitda", "INTEGER"),
+                      ("units", "INTEGER"), ("tenure", "TEXT"), ("stage", "TEXT")):
+        if col not in cols:
+            con.execute("ALTER TABLE items ADD COLUMN %s %s" % (col, decl))
     _seed_history(con)
     ecols = [r[1] for r in con.execute("PRAGMA table_info(events)")]
     if ecols and "source" not in ecols:
@@ -424,6 +438,10 @@ def init_db():
         con.execute("ALTER TABLE sections ADD COLUMN owner_id INTEGER")
     if "visibility" not in scols:
         con.execute("ALTER TABLE sections ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'")
+    if "kind" not in scols:
+        con.execute("ALTER TABLE sections ADD COLUMN kind TEXT NOT NULL DEFAULT 'tasks'")
+    if "cur" not in scols:
+        con.execute("ALTER TABLE sections ADD COLUMN cur TEXT NOT NULL DEFAULT '\u00a3'")
     if ecols and "owner_id" not in ecols:
         con.execute("ALTER TABLE events ADD COLUMN owner_id INTEGER")
     if bcols and "owner_id" not in bcols:
@@ -635,11 +653,218 @@ def board():
     return render_template("board.html", sections=sections, by_sec=by_sec,
                            projects_by_sec=projects_by_sec,
                            people={r["id"]: r["display_name"] for r in people_list(con)},
+                           names=known_names(con),
+                           sec_kind={r["id"]: r["kind"] for r in sections},
+                           tenures=TENURES, stages=STAGES,
                            notes_by_item=notes_by_item, files_by_item=files_by_item,
                            today_iso=today_iso, soon_iso=soon_iso,
                            total_active=total_active, stats=stats,
                            today=datetime.now().strftime("%b %-d, %Y")
                            if os.name != "nt" else datetime.now().strftime("%b %d, %Y"))
+
+
+# ---------- money ----------
+# He writes "30m", not 30000000. Anything that makes him type a number in full is
+# a thing he will stop doing by Thursday.
+
+_MONEY = re.compile(r"^\s*[\u00a3$\u20ac]?\s*([\d,]*\.?\d+)\s*([kmb]?)\s*$", re.I)
+_MULT = {"": 1, "k": 1000, "m": 1000000, "b": 1000000000}
+
+
+def parse_money(raw):
+    """'£30m' -> 30000000. None when it is not a number at all."""
+    m = _MONEY.match(str(raw or ""))
+    if not m:
+        return None
+    try:
+        n = float(m.group(1).replace(",", ""))
+    except ValueError:
+        return None
+    return int(round(n * _MULT[m.group(2).lower()]))
+
+
+@app.template_filter("money")
+def _money(n, cur="\u00a3"):
+    """Back out the way he wrote it, so a column of these can be read at a glance."""
+    if n in (None, ""):
+        return ""
+    n = int(n)
+    sign = "-" if n < 0 else ""
+    n = abs(n)
+    if n >= 1000000000:
+        body = ("%.2f" % (n / 1e9)).rstrip("0").rstrip(".") + "b"
+    elif n >= 1000000:
+        body = ("%.2f" % (n / 1e6)).rstrip("0").rstrip(".") + "m"
+    elif n >= 1000:
+        body = ("%.1f" % (n / 1e3)).rstrip("0").rstrip(".") + "k"
+    else:
+        body = str(n)
+    return "%s%s%s" % (sign, cur or "", body)
+
+
+TENURES = ("", "freehold", "leasehold", "mixed")
+STAGES = ("", "lead", "looking", "diligence", "offer", "agreed", "dead")
+
+
+# ---------- today ----------
+
+@app.route("/items/<int:item_id>/today", methods=["POST"])
+@login_required
+def toggle_today(item_id):
+    """Star it for today, or take the star off.
+
+    The date it was starred is kept, because the useful question is never "is
+    this on today" - it is "how long has this been on today". A task carrying
+    a nine-day-old star is the single most informative thing on the board.
+    """
+    con = db()
+    require_item(con, item_id)
+    row = con.execute("SELECT today FROM items WHERE id=?", (item_id,)).fetchone()
+    now = 0 if row["today"] else 1
+    con.execute("UPDATE items SET today=?, today_at=? WHERE id=?",
+                (now, _now_local().isoformat(timespec="seconds") if now else None, item_id))
+    commit_retry(con)
+    return jsonify(today=now)
+
+
+@app.route("/pipeline")
+@login_required
+def pipeline_view():
+    """Sections he has marked as a pipeline, as numbers rather than prose.
+
+    They are still tasks underneath - each one keeps its responses, who it is
+    waiting on and how long it has sat - but a pipeline you cannot sort or total
+    is just a list you have to read every time.
+    """
+    con = db()
+    where, args = sec_clause(con, "id", first=True)
+    secs = con.execute("SELECT * FROM sections" + where + " AND kind='pipeline'"
+                       " ORDER BY pos, id", args).fetchall()
+    lanes = []
+    for sec in secs:
+        rows = con.execute(
+            "SELECT * FROM items WHERE section_id=? AND status!='done'"
+            " ORDER BY COALESCE(amount,0) DESC, id", (sec["id"],)).fetchall()
+        done = con.execute(
+            "SELECT COUNT(*) c FROM items WHERE section_id=? AND status='done'",
+            (sec["id"],)).fetchone()["c"]
+        lanes.append({
+            "sec": sec, "rows": rows, "done": done,
+            "amount": sum(r["amount"] or 0 for r in rows),
+            "ebitda": sum(r["ebitda"] or 0 for r in rows),
+            "units": sum(r["units"] or 0 for r in rows),
+        })
+    return render_template("pipeline.html", lanes=lanes, stages=STAGES)
+
+
+@app.route("/sections/<int:sec_id>/kind", methods=["POST"])
+@login_required
+def set_section_kind(sec_id):
+    con = db()
+    if not con.execute("SELECT 1 FROM sections WHERE id=? AND owner_id=?",
+                       (sec_id, me())).fetchone():
+        abort(404)
+    kind = "pipeline" if request.form.get("kind") == "pipeline" else "tasks"
+    cur = (request.form.get("cur") or "\u00a3").strip()[:3]
+    con.execute("UPDATE sections SET kind=?, cur=? WHERE id=?", (kind, cur, sec_id))
+    commit_retry(con)
+    return redirect(url_for("pipeline_view") if kind == "pipeline"
+                    else url_for("board", _anchor="sec-%d" % sec_id))
+
+
+@app.route("/items/<int:item_id>/deal", methods=["POST"])
+@login_required
+def set_deal(item_id):
+    """The numbers on one pipeline entry."""
+    con = db()
+    require_item(con, item_id)
+    tenure = (request.form.get("tenure") or "").strip().lower()
+    stage = (request.form.get("stage") or "").strip().lower()
+    units = request.form.get("units", type=int)
+    con.execute("UPDATE items SET amount=?, ebitda=?, units=?, tenure=?, stage=?,"
+                " updated_at=? WHERE id=?",
+                (parse_money(request.form.get("amount")),
+                 parse_money(request.form.get("ebitda")),
+                 units if units and units > 0 else None,
+                 tenure if tenure in TENURES else "",
+                 stage if stage in STAGES else "",
+                 datetime.now().isoformat(timespec="seconds"), item_id))
+    commit_retry(con)
+    if request.headers.get("X-Requested-With") == "fetch":
+        return jsonify(ok=True)
+    return redirect(url_for("pipeline_view"))
+
+
+@app.route("/today")
+@login_required
+def today_view():
+    """Everything starred, plus anything overdue or due today whether starred or not.
+
+    Overdue work belongs on today's list by definition; making him star it as
+    well would just be a second place to forget.
+    """
+    con = db()
+    iso = _now_local().date().isoformat()
+    where, args = sec_clause(con, "items.section_id")
+    rows = con.execute(
+        "SELECT items.*, sections.title AS sec_title FROM items"
+        " JOIN sections ON items.section_id = sections.id"
+        " WHERE items.status != 'done'"
+        "   AND (items.today = 1 OR (COALESCE(items.due_date,'') != ''"
+        "        AND items.due_date <= ?))" + where +
+        " ORDER BY items.today DESC, items.due_date IS NULL, items.due_date,"
+        "          items.today_at, items.id", [iso] + args).fetchall()
+    keep = set(r["id"] for r in rows)
+    notes_by_item, files_by_item = {}, {}
+    for n in con.execute("SELECT * FROM item_notes ORDER BY id"):
+        if n["item_id"] in keep:
+            notes_by_item.setdefault(n["item_id"], []).append(n)
+    for f in con.execute("SELECT * FROM item_files ORDER BY id"):
+        if f["item_id"] in keep:
+            files_by_item.setdefault(f["item_id"], []).append(f)
+    where, args = sec_clause(con, "id", first=True)
+    sections = con.execute("SELECT * FROM sections" + where + " ORDER BY pos, id",
+                           args).fetchall()
+    where, args = sec_clause(con, "section_id", first=True)
+    projects = con.execute("SELECT * FROM projects" + where + " ORDER BY pos, id",
+                           args).fetchall()
+    projects_by_sec = {}
+    for p in projects:
+        projects_by_sec.setdefault(p["section_id"], []).append(p)
+    on_me = [r for r in rows if r["status"] == "open"]
+    waiting = [r for r in rows if r["status"] == "waiting"]
+    return render_template("today.html", rows=rows, on_me=on_me, waiting=waiting,
+                           sections=sections, projects_by_sec=projects_by_sec,
+                           sec_kind={r["id"]: r["kind"] for r in sections},
+                           tenures=TENURES, stages=STAGES,
+                           notes_by_item=notes_by_item, files_by_item=files_by_item,
+                           names=known_names(con),
+                           today_iso=iso, soon_iso=iso,
+                           pretty=_now_local().strftime("%A, %B %-d")
+                           if os.name != "nt" else _now_local().strftime("%A, %B %d"))
+
+
+def known_names(con):
+    """Every person already being waited on, commonest first.
+
+    Typing a name is the reason the waiting-on field goes unfilled, and an empty
+    waiting-on field is what makes the People view useless."""
+    where, args = sec_clause(con, "section_id", first=True)
+    rows = con.execute(
+        "SELECT TRIM(waiting_on) w, COUNT(*) c FROM items" + where +
+        " AND TRIM(COALESCE(waiting_on,'')) != ''"
+        " GROUP BY lower(TRIM(waiting_on)) ORDER BY c DESC, w", args).fetchall()
+    return [r["w"] for r in rows]
+
+
+def days_since(raw):
+    d = pulse.parse(raw)
+    if not d:
+        return None
+    return (pulse.now_utc() - d).days
+
+
+app.jinja_env.globals["days_since"] = days_since
 
 
 # ---------- item actions ----------
@@ -698,6 +923,17 @@ def edit_item(item_id):
          datetime.now().isoformat(timespec="seconds"), item_id))
     con.execute("UPDATE items SET remind_at=? WHERE id=?",
                 ((request.form.get("remind_at") or "").strip() or None, item_id))
+    if "amount" in request.form or "stage" in request.form:
+        tenure = (request.form.get("tenure") or "").strip().lower()
+        stage = (request.form.get("stage") or "").strip().lower()
+        units = request.form.get("units", type=int)
+        con.execute("UPDATE items SET amount=?, ebitda=?, units=?, tenure=?, stage=?"
+                    " WHERE id=?",
+                    (parse_money(request.form.get("amount")),
+                     parse_money(request.form.get("ebitda")),
+                     units if units and units > 0 else None,
+                     tenure if tenure in TENURES else "",
+                     stage if stage in STAGES else "", item_id))
     commit_retry(con)
     return redirect(url_for("board"))
 
@@ -955,7 +1191,9 @@ def joel_view():
             for f in con.execute("SELECT * FROM item_files WHERE item_id IN (%s) ORDER BY id" % joined):
                 files_by_item.setdefault(f["item_id"], []).append(f)
     return render_template("joel.html", sec=sec, items=items, sections=sections,
-                           projects_by_sec=projects_by_sec,
+                           projects_by_sec=projects_by_sec, names=known_names(con),
+                           sec_kind={r["id"]: r["kind"] for r in sections},
+                           tenures=TENURES, stages=STAGES,
                            notes_by_item=notes_by_item, files_by_item=files_by_item,
                            today_iso=datetime.now().date().isoformat(),
                            soon_iso=(datetime.now().date() + timedelta(days=3)).isoformat(),

@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Pipeline · HQ{% endblock %}
+{% block body %}
+<div class="wrap wide">
+<header class="top">
+  <div>
+    <div class="eyebrow">What is in play</div>
+    <h1>Pipeline</h1>
+  </div>
+  <div class="right">
+    <nav class="tabs">
+      <a class="tab" href="{{ url_for('today_view') }}">Today</a>
+      <a class="tab" href="{{ url_for('board') }}">Board</a>
+      <a class="tab on" href="{{ url_for('pipeline_view') }}">Pipeline</a>
+      <a class="tab" href="{{ url_for('people_view') }}">People</a>
+      <a class="tab" href="{{ url_for('pulse_view') }}">Pulse</a>
+    </nav>
+    <a class="logout" href="{{ url_for('account_view') }}">{{ session.get('name') or 'Account' }}</a>
+    <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
+  </div>
+</header>
+
+{% if not lanes %}
+<p class="pageintro">No pipeline sections yet. On the board, open a section&rsquo;s
+<b>pipeline</b> control and its tasks become rows with a size, an EBITDA and a stage &mdash;
+still tasks underneath, so they keep their responses and their ageing.</p>
+{% endif %}
+
+{% for lane in lanes %}
+{% set cur = lane.sec.cur %}
+<section class="card pipe">
+  <div class="sec-head">
+    <h2><span class="dot"></span>{{ lane.sec.title }}</h2>
+    <span class="counts">{{ lane.rows|length }} live{% if lane.done %} &middot; {{ lane.done }} closed{% endif %}</span>
+  </div>
+  <div class="tablewrap">
+  <table class="dealtable" data-cur="{{ cur }}">
+    <thead>
+      <tr>
+        <th class="sortable" data-k="name">Deal</th>
+        <th class="sortable num" data-k="amount">Size</th>
+        <th class="sortable num" data-k="ebitda">EBITDA</th>
+        <th class="sortable num" data-k="mult">&times;</th>
+        <th class="sortable num" data-k="units">Homes</th>
+        <th class="sortable" data-k="tenure">Tenure</th>
+        <th class="sortable" data-k="stage">Stage</th>
+        <th class="sortable" data-k="who">Waiting on</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for it in lane.rows %}
+      <tr data-id="{{ it.id }}"
+          data-amount="{{ it.amount or 0 }}" data-ebitda="{{ it.ebitda or 0 }}"
+          data-units="{{ it.units or 0 }}"
+          data-mult="{{ ((it.amount / it.ebitda) if it.amount and it.ebitda else 0)|round(2) }}"
+          data-name="{{ it.title }}" data-tenure="{{ it.tenure or '' }}"
+          data-stage="{{ it.stage or '' }}" data-who="{{ it.waiting_on or '' }}">
+        <td class="dealname">
+          <a href="{{ url_for('board', _anchor='item-%d' % it.id) }}">{{ it.title }}</a>
+          {% if it.note %}<span class="n">{{ it.note }}</span>{% endif %}
+        </td>
+        <td class="num">{{ it.amount|money(cur) }}</td>
+        <td class="num">{{ it.ebitda|money(cur) }}</td>
+        <td class="num">{% if it.amount and it.ebitda %}{{ (it.amount / it.ebitda)|round(1) }}&times;{% endif %}</td>
+        <td class="num">{{ it.units or '' }}</td>
+        <td>{{ it.tenure or '' }}</td>
+        <td>{% if it.stage %}<span class="stagechip {{ it.stage }}">{{ it.stage }}</span>{% endif %}</td>
+        <td>{% if it.waiting_on %}<b>{{ it.waiting_on }}</b>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr>
+        <td>{{ lane.rows|length }} live</td>
+        <td class="num">{{ lane.amount|money(cur) }}</td>
+        <td class="num">{{ lane.ebitda|money(cur) }}</td>
+        <td class="num">{% if lane.amount and lane.ebitda %}{{ (lane.amount / lane.ebitda)|round(1) }}&times;{% endif %}</td>
+        <td class="num">{{ lane.units or '' }}</td>
+        <td colspan="3"></td>
+      </tr>
+    </tfoot>
+  </table>
+  </div>
+  <p class="caveat">Tap a heading to sort. Totals count what is live, not what has closed.
+  Tap a deal to open it on the board, where its responses and its history live.</p>
+</section>
+{% endfor %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='board.js') }}?v={{ css_v }}"></script>
+{% endblock %}

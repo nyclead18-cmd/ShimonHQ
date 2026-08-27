@@ -70,7 +70,7 @@ section.card{background:var(--card); border:1px solid var(--border); border-radi
 .linky{background:none; border:none; color:var(--muted); cursor:pointer; font:inherit;
   text-decoration:underline; text-underline-offset:3px; padding:0; text-transform:uppercase; font-size:12.5px;}
 ul.items{list-style:none; margin:0; padding:0;}
-li.item{display:grid; grid-template-columns:84px 1fr; gap:12px; align-items:start;
+li.item{display:grid; grid-template-columns:84px minmax(0,1fr); gap:12px; align-items:start;
   padding:12px 18px; border-bottom:1px solid var(--border);}
 li.item:last-child{border-bottom:none}
 li.item:nth-child(even){background:var(--row)}
@@ -102,12 +102,14 @@ ul.notes .nd{color:var(--muted); font-size:12px; font-variant-numeric:tabular-nu
 .ndel{border:none; background:none; padding:0 4px; font-size:11px; opacity:.4;}
 ul.notes li:hover .ndel{opacity:1;}
 form.respond{display:flex; gap:6px; margin-top:6px; max-width:420px;}
-form.respond input{flex:1; background:var(--bg); border:1px solid var(--border); border-radius:999px;
+form.respond input{flex:1 1 0; min-width:0; background:var(--bg); border:1px solid var(--border); border-radius:999px;
   color:var(--ink); font:inherit; font-size:13.5px; padding:5px 12px;}
-form.respond button{border:1px solid var(--border); background:var(--card); color:var(--muted);
+form.respond button{flex:0 0 auto; border:1px solid var(--border); background:var(--card); color:var(--muted);
   border-radius:999px; padding:0 12px; cursor:pointer; font-size:14px;}
-.respondrow{display:flex; gap:6px; align-items:center; max-width:480px;}
-.respondrow form.respond{flex:1; margin-top:6px; max-width:none;}
+/* A flex item will not shrink below the width of its own placeholder text unless
+   told to, which is how the send arrow ended up outside the card on a phone. */
+.respondrow{display:flex; gap:6px; align-items:center; max-width:480px; flex-wrap:wrap;}
+.respondrow form.respond{flex:1 1 200px; min-width:0; margin-top:6px; max-width:none;}
 .fadd{border:1px dashed var(--border); background:var(--card); color:var(--muted);
   border-radius:999px; padding:5px 12px; cursor:pointer; font-size:12.5px; margin-top:6px;
   white-space:nowrap;}
@@ -271,7 +273,7 @@ form.edit select{background:var(--bg); border:1px solid var(--border); border-ra
   .stat .lbl{font-size:10px; letter-spacing:.05em;}
   .capture{gap:6px;} .capture input{padding:10px 14px;} .capture button{padding:0 16px;}
   .toolbar{gap:8px;} .fpills{width:100%;} .fpill{flex:1; padding:7px 4px; font-size:11px;}
-  li.item{grid-template-columns:66px 1fr; gap:9px; padding:11px 12px;}
+  li.item{grid-template-columns:66px minmax(0,1fr); gap:9px; padding:11px 12px;}
   .pill{width:62px; font-size:10.5px; padding:4px 0;}
   .sec-head{padding:12px 12px 10px;} .proj-head{padding:9px 12px 7px;}
   .addrow{padding:10px 12px;} .addrow.slim{padding:6px 12px 10px;}
@@ -354,7 +356,7 @@ li.item.flash .t{font-weight:700;}
 .badge{background:var(--accent); color:#fff; border-radius:999px; padding:0 6px;
   font-size:10.5px; font-weight:700; margin-left:3px; vertical-align:1px;}
 .tab.on .badge{background:var(--btn-tx); color:var(--btn-bg);}
-li.item.brief{grid-template-columns:26px 1fr;}
+li.item.brief{grid-template-columns:26px minmax(0,1fr);}
 /* small dot, finger-sized hit box */
 .dotbtn{width:34px; height:34px; border:none; background:transparent; padding:0; margin:-6px 0 0 -10px;
   cursor:pointer; position:relative; touch-action:manipulation; -webkit-appearance:none; appearance:none;}
@@ -507,7 +509,7 @@ li.noterow .t{flex:1; min-width:0;}
 }
 /* a task row has room to breathe on a wide screen */
 @media (min-width:1200px){
-  li.item{grid-template-columns:96px 1fr; padding:14px 20px;}
+  li.item{grid-template-columns:96px minmax(0,1fr); padding:14px 20px;}
   .sec-head{padding-left:20px; padding-right:20px;}
   .proj-head{padding-left:20px; padding-right:20px;}
   ul.notes li > .t{line-height:1.45;}
@@ -626,3 +628,47 @@ li.prow .ptitle + .psec{justify-self:end;}
 .refreshform .linky{font-size:12px; letter-spacing:.06em;}
 .readcard .sec-head{align-items:center;}
 .readbody:empty{display:none;}
+
+/* A grid column of 1fr will not shrink below its content. Every row here has an
+   input in it, so without minmax(0,1fr) the row decides the card is too narrow
+   and spills over the edge of the phone. */
+/* ---------- today ---------- */
+li.item{position:relative;}
+.star{position:absolute; left:2px; top:10px; width:30px; height:30px; padding:0;
+  background:none; border:0; cursor:pointer; font-size:16px; line-height:1;
+  color:var(--border); z-index:3;}
+.star.on{color:#C9A227;}
+.star:hover{color:var(--muted);}
+li.item{padding-left:34px;}
+.staleday{background:var(--pill-wait-bg); color:var(--pill-wait-tx); border-radius:999px;
+  padding:1px 8px; font-size:11px; font-weight:700; letter-spacing:.03em;}
+.staleday.hot{background:var(--pill-open-bg); color:var(--danger);}
+@media (max-width:520px){ .star{left:0; top:8px;} li.item{padding-left:30px;} }
+
+/* ---------- pipeline ---------- */
+.pipe{margin-bottom:22px;}
+.tablewrap{overflow-x:auto; -webkit-overflow-scrolling:touch;}
+table.dealtable{width:100%; border-collapse:collapse; font-size:14px;}
+.dealtable th{text-align:left; font-size:11px; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--muted); font-weight:700; padding:8px 10px; border-bottom:1px solid var(--border);
+  white-space:nowrap;}
+.dealtable th.sortable{cursor:pointer; user-select:none;}
+.dealtable th.sortable:hover{color:var(--accent);}
+.dealtable th.sorted::after{content:' \25be'; }
+.dealtable th.sorted.up::after{content:' \25b4';}
+.dealtable td{padding:9px 10px; border-bottom:1px solid var(--border); vertical-align:top;}
+.dealtable .num{text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap;}
+.dealtable tbody tr:hover{background:var(--row);}
+.dealname a{color:var(--ink); text-decoration:none; font-weight:600;}
+.dealname a:hover{color:var(--accent);}
+.dealname .n{display:block; color:var(--muted); font-size:12px; margin-top:2px;}
+.dealtable tfoot td{border-top:2px solid var(--border); border-bottom:none;
+  font-weight:700; color:var(--ink); padding-top:11px;}
+.stagechip{background:var(--pill-wait-bg); color:var(--pill-wait-tx); border-radius:999px;
+  padding:2px 9px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em;}
+.stagechip.agreed,.stagechip.offer{background:var(--pill-done-bg); color:var(--pill-done-tx);}
+.stagechip.dead{background:var(--border); color:var(--muted);}
+.dealfields{display:grid; grid-template-columns:repeat(2,1fr); gap:10px;
+  border-top:1px solid var(--border); padding-top:12px; margin-top:4px;}
+.dealfields .taglabel{margin:0;}
+@media (max-width:520px){ .dealfields{grid-template-columns:1fr;} }

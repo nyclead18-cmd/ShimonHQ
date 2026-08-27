@@ -112,6 +112,8 @@
     return null;
   }
 
+  function starOf(li) { return q(li, '.star'); }
+
   function itemId(li) {
     var pill = q(li, '.pill');
     return (pill && pill.getAttribute('data-id')) || '';
@@ -218,6 +220,12 @@
       }
       return out;
     }
+    var st = starOf(li);
+    if (st) {
+      out.push({label: st.classList.contains('on') ? 'Take off today' : 'Put on today',
+                run: function () { st.click(); }});
+    }
+
 
     // anything on the row that points at a map or an email
     Array.prototype.forEach.call(li.querySelectorAll('a.maplink, a.dirlink, a.outlookbtn:not(.done)'),

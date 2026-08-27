@@ -3,7 +3,8 @@
   <form class="edit" method="post" action="">
     <input name="title" dir="auto" required>
     <input name="note" dir="auto" placeholder="Next step / note">
-    <input name="waiting_on" dir="auto" placeholder="Waiting on (who)">
+    <input name="waiting_on" dir="auto" placeholder="Waiting on (who)" list="knownnames"
+           autocomplete="off">
     <label class="taglabel">Section
       <select name="section_id">
         {% for s in sections %}<option value="{{ s.id }}">{{ s.title }}</option>{% endfor %}
@@ -20,9 +21,28 @@
     </label>
     <label class="duelabel">Due <input type="date" name="due_date"></label>
     <label class="duelabel">Remind <input type="datetime-local" name="remind_at"></label>
+    <div class="dealfields" hidden>
+      <label class="taglabel">Size <input name="amount" placeholder="30m" autocomplete="off"></label>
+      <label class="taglabel">EBITDA <input name="ebitda" placeholder="4.5m" autocomplete="off"></label>
+      <label class="taglabel">Homes <input name="units" type="number" min="0" autocomplete="off"></label>
+      <label class="taglabel">Tenure
+        <select name="tenure">
+          {% for t in tenures or [] %}<option value="{{ t }}">{{ t or '—' }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="taglabel">Stage
+        <select name="stage">
+          {% for t in stages or [] %}<option value="{{ t }}">{{ t or '—' }}</option>{% endfor %}
+        </select>
+      </label>
+    </div>
     <div class="btns"><button type="submit">Save</button></div>
   </form>
   <form method="post" class="delform" action="">
     <button type="submit" class="del" title="Remove">&#x2715;</button>
   </form>
 </template>
+{# Names already in use, so the field that makes the People view work costs a tap. #}
+<datalist id="knownnames">
+  {% for n in names or [] %}<option value="{{ n }}">{% endfor %}
+</datalist>

@@ -1,9 +1,16 @@
 <li class="item {{ it.status }}{% if hidden %} donerow{% endif %}" id="item-{{ it.id }}"
     data-due="{{ it.due_date or '' }}" data-rem="{{ it.remind_at or '' }}"
+    data-kind="{{ (sec_kind or {}).get(it.section_id, 'tasks') }}"
+    data-amount="{{ it.amount or '' }}" data-ebitda="{{ it.ebitda or '' }}"
+    data-units="{{ it.units or '' }}" data-tenure="{{ it.tenure or '' }}"
+    data-stage="{{ it.stage or '' }}"
     data-sec="{{ it.section_id }}" data-proj="{{ it.project_id or '' }}">
   <button type="button" class="pill {{ it.status }}" data-id="{{ it.id }}">
     {{ 'Open' if it.status == 'open' else 'Waiting' if it.status == 'waiting' else 'Done' }}
   </button>
+  <button type="button" class="star{% if it.today %} on{% endif %}" data-star="{{ it.id }}"
+          title="{% if it.today %}On today{% else %}Put on today{% endif %}"
+          aria-label="Today">{% if it.today %}&#9733;{% else %}&#9734;{% endif %}</button>
   <div class="body">
     <div class="t" dir="auto"><span class="tt">{{ it.title }}</span>{% if it.note %} <span class="n" dir="auto">&mdash; {{ it.note }}</span>{% endif %}</div>
     <div class="metaline">
@@ -12,6 +19,8 @@
       {% endif %}
       {% if it.remind_at %}<span class="rem" title="Reminder set">&#9200; {{ it.remind_at[5:7]|int }}/{{ it.remind_at[8:10]|int }} {{ it.remind_at[11:16] }}</span>{% endif %}
       {% if it.waiting_on %}<span class="w">waiting on <b dir="auto">{{ it.waiting_on }}</b></span>{% endif %}
+      {% if it.today and it.today_at %}{% set d = days_since(it.today_at) %}{% if d and d >= 1 %}
+      <span class="staleday{% if d >= 5 %} hot{% endif %}">{{ d }}d on today</span>{% endif %}{% endif %}
     </div>
     {% set inotes = notes_by_item.get(it.id, []) %}
     {% if inotes %}

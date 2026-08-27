@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Today · HQ{% endblock %}
+{% block body %}
+<div class="wrap">
+<header class="top">
+  <div>
+    <div class="eyebrow">{{ pretty }}</div>
+    <h1>Today</h1>
+  </div>
+  <div class="right">
+    <nav class="tabs">
+      <a class="tab on" href="{{ url_for('today_view') }}">Today</a>
+      <a class="tab" href="{{ url_for('board') }}">Board</a>
+      <a class="tab" href="{{ url_for('briefing_view') }}">Brief{% if brief_unread %} <span class="badge">{{ brief_unread }}</span>{% endif %}</a>
+      <a class="tab" href="{{ url_for('calendar_view') }}">Calendar</a>
+      <a class="tab" href="{{ url_for('people_view') }}">People</a>
+      {% if session.get('admin') %}<a class="tab" href="{{ url_for('joel_view') }}">Joel</a>{% endif %}
+      <a class="tab" href="{{ url_for('pulse_view') }}">Pulse</a>
+    </nav>
+    <button type="button" class="notifbtn" id="notifbtn" title="Reminders on this device">&#9200;</button>
+    <a class="logout" href="{{ url_for('account_view') }}">{{ session.get('name') or 'Account' }}</a>
+    <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
+  </div>
+</header>
+
+{% if not rows %}
+<p class="pageintro">Nothing starred and nothing overdue. Star a task on the board and it
+lands here &mdash; it stays where it lives, so there is only ever one copy of it.</p>
+{% endif %}
+
+{% macro lane(title, items, note) %}
+{% if items %}
+<section class="card" style="--sa: {{ '#C24E2A' if title == 'On you' else '#8A671D' }}">
+  <div class="sec-head"><h2><span class="dot"></span>{{ title }}</h2>
+    <span class="counts">{{ items|length }}</span></div>
+  <ul class="items">
+    {% for it in items %}{% include "_item.html" %}{% endfor %}
+  </ul>
+  {% if note %}<p class="caveat">{{ note }}</p>{% endif %}
+</section>
+{% endif %}
+{% endmacro %}
+
+{{ lane('On you', on_me, '') }}
+{{ lane('Waiting on someone', waiting, 'Starred, but the next move is not yours. Open People to see everything that person owes you before you call them.') }}
+
+</div>
+{% include "_edittpl.html" %}
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='board.js') }}?v={{ css_v }}"></script>
+{% endblock %}
