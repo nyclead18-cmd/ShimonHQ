@@ -594,9 +594,11 @@ def _make_people(con):
         if row:
             con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES(?,?)",
                         ("u%d:%s" % (me, k), row[0]))
-    con.execute("UPDATE sections SET visibility='shared' WHERE title LIKE '%Joel%'")
+    if HQ_USER.lower() == "shimon":
+        con.execute("UPDATE sections SET visibility='shared' WHERE title LIKE '%Joel%'")
     con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES(?,?)",
-                ("u%d:tagline" % me, "Pinta \u00b7 Ohr Chaim \u00b7 Personal"))
+                ("u%d:tagline" % me,
+                 os.environ.get("HQ_TAGLINE", "Pinta \u00b7 Ohr Chaim \u00b7 Personal")))
 
 
 def init_db():
@@ -1768,6 +1770,7 @@ def board_title(con, uid=None):
     name = (row["display_name"] if row else "").strip()
     if not name:
         return "HQ"
+    name = name.split()[0]   # "Joel Landau" signs his board "Joel's HQ"
     return "%s' HQ" % name if name.endswith("s") else "%s's HQ" % name
 
 
