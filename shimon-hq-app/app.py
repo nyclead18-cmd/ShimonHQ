@@ -459,6 +459,69 @@ def _everything_into_buckets(con):
     con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES('mig:buckets','1')")
 
 
+def _joel_fresh_start(con):
+    """Joel asked for a clean slate. Everything currently on his board is
+    written to a snapshot file beside the database first - nothing is lost,
+    it is just no longer in the way. UK Prospects and US carry over; the
+    buckets, his login, his key, and the Joel-Shimon List are untouched
+    (the List lives in other people's buckets, not on his board).
+    """
+    if con.execute("SELECT 1 FROM settings WHERE k='mig:joelfresh'").fetchone():
+        return
+    row = con.execute("SELECT id FROM users WHERE username='jlandau'").fetchone()
+    if not row:
+        con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES('mig:joelfresh','1')")
+        return
+    jid = row[0]
+    secs = [r[0] for r in con.execute("SELECT id FROM sections WHERE owner_id=?", (jid,))]
+    if secs:
+        q = ",".join("?" * len(secs))
+        snap = {"taken": datetime.now().isoformat(timespec="seconds"),
+                "sections": [], "projects": [], "items": [], "notes": []}
+        for t, sql in (("sections", "SELECT * FROM sections WHERE id IN (%s)" % q),
+                       ("projects", "SELECT * FROM projects WHERE section_id IN (%s)" % q),
+                       ("items", "SELECT * FROM items WHERE section_id IN (%s)" % q)):
+            cur = con.execute(sql, secs)
+            cols = [c[0] for c in cur.description]
+            snap[t] = [dict(zip(cols, r)) for r in cur.fetchall()]
+        iids = [it["id"] for it in snap["items"]]
+        if iids:
+            qi = ",".join("?" * len(iids))
+            cur = con.execute("SELECT * FROM item_notes WHERE item_id IN (%s)" % qi, iids)
+            cols = [c[0] for c in cur.description]
+            snap["notes"] = [dict(zip(cols, r)) for r in cur.fetchall()]
+        try:
+            path = os.path.join(os.path.dirname(DB_PATH) or BASE,
+                                "joel-board-before-reset.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(snap, f, ensure_ascii=False, indent=1, default=str)
+        except OSError:
+            pass    # a failed snapshot must not block startup; data below is only trimmed
+        keep_projects = [r[0] for r in con.execute(
+            "SELECT id FROM projects WHERE section_id IN (%s)" % q
+            + " AND lower(title) IN ('uk prospects','us')", secs)]
+        kp = ",".join("?" * len(keep_projects)) if keep_projects else "NULL"
+        doomed_items = [r[0] for r in con.execute(
+            "SELECT id FROM items WHERE section_id IN (%s)" % q
+            + " AND (project_id IS NULL OR project_id NOT IN (%s))" % kp,
+            secs + keep_projects)]
+        if doomed_items:
+            qd = ",".join("?" * len(doomed_items))
+            con.execute("DELETE FROM item_notes WHERE item_id IN (%s)" % qd, doomed_items)
+            con.execute("DELETE FROM item_files WHERE item_id IN (%s)" % qd, doomed_items)
+            con.execute("DELETE FROM list_tags WHERE item_id IN (%s)" % qd, doomed_items)
+            con.execute("DELETE FROM items WHERE id IN (%s)" % qd, doomed_items)
+        doomed_projects = [r[0] for r in con.execute(
+            "SELECT id FROM projects WHERE section_id IN (%s)" % q
+            + " AND id NOT IN (%s)" % kp, secs + keep_projects)]
+        if doomed_projects:
+            qp = ",".join("?" * len(doomed_projects))
+            con.execute("DELETE FROM project_tags WHERE project_id IN (%s)" % qp,
+                        doomed_projects)
+            con.execute("DELETE FROM projects WHERE id IN (%s)" % qp, doomed_projects)
+    con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES('mig:joelfresh','1')")
+
+
 def _pipeline_becomes_plain(con):
     """The pipeline confused the people it was built for, so it goes.
 
@@ -657,6 +720,7 @@ def init_db():
                     (sid, it["t"], it.get("n", ""), it.get("w", ""),
                      it.get("s", "open"), pi, now))
     _everything_into_buckets(con)   # after seeding, so a brand-new board is born bucketed
+    _joel_fresh_start(con)          # after bucketing, so it trims projects, not sections
     commit_retry(con)
     con.close()
 
