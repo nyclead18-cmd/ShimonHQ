@@ -391,6 +391,24 @@ jumpToLinkedItem();
       if (eb) { eb.value = short(d.ebitda); }
       set('units', d.units); set('tenure', d.tenure); set('stage', d.stage);
     }
+    // list chips: light the people this task is already with, keep the hidden
+    // field in step as chips are toggled
+    var lt = edit.querySelector('[name=ltags]');
+    if (lt) {
+      var on = (d.ltags || '').split(',').filter(Boolean);
+      lt.value = on.join(',');
+      frag.querySelectorAll('.lchip').forEach(function (c) {
+        if (on.indexOf(c.getAttribute('data-luid')) !== -1) { c.classList.add('on'); }
+        c.addEventListener('click', function () {
+          c.classList.toggle('on');
+          var now = [];
+          edit.querySelectorAll('.lchip.on').forEach(function (x) {
+            now.push(x.getAttribute('data-luid'));
+          });
+          lt.value = now.join(',');
+        });
+      });
+    }
     box.appendChild(frag);
   }
 
@@ -541,7 +559,7 @@ document.addEventListener('click', function (ev) {
 /* ---------- team chips: one tap names who you are waiting on ---------- */
 document.addEventListener('click', function (ev) {
   var chip = ev.target.closest && ev.target.closest('.tchip');
-  if (!chip) { return; }
+  if (!chip || chip.classList.contains('lchip')) { return; }
   ev.preventDefault();
   var form = chip.closest('form');
   var field = form && form.querySelector('[name=waiting_on]');

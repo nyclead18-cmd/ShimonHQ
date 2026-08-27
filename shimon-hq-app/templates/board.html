@@ -13,6 +13,7 @@
       {% if has_pipe %}<a class="tab" href="{{ url_for('pipeline_view') }}">Pipeline</a>{% endif %}
       {% if has_brief %}<a class="tab" href="{{ url_for('briefing_view') }}">Brief{% if brief_unread %} <span class="badge">{{ brief_unread }}</span>{% endif %}</a>{% endif %}
       {% if has_cal %}<a class="tab" href="{{ url_for('calendar_view') }}">Calendar</a>{% endif %}
+      <a class="tab" href="{{ url_for('list_view') }}">List</a>
       <a class="tab" href="{{ url_for('people_view') }}">People</a>
       {% if session.get('admin') %}<a class="tab" href="{{ url_for('joel_view') }}">Joel</a>{% endif %}
       <a class="tab" href="{{ url_for('pulse_view') }}">Pulse</a>
@@ -113,7 +114,22 @@
   <div class="project">
     <div class="proj-head">
       <h3 dir="auto">{{ p.title }}</h3>
+      {% set ptag = (ptags or {}).get(p.id) %}
+      {% if ptag %}<span class="lwith" title="This whole project is on the list with">&#8646; {% for u in ptag|sort %}{{ people.get(u, '?') }}{% if not loop.last %} + {% endif %}{% endfor %}</span>{% endif %}
       <span class="pcount">{{ pdone | length }}/{{ pitems | length }}</span>
+      {% if sec.owner_id == session.get('uid') %}
+      <details class="sharepop secmenu projtag">
+        <summary title="Put this project on a list">&#8646;</summary>
+        <form method="post" action="{{ url_for('set_project_tags', proj_id=p.id) }}" class="sharemenu menurow">
+          <div class="menusep" style="border-top:0;padding-top:0;margin-top:0">On the list with</div>
+          {% for pid2, pname in people.items() if pid2 != session.get('uid') %}
+          <label class="checkrow"><input type="checkbox" name="uids" value="{{ pid2 }}"
+            {% if ptag and pid2 in ptag %}checked{% endif %}> {{ pname }}</label>
+          {% endfor %}
+          <button type="submit">Save</button>
+        </form>
+      </details>
+      {% endif %}
       <form method="post" action="{{ url_for('delete_project', proj_id=p.id) }}" class="pdelform">
         <button type="submit" class="del" title="Remove project (tasks stay)">&#x2715;</button>
       </form>

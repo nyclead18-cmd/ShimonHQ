@@ -8,6 +8,15 @@
     </div>
     <input name="waiting_on" dir="auto" placeholder="Waiting on (who)" list="knownnames"
            autocomplete="off">
+    {% if people %}
+    <div class="teamchips lrow">
+      <span class="llabel">On the list with</span>
+      {% for pid, pname in people.items() if pid != session.get('uid') %}
+      <button type="button" class="tchip lchip" data-luid="{{ pid }}">{{ pname }}</button>
+      {% endfor %}
+      <input type="hidden" name="ltags" value="">
+    </div>
+    {% endif %}
     <label class="taglabel">Section
       <select name="section_id">
         {% for s in sections %}<option value="{{ s.id }}">{{ s.title }}</option>{% endfor %}

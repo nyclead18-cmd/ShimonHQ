@@ -921,3 +921,27 @@ li.item .pill{justify-self:start; align-self:start; white-space:nowrap;}
 /* popovers must not be cut off at the card's edge */
 section.card:has(details.sharepop[open]),
 section.card:has(.statusmenu){overflow:visible;}
+
+/* ---------- the list: tagged across buckets ----------
+   A task lives in one person's bucket and can sit on a list with somebody -
+   the small arrows say so on the row, the chips in edit choose who. */
+.lwith{color:var(--pill-done-tx); background:var(--pill-done-bg); font-size:10.5px;
+  font-weight:700; border-radius:999px; padding:1px 8px; white-space:nowrap;}
+.lchip{opacity:.55;}
+.lchip.on{opacity:1; outline:2px solid var(--pill-wait-tx);}
+.lrow{align-items:center;}
+.llabel{color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.05em;}
+.projtag summary{font-size:13px; padding:0 4px; color:var(--muted); font-weight:700;}
+.projtag summary:hover{color:var(--ink);}
+.proj-head{display:flex; align-items:center; gap:8px;}
+.proj-head h3{flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.proj-head .sharemenu{right:auto; left:0;}
+section.card:has(.projtag[open]){overflow:visible;}
+.lane-kicker{font-size:12px; font-weight:700; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--muted); margin:22px 0 8px; border-bottom:2px solid var(--border); padding-bottom:5px;}
+.lane-done{color:var(--muted); font-size:12px; margin:6px 0 0;}
+form.listrespond{display:flex; gap:6px; margin-top:6px; max-width:34em;}
+form.listrespond input[name=body]{flex:1 1 0; min-width:0; font:inherit; font-size:13px;
+  border:1px solid var(--border); border-radius:999px; padding:5px 12px; background:var(--card); color:var(--ink);}
+form.listrespond button{font:inherit; font-size:13px; border:1px solid var(--border);
+  background:var(--card); color:var(--ink); border-radius:999px; padding:4px 12px; cursor:pointer;}

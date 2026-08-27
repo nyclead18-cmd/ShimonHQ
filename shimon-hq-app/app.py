@@ -387,6 +387,78 @@ def _three_boards(con):
     con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES('mig:boards3','1')")
 
 
+def _everything_into_buckets(con):
+    """Three boxes per person - Personal/Family, Pinta, Community/Charity - and
+    everything else becomes a project inside one of them.
+
+    A section that was shared stays shared in the new shape: the project it
+    becomes is tagged to the same people, so they keep seeing and working
+    exactly what they saw before - on the List, item by item - and nobody
+    gains sight of the rest of the bucket it moved into.
+    """
+    if con.execute("SELECT 1 FROM settings WHERE k='mig:buckets'").fetchone():
+        return
+    all_users = [r[0] for r in con.execute("SELECT id FROM users")]
+
+    def _canon_bucket(title):
+        t = " ".join((title or "").strip().lower().split())
+        t = t.replace(" / ", "/").replace("/ ", "/").replace(" /", "/")
+        if t in ("personal/family", "personal", "family"):
+            return "Personal/Family"
+        if t == "pinta":
+            return "Pinta"
+        if t in ("community/charity", "community", "charity"):
+            return "Community/Charity"
+        return None
+
+    for uid in all_users:
+        buckets = {}
+        for (sid, title) in con.execute(
+                "SELECT id, title FROM sections WHERE owner_id=?", (uid,)).fetchall():
+            b = _canon_bucket(title)
+            if b and b not in buckets:
+                con.execute("UPDATE sections SET title=?, board=?, kind='tasks',"
+                            " visibility='private', pos=? WHERE id=?",
+                            (b, b, BUCKET_POS[b], sid))
+                con.execute("DELETE FROM section_shares WHERE section_id=?", (sid,))
+                buckets[b] = sid
+        for b in BOARDS:
+            if b not in buckets:
+                buckets[b] = con.execute(
+                    "INSERT INTO sections(title, pos, owner_id, visibility, board)"
+                    " VALUES(?,?,?,'private',?)", (b, BUCKET_POS[b], uid, b)).lastrowid
+        bucket_ids = set(buckets.values())
+        for (sid, title, board, vis) in con.execute(
+                "SELECT id, title, board, visibility FROM sections WHERE owner_id=?",
+                (uid,)).fetchall():
+            if sid in bucket_ids:
+                continue
+            dest = buckets.get(canonical_board(board) or "", buckets["Pinta"])
+            shared_with = [r[0] for r in con.execute(
+                "SELECT user_id FROM section_shares WHERE section_id=?", (sid,))]
+            if vis == "shared":
+                shared_with = [u for u in all_users if u != uid]
+            ppos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM projects"
+                               " WHERE section_id=?", (dest,)).fetchone()[0]
+            # the section's own projects move over first, keeping their names
+            for (opid,) in con.execute("SELECT id FROM projects WHERE section_id=?",
+                                       (sid,)).fetchall():
+                con.execute("UPDATE projects SET section_id=? WHERE id=?", (dest, opid))
+                for u in shared_with:
+                    con.execute("INSERT OR IGNORE INTO project_tags(project_id, user_id)"
+                                " VALUES(?,?)", (opid, u))
+            p = con.execute("INSERT INTO projects(section_id, title, pos) VALUES(?,?,?)",
+                            (dest, title.strip(), ppos)).lastrowid
+            for u in shared_with:
+                con.execute("INSERT OR IGNORE INTO project_tags(project_id, user_id)"
+                            " VALUES(?,?)", (p, u))
+            con.execute("UPDATE items SET project_id=COALESCE(project_id, ?), section_id=?"
+                        " WHERE section_id=?", (p, dest, sid))
+            con.execute("DELETE FROM section_shares WHERE section_id=?", (sid,))
+            con.execute("DELETE FROM sections WHERE id=?", (sid,))
+    con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES('mig:buckets','1')")
+
+
 def _pipeline_becomes_plain(con):
     """The pipeline confused the people it was built for, so it goes.
 
@@ -550,7 +622,13 @@ def init_db():
     con.executescript(
         "CREATE TABLE IF NOT EXISTS section_shares ("
         " section_id INTEGER NOT NULL, user_id INTEGER NOT NULL,"
-        " PRIMARY KEY(section_id, user_id));")
+        " PRIMARY KEY(section_id, user_id));"
+        "CREATE TABLE IF NOT EXISTS list_tags ("
+        " item_id INTEGER NOT NULL, user_id INTEGER NOT NULL,"
+        " PRIMARY KEY(item_id, user_id));"
+        "CREATE TABLE IF NOT EXISTS project_tags ("
+        " project_id INTEGER NOT NULL, user_id INTEGER NOT NULL,"
+        " PRIMARY KEY(project_id, user_id));")
     _pulse_notes_per_person(con)
     _make_people(con)
     _shared_becomes_people(con)
@@ -578,6 +656,7 @@ def init_db():
                     " VALUES(?,?,?,?,?,?,?)",
                     (sid, it["t"], it.get("n", ""), it.get("w", ""),
                      it.get("s", "open"), pi, now))
+    _everything_into_buckets(con)   # after seeding, so a brand-new board is born bucketed
     commit_retry(con)
     con.close()
 
@@ -628,9 +707,25 @@ def sec_clause(con, col="section_id", uid=None, first=False):
     return kw + "%s IN (%s)" % (col, ",".join("?" * len(ids))), ids
 
 
+def tag_pool(con, item_id):
+    """Everyone this task is on a list with - tagged itself, or through its project."""
+    return [r[0] for r in con.execute(
+        "SELECT user_id FROM list_tags WHERE item_id=?"
+        " UNION SELECT pt.user_id FROM project_tags pt"
+        " JOIN items i ON i.project_id = pt.project_id WHERE i.id=?",
+        (item_id, item_id))]
+
+
 def may_touch(con, item_id, uid=None):
     row = con.execute("SELECT section_id FROM items WHERE id=?", (item_id,)).fetchone()
-    return bool(row) and row["section_id"] in visible_ids(con, uid)
+    if not row:
+        return False
+    if row["section_id"] in visible_ids(con, uid):
+        return True
+    # a task lives in one person's bucket but can sit on a list with somebody
+    # else - that somebody may read it and work it, and nobody else may
+    uid = uid if uid is not None else me()
+    return uid in tag_pool(con, item_id)
 
 
 def require_item(con, item_id, uid=None):
@@ -644,16 +739,32 @@ def require_section(con, sec_id, uid=None):
         abort(404)
 
 
+BUCKET_POS = {"Personal/Family": 1, "Pinta": 2, "Community/Charity": 3}
+
+
+def ensure_buckets(con, uid):
+    """The three fixed boxes everyone works out of. Returns {title: section_id}."""
+    out = {}
+    for t in BOARDS:
+        row = con.execute("SELECT id FROM sections WHERE owner_id=? AND lower(title)=lower(?)",
+                          (uid, t)).fetchone()
+        out[t] = row["id"] if row else con.execute(
+            "INSERT INTO sections(title, pos, owner_id, visibility, board)"
+            " VALUES(?,?,?,'private',?)", (t, BUCKET_POS[t], uid, t)).lastrowid
+    return out
+
+
 def my_inbox(con, uid=None):
-    """Everyone captures into their own Inbox, never into somebody else's."""
+    """Captures land in the Inbox project inside Pinta, to be sorted later.
+    Returns (section_id, project_id)."""
     uid = uid if uid is not None else me()
-    row = con.execute("SELECT id FROM sections WHERE title='Inbox' AND owner_id=?",
-                      (uid,)).fetchone()
-    if row:
-        return row["id"]
-    return con.execute(
-        "INSERT INTO sections(title, pos, owner_id, visibility) VALUES('Inbox', -1, ?, 'private')",
-        (uid,)).lastrowid
+    sec = ensure_buckets(con, uid)["Pinta"]
+    row = con.execute("SELECT id FROM projects WHERE section_id=? AND lower(title)='inbox'",
+                      (sec,)).fetchone()
+    proj = row["id"] if row else con.execute(
+        "INSERT INTO projects(section_id, title, pos) VALUES(?, 'Inbox', -1)",
+        (sec,)).lastrowid
+    return sec, proj
 
 
 def uset(con, key, uid=None, default=""):
@@ -778,9 +889,16 @@ def board():
         "waiting": sum(1 for it in items if it["status"] == "waiting"),
         "done": sum(1 for it in items if it["status"] == "done"),
     }
+    ltags = {}
+    for r in con.execute("SELECT item_id, user_id FROM list_tags"):
+        ltags.setdefault(r["item_id"], []).append(r["user_id"])
+    ltags = {k: ",".join(str(u) for u in sorted(v)) for k, v in ltags.items()}
+    ptags = {}
+    for r in con.execute("SELECT project_id, user_id FROM project_tags"):
+        ptags.setdefault(r["project_id"], set()).add(r["user_id"])
     return render_template("board.html", sections=sections, by_sec=by_sec,
                            cur_board=cur_board, shares=shares, collapsed=collapsed,
-                           projects_by_sec=projects_by_sec,
+                           projects_by_sec=projects_by_sec, ltags=ltags, ptags=ptags,
                            people={r["id"]: r["display_name"] for r in people_list(con)},
                            names=known_names(con),
                            sec_kind={r["id"]: r["kind"] for r in sections},
@@ -989,8 +1107,13 @@ def today_view():
         "SELECT * FROM items WHERE status != 'done'"
         " AND COALESCE(remind_at,'') != '' AND substr(remind_at,1,10) = ?"
         + where2 + " ORDER BY remind_at", [iso] + args2).fetchall()
+    ltags = {}
+    for r in con.execute("SELECT item_id, user_id FROM list_tags"):
+        ltags.setdefault(r["item_id"], []).append(r["user_id"])
+    ltags = {k: ",".join(str(u) for u in sorted(v)) for k, v in ltags.items()}
     return render_template("today.html", rows=rows, on_me=on_me, waiting=waiting,
-                           evs=evs, timed=timed,
+                           evs=evs, timed=timed, ltags=ltags,
+                           people={r["id"]: r["display_name"] for r in people_list(con)},
                            sections=sections, projects_by_sec=projects_by_sec,
                            sec_kind={r["id"]: r["kind"] for r in sections},
                            tenures=TENURES, stages=STAGES,
@@ -1091,6 +1214,18 @@ def edit_item(item_id):
                      units if units and units > 0 else None,
                      tenure if tenure in TENURES else "",
                      stage if stage in STAGES else "", item_id))
+    if request.form.get("ltags") is not None:
+        # only the person whose bucket this is decides who it is on a list with
+        own = con.execute("SELECT s.owner_id FROM items i JOIN sections s"
+                          " ON s.id=i.section_id WHERE i.id=?", (item_id,)).fetchone()
+        if own and own["owner_id"] == me():
+            uids = {int(x) for x in (request.form.get("ltags") or "").split(",")
+                    if x.strip().isdigit()}
+            known = {r["id"] for r in people_list(con)}
+            con.execute("DELETE FROM list_tags WHERE item_id=?", (item_id,))
+            for u in uids & (known - {me()}):
+                con.execute("INSERT OR IGNORE INTO list_tags(item_id, user_id)"
+                            " VALUES(?,?)", (item_id, u))
     commit_retry(con)
     return redirect(url_for("board"))
 
@@ -1119,6 +1254,9 @@ def add_note(item_id):
                     "/#item-%d" % item_id)
     if request.headers.get("X-Requested-With") == "fetch":
         return jsonify(id=note_id, body=body, created_at=created)
+    nxt = request.form.get("next") or ""
+    if nxt.startswith("/") and not nxt.startswith("//"):
+        return redirect(nxt)
     return redirect(url_for("board"))
 
 
@@ -1199,12 +1337,13 @@ def capture():
     if not title:
         return redirect(url_for("board"))
     con = db()
-    sid = my_inbox(con)
+    sid, pid = my_inbox(con)
     pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM items WHERE section_id=?",
                       (sid,)).fetchone()[0]
     con.execute(
-        "INSERT INTO items(section_id, title, status, pos, updated_at) VALUES(?,?,?,?,?)",
-        (sid, title, "open", pos, datetime.now().isoformat(timespec="seconds")))
+        "INSERT INTO items(section_id, project_id, title, status, pos, updated_at)"
+        " VALUES(?,?,?,?,?,?)",
+        (sid, pid, title, "open", pos, datetime.now().isoformat(timespec="seconds")))
     commit_retry(con)
     return redirect(url_for("board"))
 
@@ -1391,6 +1530,106 @@ def agenda_view(who):
     return render_template("agenda.html", who=who, rows=rows, latest=latest,
                            today=_now_local().strftime("%B %-d, %Y")
                            if os.name != "nt" else _now_local().strftime("%B %d, %Y"))
+
+
+# ---------- the list: two people, one page ----------
+
+def _tagged_between(con, a, b):
+    """Items owned by a (their bucket) that sit on a list with b."""
+    return con.execute(
+        "SELECT items.*, COALESCE(p.title, '') AS proj_title FROM items"
+        " JOIN sections s ON s.id = items.section_id"
+        " LEFT JOIN projects p ON p.id = items.project_id"
+        " WHERE s.owner_id=? AND items.id IN ("
+        "   SELECT item_id FROM list_tags WHERE user_id=?"
+        "   UNION SELECT i2.id FROM items i2"
+        "     JOIN project_tags pt ON pt.project_id = i2.project_id WHERE pt.user_id=?)"
+        " ORDER BY items.status='done', items.due_date IS NULL, items.due_date,"
+        " items.pos, items.id", (a, b, b)).fetchall()
+
+
+@app.route("/list")
+@app.route("/list/<username>")
+@login_required
+def list_view(username=None):
+    """One list for the two of you: what each side has tagged for the other,
+    living in its own bucket, reviewable here and printable as one sheet."""
+    con = db()
+    uid = me()
+    folk = {r["id"]: r for r in people_list(con)}
+    other = None
+    if username:
+        for pid, r in folk.items():
+            if r["username"] == username and pid != uid:
+                other = pid
+    if other is None:
+        # whoever shares the most with you comes first; default to them
+        counts = {}
+        for pid in folk:
+            if pid == uid:
+                continue
+            counts[pid] = len(_tagged_between(con, uid, pid)) + \
+                len(_tagged_between(con, pid, uid))
+        others = sorted(counts, key=lambda p: (-counts[p], p))
+        if username or not others:
+            other = others[0] if others else None
+        else:
+            other = others[0]
+    if other is None:
+        return render_template("list.html", folk=folk, other=None, mine=[], theirs=[],
+                               latest={}, me_id=uid, today="")
+    mine = _tagged_between(con, uid, other)
+    theirs = _tagged_between(con, other, uid)
+    keep = {r["id"] for r in mine} | {r["id"] for r in theirs}
+    latest = {}
+    for n in con.execute("SELECT item_id, body, created_at FROM item_notes ORDER BY id"):
+        if n["item_id"] in keep:
+            latest[n["item_id"]] = n
+    return render_template("list.html", folk=folk, other=other, me_id=uid,
+                           mine=mine, theirs=theirs, latest=latest,
+                           today=_now_local().strftime("%B %-d, %Y")
+                           if os.name != "nt" else _now_local().strftime("%B %d, %Y"))
+
+
+@app.route("/items/<int:item_id>/tags", methods=["POST"])
+@login_required
+def set_item_tags(item_id):
+    """Put a task on (or off) the list with the named people. Only the person
+    whose bucket it lives in decides who it is shared with."""
+    con = db()
+    row = con.execute(
+        "SELECT s.owner_id FROM items i JOIN sections s ON s.id=i.section_id"
+        " WHERE i.id=?", (item_id,)).fetchone()
+    if not row or row["owner_id"] != me():
+        abort(404)
+    uids = {int(u) for u in request.form.getlist("uids") if str(u).isdigit()}
+    known = {r["id"] for r in people_list(con)}
+    con.execute("DELETE FROM list_tags WHERE item_id=?", (item_id,))
+    for u in uids & known - {me()}:
+        con.execute("INSERT OR IGNORE INTO list_tags(item_id, user_id) VALUES(?,?)",
+                    (item_id, u))
+    commit_retry(con)
+    return jsonify(ok=True)
+
+
+@app.route("/projects/<int:proj_id>/tags", methods=["POST"])
+@login_required
+def set_project_tags(proj_id):
+    """Tag a whole project onto the list - every task in it, present and future."""
+    con = db()
+    row = con.execute(
+        "SELECT s.owner_id FROM projects p JOIN sections s ON s.id=p.section_id"
+        " WHERE p.id=?", (proj_id,)).fetchone()
+    if not row or row["owner_id"] != me():
+        abort(404)
+    uids = {int(u) for u in request.form.getlist("uids") if str(u).isdigit()}
+    known = {r["id"] for r in people_list(con)}
+    con.execute("DELETE FROM project_tags WHERE project_id=?", (proj_id,))
+    for u in uids & known - {me()}:
+        con.execute("INSERT OR IGNORE INTO project_tags(project_id, user_id) VALUES(?,?)",
+                    (proj_id, u))
+    commit_retry(con)
+    return redirect(url_for("board"))
 
 
 # ---------- calendar ----------
@@ -1597,17 +1836,18 @@ def brief_to_task(bid):
         abort(404)
     title = (request.form.get("title") or row["text"]).strip()[:120]
     sid = request.form.get("section_id", type=int)
+    pid = None
     if sid:
         require_section(con, sid)
     else:
-        sid = my_inbox(con)
+        sid, pid = my_inbox(con)
     note = (request.form.get("note") or row["detail"] or "").strip()[:200]
     pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM items WHERE section_id=?",
                       (sid,)).fetchone()[0]
     iid = con.execute(
-        "INSERT INTO items(section_id, title, note, waiting_on, status, pos,"
-        " due_date, updated_at) VALUES(?,?,?,?,?,?,?,?)",
-        (sid, title, note, (request.form.get("waiting_on") or "").strip(), "open", pos,
+        "INSERT INTO items(section_id, project_id, title, note, waiting_on, status, pos,"
+        " due_date, updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+        (sid, pid, title, note, (request.form.get("waiting_on") or "").strip(), "open", pos,
          (request.form.get("due_date") or "").strip() or None,
          datetime.now().isoformat(timespec="seconds"))).lastrowid
     con.execute("UPDATE brief_items SET item_id=?, is_read=1 WHERE id=?", (iid, bid))
@@ -2134,6 +2374,12 @@ def watchers(con, item_id, kind, exclude=None):
         pool.append(sec["owner_id"])
         pool = [u for u in set(pool) if u != exclude]
     else:
+        pool = []
+    # a task on a list is watched by everyone on that list, and by its owner
+    tags = tag_pool(con, item_id)
+    if tags:
+        pool = [u for u in set(pool) | set(tags) | {sec["owner_id"]} if u != exclude]
+    if not pool:
         return []
     return [u for u in pool if wants(con, u, kind)]
 
@@ -2272,13 +2518,9 @@ def add_person():
         " VALUES(?,?,?,0,?)",
         (username, display, generate_password_hash(pw),
          datetime.now().isoformat(timespec="seconds"))).lastrowid
-    # a board with nothing on it is useless, so they get one section to work in,
-    # shared - which is the point of them being here
-    pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM sections").fetchone()[0]
-    con.execute("INSERT INTO sections(title, pos, owner_id, visibility)"
-                " VALUES(?,?,?,'private')", ("%s / Tracker" % display, pos, uid))
-    con.execute("INSERT INTO sections(title, pos, owner_id, visibility)"
-                " VALUES('Inbox',?,?,'private')", (pos + 1, uid))
+    # everyone starts with the same three boxes, private until they share
+    ensure_buckets(con, uid)
+    my_inbox(con, uid)
     commit_retry(con)
     return render_template("account.html", who=user_row(con), folk=people_list(con),
                            feed_url="", api_token="",
@@ -2745,6 +2987,18 @@ def api_quickadd():
     where, args = sec_clause(con, "id")
     sec = con.execute("SELECT id FROM sections WHERE title=?" + where,
                       [sec_title] + args).fetchone()
+    preset_pid = None
+    if not sec and sec_title:
+        # the old boxes live on as projects inside the three buckets - a sweep
+        # still saying "Joel / Shimon Tracker" lands in that project
+        prow = con.execute(
+            "SELECT id, section_id FROM projects WHERE (title=? OR title LIKE ?)"
+            + where.replace(" AND id", " AND section_id")
+            + " ORDER BY (title=?) DESC, id LIMIT 1",
+            [sec_title, "%" + sec_title + "%"] + args + [sec_title]).fetchone()
+        if prow:
+            sec = {"id": prow["section_id"]}
+            preset_pid = prow["id"]
     if not sec and sec_title:
         sec = con.execute("SELECT id FROM sections WHERE title LIKE ?" + where
                           + " ORDER BY id LIMIT 1",
@@ -2758,7 +3012,7 @@ def api_quickadd():
                       [title] + args).fetchone()
     if dup:
         return "SKIPPED (duplicate): " + title, 200, {"Content-Type": "text/plain; charset=utf-8"}
-    pid = None
+    pid = preset_pid
     proj = (request.args.get("project") or "").strip()
     if proj:
         prow = con.execute("SELECT id FROM projects WHERE section_id=? AND lower(title)=lower(?)",

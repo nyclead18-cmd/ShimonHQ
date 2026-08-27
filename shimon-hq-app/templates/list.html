@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}List · Pinta HQ{% endblock %}
+{% block body %}
+<div class="wrap">
+<header class="top noprint">
+  <div>
+    <div class="eyebrow">The list</div>
+    <h1>{% if other %}{{ session.get('name') or 'Me' }} + {{ folk[other].display_name }}{% else %}List{% endif %}</h1>
+  </div>
+  <div class="right">
+    <nav class="tabs">
+      <a class="tab" href="{{ url_for('today_view') }}">Today</a>
+      <a class="tab" href="{{ url_for('board') }}">Board</a>
+      <a class="tab on" href="{{ url_for('list_view') }}">List</a>
+      <a class="tab" href="{{ url_for('people_view') }}">People</a>
+    </nav>
+    {% if other %}<button type="button" class="printbtn" onclick="window.print()">&#128424; Print</button>{% endif %}
+    <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
+  </div>
+</header>
+
+{% if folk|length > 2 %}
+<div class="boardchips noprint">
+  {% for pid, r in folk.items() if pid != me_id %}
+  <a class="bchip{% if pid == other %} on{% endif %}"
+     href="{{ url_for('list_view', username=r.username) }}">{{ r.display_name }}</a>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if not other %}
+<p class="meta">Nothing here yet. Tag a task or a whole project onto a list from the
+board &mdash; open a task's edit and pick a name under &ldquo;On the list with&rdquo;,
+or use the &#8646; button on a project's header.</p>
+{% else %}
+<div class="agsheet">
+  <div class="sheet-top">
+    <div>
+      <div class="sheet-kicker">Pinta HQ &middot; shared list</div>
+      <h2 class="sheet-name">{{ session.get('name') or 'Me' }} + {{ folk[other].display_name }}</h2>
+    </div>
+    <div class="sheet-date">{{ today }}</div>
+  </div>
+
+  {% for lane, rows in [('Yours', mine), (folk[other].display_name ~ "'s", theirs)] %}
+  <div class="lane-kicker">{{ lane }} &middot; {{ rows|rejectattr('status','equalto','done')|list|length }} open</div>
+  {% if rows %}
+  <ol class="sheet-items">
+    {% for it in rows if it.status != 'done' %}
+    <li id="item-{{ it.id }}">
+      <div class="si-head">
+        <span class="si-title" dir="auto">{{ it.title }}</span>
+        {% if it.status == 'waiting' %}<span class="si-due">waiting{% if it.waiting_on %} on {{ it.waiting_on }}{% endif %}</span>{% endif %}
+        {% if it.due_date %}<span class="si-due">due {{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}</span>{% endif %}
+        {% if it.proj_title %}<span class="si-sec">{{ it.proj_title }}</span>{% endif %}
+      </div>
+      {% if it.note %}<div class="si-note" dir="auto">{{ it.note }}</div>{% endif %}
+      {% set n = latest.get(it.id) %}
+      {% if n %}<div class="si-last" dir="auto">Last: {{ n.body }} <span class="si-when">({{ n.created_at|stamp }})</span></div>{% endif %}
+      <div class="si-outcome">Outcome:</div>
+      <form class="respond listrespond noprint" method="post" action="{{ url_for('add_note', item_id=it.id) }}">
+        <input type="hidden" name="next" value="{{ request.path }}">
+        <input name="body" placeholder="Add a response&hellip;" dir="auto" autocomplete="off">
+        <button type="submit">&#8594;</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ol>
+  {% set donerows = rows|selectattr('status','equalto','done')|list %}
+  {% if donerows %}<div class="lane-done noprint">{{ donerows|length }} done &middot; {{ donerows|map(attribute='title')|join(' · ') }}</div>{% endif %}
+  {% else %}
+  <p class="meta">Nothing tagged this way yet.</p>
+  {% endif %}
+  {% endfor %}
+</div>
+{% endif %}
+</div>
+{% endblock %}

@@ -5,7 +5,8 @@
     data-amount="{{ it.amount or '' }}" data-ebitda="{{ it.ebitda or '' }}"
     data-units="{{ it.units or '' }}" data-tenure="{{ it.tenure or '' }}"
     data-stage="{{ it.stage or '' }}"
-    data-sec="{{ it.section_id }}" data-proj="{{ it.project_id or '' }}">
+    data-sec="{{ it.section_id }}" data-proj="{{ it.project_id or '' }}"
+    data-ltags="{{ (ltags or {}).get(it.id, '') }}">
   <button type="button" class="pill {{ it.status }}" data-id="{{ it.id }}">
     {{ 'Open' if it.status == 'open' else 'Waiting' if it.status == 'waiting' else 'Done' }}
   </button>
@@ -24,6 +25,7 @@
       {% if it.waiting_on %}<span class="w">waiting on <b dir="auto">{{ it.waiting_on }}</b></span>{% endif %}
       {% if it.today and it.today_at %}{% set d = days_since(it.today_at) %}{% if d and d >= 1 %}
       <span class="staleday{% if d >= 5 %} hot{% endif %}">{{ d }}d on today</span>{% endif %}{% endif %}
+      {% if ltags and ltags.get(it.id) %}<span class="lwith" title="On the list with">&#8646; {% for u in ltags[it.id].split(',') %}{{ (people or {}).get(u|int, '?') }}{% if not loop.last %} + {% endif %}{% endfor %}</span>{% endif %}
     </div>
     {% set inotes = notes_by_item.get(it.id, []) %}
     {% if inotes %}

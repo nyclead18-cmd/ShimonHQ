@@ -14,6 +14,7 @@
       {% if has_pipe %}<a class="tab" href="{{ url_for('pipeline_view') }}">Pipeline</a>{% endif %}
       {% if has_brief %}<a class="tab" href="{{ url_for('briefing_view') }}">Brief{% if brief_unread %} <span class="badge">{{ brief_unread }}</span>{% endif %}</a>{% endif %}
       {% if has_cal %}<a class="tab" href="{{ url_for('calendar_view') }}">Calendar</a>{% endif %}
+      <a class="tab" href="{{ url_for('list_view') }}">List</a>
       <a class="tab" href="{{ url_for('people_view') }}">People</a>
       {% if session.get('admin') %}<a class="tab" href="{{ url_for('joel_view') }}">Joel</a>{% endif %}
       <a class="tab" href="{{ url_for('pulse_view') }}">Pulse</a>
