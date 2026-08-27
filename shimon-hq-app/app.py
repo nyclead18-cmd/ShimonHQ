@@ -890,7 +890,9 @@ def login():
                 "today_view" if display_mode(con, row["id"]) == "simple" else "board"))
         # one message for both cases - never reveal which usernames exist
         error = "Wrong username or password."
-    return render_template("login.html", error=error)
+    return render_template("login.html", error=error,
+                           login_sub=os.environ.get("HQ_TAGLINE",
+                                                    "Pinta · Ohr Chaim · Personal"))
 
 
 @app.route("/logout")

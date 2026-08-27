@@ -4,7 +4,7 @@
 <div class="login-wrap">
   <form class="login-card" method="post" autocomplete="on">
     <h1>Pinta HQ</h1>
-    <div class="sub">Pinta &middot; Ohr Chaim &middot; Personal</div>
+    <div class="sub">{{ login_sub }}</div>
     {% if error %}<div class="error">{{ error }}</div>{% endif %}
     <input name="username" placeholder="Username" autocapitalize="none" required>
     <input name="password" type="password" placeholder="Password" required>
