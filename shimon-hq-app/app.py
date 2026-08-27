@@ -2289,9 +2289,17 @@ def api_section_board():
     con = db()
     row = con.execute("SELECT id FROM sections WHERE lower(title)=lower(?) AND owner_id=?",
                       (title, me())).fetchone()
-    if not row:
-        return "NOT FOUND: " + title, 404, {"Content-Type": "text/plain; charset=utf-8"}
     b = (request.args.get("board") or "").strip()[:30]
+    if not row:
+        if (request.args.get("create") or "") != "1":
+            return "NOT FOUND: " + title, 404, {"Content-Type": "text/plain; charset=utf-8"}
+        # scaffolding: the block exists before its first task, private like any new section
+        pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM sections").fetchone()[0]
+        con.execute("INSERT INTO sections(title, pos, owner_id, visibility, board)"
+                    " VALUES(?,?,?,'private',?)", (title, pos, me(), b))
+        commit_retry(con)
+        return "CREATED on %s: %s" % (b or "(none)", title), 200, \
+            {"Content-Type": "text/plain; charset=utf-8"}
     con.execute("UPDATE sections SET board=? WHERE id=?", (b, row["id"]))
     commit_retry(con)
     return "BOARD %s: %s" % (b or "(none)", title), 200, {"Content-Type": "text/plain; charset=utf-8"}
