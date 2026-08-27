@@ -1818,8 +1818,9 @@ def pulse_view(day=None):
     con = db()
     data = pulse.week(con, d, me())
     mon = date.fromisoformat(data["from"])
+    pending = uset(con, "read_wanted") == data["from"]
     return render_template("pulse.html",
-                           p=data,
+                           p=data, pending=pending,
                            prev_week=(mon - timedelta(days=7)).isoformat(),
                            next_week=(mon + timedelta(days=7)).isoformat(),
                            this_week=pulse.week_of()[0].isoformat())
@@ -1870,6 +1871,52 @@ def api_pulse():
     return "\n".join(L) or "(nothing)", 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
+@app.route("/pulse/refresh", methods=["POST"])
+@login_required
+def pulse_refresh():
+    """Update now.
+
+    Two things happen. The board writes a read from the numbers immediately, so
+    the button does something the moment it is pressed. It also leaves a request
+    for the sweep, which replaces it with the considered version - the app cannot
+    summon that itself, and pretending otherwise would make the button a lie.
+    """
+    con = db()
+    try:
+        d = date.fromisoformat((request.form.get("week") or "").strip())
+    except ValueError:
+        d = None
+    mon = pulse.week_of(d)[0]
+    body = pulse.auto_read(pulse.week(con, d, me()))
+    con.execute("INSERT INTO pulse_notes(week, user_id, body, created_at) VALUES(?,?,?,?)"
+                " ON CONFLICT(week, user_id) DO UPDATE SET body=excluded.body,"
+                " created_at=excluded.created_at",
+                (mon.isoformat(), me(), body,
+                 datetime.now().isoformat(timespec="seconds")))
+    uset_put(con, "read_wanted", mon.isoformat())
+    commit_retry(con)
+    if request.headers.get("X-Requested-With") == "fetch":
+        return jsonify(body=body, pending=True)
+    return redirect(url_for("pulse_view", day=mon.isoformat()))
+
+
+@app.route("/api/pulsereq")
+def api_pulse_requests():
+    """Who has asked for a written read, for the sweep to pick up.
+
+    One line per person: USERNAME <tab> WEEK. NONE when nobody is waiting.
+    """
+    if not _api_auth():
+        abort(401)
+    con = db()
+    out = []
+    for u in people_list(con):
+        week = uset(con, "read_wanted", u["id"])
+        if week:
+            out.append("%s\t%s" % (u["username"], week))
+    return ("\n".join(out) or "NONE"), 200, {"Content-Type": "text/plain; charset=utf-8"}
+
+
 @app.route("/api/read")
 def api_read():
     """Store the written half of the week - the part the numbers cannot say."""
@@ -1888,6 +1935,7 @@ def api_read():
                 " ON CONFLICT(week, user_id) DO UPDATE SET body=excluded.body,"
                 " created_at=excluded.created_at",
                 (mon, me(), body, datetime.now().isoformat(timespec="seconds")))
+    uset_del(con, ("read_wanted",))
     commit_retry(con)
     return "SAVED for week of " + mon, 200, {"Content-Type": "text/plain; charset=utf-8"}
 

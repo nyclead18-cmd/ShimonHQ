@@ -408,3 +408,77 @@ def note(con, monday, uid=0):
     r = _q(con, "SELECT body FROM pulse_notes WHERE week=? AND user_id=?",
            (monday.isoformat(), uid))
     return r[0][0] if r else ""
+
+
+# ---------- a read the app can write for itself ----------
+# The considered read comes from a scheduled task once a week. This is the one
+# the board can produce the instant somebody asks: no judgment in it, just the
+# facts arranged so they mean something. It is deliberately plain, so that when
+# the written one lands nobody has to wonder which is which.
+
+def _plural(n, word):
+    return "%d %s" % (n, word if n == 1 else word + "s")
+
+
+def auto_read(data):
+    m, prev = data["movement"], data["previous"]
+    net = m["opened"] - m["closed"]
+    bits = []
+
+    if not (m["opened"] or m["closed"]):
+        bits.append("Nothing opened and nothing closed this week.")
+    else:
+        line = "Closed %s, %s landed." % (_plural(m["closed"], "task"),
+                                          _plural(m["opened"], "task"))
+        if net > 0:
+            line += " The board grew by %d." % net
+        elif net < 0:
+            line += " The board shrank by %d." % -net
+        else:
+            line += " The board held level."
+        bits.append(line)
+        if prev["closed"] or prev["opened"]:
+            d = m["closed"] - prev["closed"]
+            if d:
+                bits.append("That is %d %s than last week." % (abs(d), "more" if d > 0 else "fewer"))
+
+    closed = data["closed"]
+    aged = [c for c in closed if c["age_days"] is not None]
+    if aged:
+        quick = [c for c in aged if c["age_days"] <= 2]
+        if len(quick) >= max(2, len(aged) * 2 // 3):
+            bits.append("Most of what closed was under two days old, so this was a week of"
+                        " clearing rather than finishing.")
+        else:
+            oldest = max(aged, key=lambda c: c["age_days"])
+            bits.append("The longest-running thing you finished was \u201c%s\u201d, after %s."
+                        % (oldest["title"], _plural(oldest["age_days"], "day")))
+
+    st = data["stalled"]
+    if st:
+        worst = st[0]
+        bits.append("%s open and untouched a fortnight or more. The quietest is \u201c%s\u201d"
+                    " at %s." % (_plural(len(st), "task"), worst["title"],
+                                 _plural(worst["quiet_days"], "day")))
+
+    waits = [w for w in data["waiting"] if w["days"]]
+    if waits:
+        w = waits[0]
+        bits.append("Longest wait on somebody else: %s, %s on \u201c%s\u201d."
+                    % (w["who"], _plural(w["days"], "day"), w["title"]))
+    elif data["waiting"]:
+        bits.append("%s sitting with other people, none of them timed yet."
+                    % _plural(len(data["waiting"]), "task"))
+
+    mt = data["meetings"]
+    if mt["count"]:
+        line = _plural(mt["count"], "meeting")
+        if mt["minutes_known"]:
+            line += ", " + hours(mt["minutes_known"])
+        if mt["count"] >= 10 and m["closed"] <= 3:
+            line += " against very little movement on the board."
+        else:
+            line += "."
+        bits.append(line[0].upper() + line[1:])
+
+    return " ".join(bits) or "Nothing to report yet."

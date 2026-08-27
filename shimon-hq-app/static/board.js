@@ -353,3 +353,37 @@ jumpToLinkedItem();
     if (sum) { build(sum.parentElement); }
   }, true);
 })();
+
+/* ---------- Pulse: update the read without a page reload ---------- */
+(function () {
+  var form = document.querySelector('.refreshform');
+  if (!form) { return; }
+  form.addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var btn = form.querySelector('button');
+    var body = document.getElementById('readbody');
+    var empty = document.getElementById('readempty');
+    var pending = document.getElementById('readpending');
+    btn.disabled = true;
+    btn.textContent = 'reading…';
+    fetch(form.action, {
+      method: 'POST',
+      headers: {'X-Requested-With': 'fetch'},
+      body: new FormData(form)
+    }).then(function (r) {
+      if (!r.ok) { throw new Error('http ' + r.status); }
+      return r.json();
+    }).then(function (d) {
+      if (body) { body.textContent = d.body; }
+      if (empty) { empty.hidden = true; }
+      if (pending) { pending.hidden = false; }
+      btn.disabled = false;
+      btn.textContent = 'Update now';
+    }).catch(function () {
+      // say so rather than leave a button that looks like it worked
+      btn.disabled = false;
+      btn.textContent = 'try again';
+      setTimeout(function () { btn.textContent = 'Update now'; }, 2500);
+    });
+  });
+})();

@@ -622,3 +622,7 @@ li.prow .ptitle + .psec{justify-self:end;}
 .checkrow input{width:18px; height:18px; flex:none; accent-color:var(--accent); padding:0;}
 .peoplerow{border-top:1px solid var(--border); padding-top:14px; margin-top:14px;}
 .peoplerow:first-of-type{border-top:none; margin-top:4px;}
+.refreshform{display:inline;}
+.refreshform .linky{font-size:12px; letter-spacing:.06em;}
+.readcard .sec-head{align-items:center;}
+.readbody:empty{display:none;}

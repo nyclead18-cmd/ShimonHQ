@@ -46,12 +46,21 @@
     <div class="delta">{% if p['meetings']['minutes_known'] %}{{ p['meetings']['minutes_known']|hrs }}{% if p['meetings']['unmeasured'] %} + {{ p['meetings']['unmeasured'] }} unmeasured{% endif %}{% else %}&nbsp;{% endif %}</div></div>
 </div>
 
-{% if p['note'] %}
 <section class="card readcard">
-  <div class="sec-head"><h2>The read</h2></div>
-  <div class="readbody">{{ p['note']|linkify }}</div>
+  <div class="sec-head"><h2>The read</h2>
+    <form method="post" action="{{ url_for('pulse_refresh') }}" class="refreshform">
+      <input type="hidden" name="week" value="{{ p['from'] }}">
+      <button type="submit" class="linky" id="refreshread">Update now</button>
+    </form>
+  </div>
+  <div class="readbody" id="readbody">{{ p['note']|linkify if p['note'] else '' }}</div>
+  {% if not p['note'] %}
+  <p class="caveat" id="readempty">Nothing written for this week yet. Tap <b>Update now</b> for
+  what the numbers say, or wait for Friday when the fuller one is written.</p>
+  {% endif %}
+  <p class="caveat readpending"{% if not pending %} hidden{% endif %} id="readpending">
+    Written from the numbers. The considered version lands with the next sweep.</p>
 </section>
-{% endif %}
 
 <div class="grid">
 
@@ -152,4 +161,7 @@
 
 </div>
 </div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='board.js') }}?v={{ css_v }}"></script>
 {% endblock %}
