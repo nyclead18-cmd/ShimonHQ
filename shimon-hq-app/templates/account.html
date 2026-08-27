@@ -28,6 +28,20 @@
   </form>
 </section>
 
+{% if api_token %}
+<section class="card acct">
+  <div class="sec-head"><h2>Your board key</h2></div>
+  <p class="caveat">This is what a scheduled task uses to write onto <b>your</b> board and
+  nothing else. It cannot read anyone else's sections. Treat it like a password &mdash;
+  paste it into your own automation, never into an email or a chat.</p>
+  <input class="feedurl" value="{{ api_token }}" readonly onclick="this.select()">
+  <form method="post" action="{{ url_for('new_api_key') }}" class="stack">
+    <button type="submit" class="ghostbtn">Replace this key</button>
+  </form>
+  <p class="caveat">Replacing it breaks anything still using the old one.</p>
+</section>
+{% endif %}
+
 {% if feed_url %}
 <section class="card acct">
   <div class="sec-head"><h2>Your calendar feed</h2></div>

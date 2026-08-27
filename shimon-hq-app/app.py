@@ -2,6 +2,7 @@ import os
 import re
 import json
 import uuid
+import hmac
 import sqlite3
 from datetime import datetime, timezone, timedelta, date
 from functools import wraps
@@ -1530,6 +1531,7 @@ def account_view():
     con = db()
     return render_template("account.html",
                            who=user_row(con), folk=people_list(con),
+                           api_token=api_token_for(con),
                            feed_url=request.url_root.rstrip("/")
                            + url_for("ics_feed", token=_feed_token(con)))
 
@@ -1544,15 +1546,25 @@ def change_password():
     new = request.form.get("new", "")
     if not row or not check_password_hash(row["pw_hash"], old):
         return render_template("account.html", who=row, folk=people_list(con),
-                               feed_url="", error="That is not your current password.")
+                               feed_url="", api_token="", error="That is not your current password.")
     if len(new) < 8:
         return render_template("account.html", who=row, folk=people_list(con),
-                               feed_url="", error="Use at least 8 characters.")
+                               feed_url="", api_token="", error="Use at least 8 characters.")
     con.execute("UPDATE users SET pw_hash=? WHERE id=?",
                 (generate_password_hash(new), row["id"]))
     commit_retry(con)
     return render_template("account.html", who=row, folk=people_list(con),
-                           feed_url="", ok="Password changed.")
+                           feed_url="", api_token="", ok="Password changed.")
+
+
+@app.route("/account/newkey", methods=["POST"])
+@login_required
+def new_api_key():
+    con = db()
+    uset_del(con, ("api_token",))
+    api_token_for(con)
+    commit_retry(con)
+    return redirect(url_for("account_view"))
 
 
 @app.route("/account/add", methods=["POST"])
@@ -1575,7 +1587,7 @@ def add_person():
         err = "That username is taken."
     if err:
         return render_template("account.html", who=user_row(con), folk=people_list(con),
-                               feed_url="", error=err)
+                               feed_url="", api_token="", error=err)
     uid = con.execute(
         "INSERT INTO users(username, display_name, pw_hash, is_admin, created_at)"
         " VALUES(?,?,?,0,?)",
@@ -1590,7 +1602,9 @@ def add_person():
                 " VALUES('Inbox',?,?,'private')", (pos + 1, uid))
     commit_retry(con)
     return render_template("account.html", who=user_row(con), folk=people_list(con),
-                           feed_url="", ok="%s can sign in now." % display)
+                           feed_url="", api_token="",
+                           ok="%s can sign in now. Their own board key is on their Account page."
+                              % display)
 
 
 # ---------- pulse ----------
@@ -1689,11 +1703,26 @@ def _api_auth():
         return False
     auth = request.headers.get("Authorization", "")
     supplied = auth[7:] if auth.startswith("Bearer ") else request.args.get("token", "")
-    if supplied != tok:
+    if not supplied:
         return False
-    # The token belongs to the board owner. Naming someone else with ?who= lets one
-    # scheduled task serve several people without handing out a token each.
     con = db()
+
+    # A personal token IS the identity - it cannot be talked into being someone
+    # else. This is what lets Joel's own sweep hold a token without that token
+    # also being able to read Shimon's private board.
+    row = con.execute("SELECT k FROM settings WHERE k LIKE 'u%:api_token' AND v=?",
+                      (supplied,)).fetchone()
+    if row:
+        try:
+            g.api_uid = int(row["k"].split(":")[0][1:])
+        except (ValueError, IndexError):
+            return False
+        return True
+
+    # The board-wide token is the admin's. Only it may act as somebody else, which
+    # is how one task can serve several people.
+    if not (tok and hmac.compare_digest(supplied, tok)):
+        return False
     who = (request.args.get("who") or "").strip().lower()
     if who:
         row = con.execute("SELECT id FROM users WHERE lower(username)=?", (who,)).fetchone()
@@ -1704,6 +1733,17 @@ def _api_auth():
                or con.execute("SELECT id FROM users ORDER BY id LIMIT 1").fetchone())
     g.api_uid = row["id"] if row else 0
     return True
+
+
+def api_token_for(con, uid=None):
+    """Each person's own key to their own board. Made on first sight."""
+    uid = uid if uid is not None else me()
+    tok = uset(con, "api_token", uid) or ""
+    if not tok:
+        tok = uuid.uuid4().hex + uuid.uuid4().hex[:8]
+        uset_put(con, "api_token", tok, uid)
+        commit_retry(con)
+    return tok
 
 
 @app.route("/api/titles")
@@ -1861,14 +1901,14 @@ def api_brief():
             return "ERROR: no task matches " + tgt, 404, \
                 {"Content-Type": "text/plain; charset=utf-8"}
         target = row["id"]
-    dup = con.execute("SELECT 1 FROM brief_items WHERE day=? AND lower(text)=lower(?)",
-                      (day, text)).fetchone()
+    dup = con.execute("SELECT 1 FROM brief_items WHERE day=? AND owner_id=?"
+                      " AND lower(text)=lower(?)", (day, me(), text)).fetchone()
     if dup:
         return "SKIPPED (duplicate): " + text, 200, {"Content-Type": "text/plain; charset=utf-8"}
     con.execute("INSERT INTO brief_items(day, kind, text, detail, link, target_item_id,"
-                " created_at) VALUES(?,?,?,?,?,?,?)",
+                " owner_id, created_at) VALUES(?,?,?,?,?,?,?,?)",
                 (day, kind, text, (request.args.get("detail") or "").strip(),
-                 (request.args.get("link") or "").strip(), target,
+                 (request.args.get("link") or "").strip(), target, me(),
                  datetime.now().isoformat(timespec="seconds")))
     commit_retry(con)
     return "BRIEFED: " + text, 200, {"Content-Type": "text/plain; charset=utf-8"}
@@ -1881,7 +1921,8 @@ def api_brief_clear():
         abort(401)
     day = (request.args.get("day") or _now_local().strftime("%Y-%m-%d")).strip()
     con = db()
-    cur = con.execute("DELETE FROM brief_items WHERE day=? AND item_id IS NULL", (day,))
+    cur = con.execute("DELETE FROM brief_items WHERE day=? AND owner_id=? AND item_id IS NULL",
+                      (day, me()))
     commit_retry(con)
     return "CLEARED %d from %s" % (cur.rowcount, day), 200, \
         {"Content-Type": "text/plain; charset=utf-8"}

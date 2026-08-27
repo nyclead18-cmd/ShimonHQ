@@ -616,3 +616,4 @@ li.prow .ptitle + .psec{justify-self:end;}
   border-radius:10px; color:var(--muted); font:inherit; font-size:12.5px; padding:9px 12px;}
 .okline{background:var(--pill-done-bg); color:var(--pill-done-tx); border-radius:10px;
   padding:10px 14px; margin:16px 0; font-weight:600;}
+.ghostbtn{background:transparent; color:var(--muted); border:1px solid var(--border);}
