@@ -516,3 +516,60 @@ document.addEventListener('click', function (ev) {
     field.value = field.value === chip.getAttribute('data-team') ? '' : chip.getAttribute('data-team');
   }
 }, false);
+
+/* ---------- fold a box to its header ---------- */
+document.addEventListener('click', function (ev) {
+  var f = ev.target.closest && ev.target.closest('.foldbtn');
+  if (!f) { return; }
+  ev.preventDefault();
+  var card = f.closest('section.card');
+  fetch('/sections/' + f.getAttribute('data-fold') + '/fold', {method: 'POST'})
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (j) {
+      if (!j) { return; }
+      card.classList.toggle('folded', j.folded);
+      f.innerHTML = j.folded ? '▸' : '▾';
+    });
+}, false);
+
+/* ---------- drag boxes into your own order ----------
+   Pointer events so one code path serves mouse and thumb. The handle is the
+   only place a drag can start, so rows keep their swipes and holds. */
+(function () {
+  var dragging = null;
+  function cards() {
+    return Array.prototype.slice.call(document.querySelectorAll('.grid section.card'));
+  }
+  document.addEventListener('pointerdown', function (ev) {
+    var h = ev.target.closest && ev.target.closest('.draghandle');
+    if (!h) { return; }
+    ev.preventDefault();
+    dragging = h.closest('section.card');
+    dragging.classList.add('dragging');
+    try { h.setPointerCapture(ev.pointerId); } catch (e) {}
+  });
+  document.addEventListener('pointermove', function (ev) {
+    if (!dragging) { return; }
+    ev.preventDefault();
+    var under = document.elementsFromPoint(ev.clientX, ev.clientY)
+      .map(function (el) { return el.closest && el.closest('.grid section.card'); })
+      .filter(function (c) { return c && c !== dragging; })[0];
+    cards().forEach(function (c) { c.classList.remove('dropwait'); });
+    if (!under) { return; }
+    under.classList.add('dropwait');
+    var r = under.getBoundingClientRect();
+    var before = ev.clientY < r.top + r.height / 2;
+    under.parentNode.insertBefore(dragging, before ? under : under.nextSibling);
+  }, {passive: false});
+  document.addEventListener('pointerup', function () {
+    if (!dragging) { return; }
+    dragging.classList.remove('dragging');
+    cards().forEach(function (c) { c.classList.remove('dropwait'); });
+    dragging = null;
+    var ids = cards().map(function (c) { return c.getAttribute('data-sec'); })
+      .filter(Boolean).join(',');
+    var fd = new FormData();
+    fd.append('ids', ids);
+    fetch('/sections/order', {method: 'POST', body: fd});
+  });
+})();

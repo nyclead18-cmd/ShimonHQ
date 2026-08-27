@@ -332,6 +332,25 @@ def _events_unique_per_person(con):
         "CREATE UNIQUE INDEX events_key_owner ON events(ext_key, owner_id);")
 
 
+def _shared_becomes_people(con):
+    """'Shared' used to mean the whole team. From now on a section is shared with
+    PEOPLE, and 'everyone' is one of the choices rather than the only one. What
+    was already shared becomes explicitly shared with everyone who existed at the
+    time - so nothing anyone could see disappears, and nobody new inherits it.
+    """
+    if con.execute("SELECT 1 FROM settings WHERE k='mig:shares'").fetchone():
+        return
+    users = [r[0] for r in con.execute("SELECT id FROM users")]
+    for (sid, owner) in con.execute(
+            "SELECT id, owner_id FROM sections WHERE visibility='shared'").fetchall():
+        for uid in users:
+            if uid != owner:
+                con.execute("INSERT OR IGNORE INTO section_shares(section_id, user_id)"
+                            " VALUES(?,?)", (sid, uid))
+        con.execute("UPDATE sections SET visibility='some' WHERE id=?", (sid,))
+    con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES('mig:shares','1')")
+
+
 def _make_people(con):
     """Turn the single hard-coded login into a real account, once.
 
@@ -453,8 +472,13 @@ def init_db():
     pcols = [r[1] for r in con.execute("PRAGMA table_info(push_subs)")]
     if pcols and "user_id" not in pcols:
         con.execute("ALTER TABLE push_subs ADD COLUMN user_id INTEGER")
+    con.executescript(
+        "CREATE TABLE IF NOT EXISTS section_shares ("
+        " section_id INTEGER NOT NULL, user_id INTEGER NOT NULL,"
+        " PRIMARY KEY(section_id, user_id));")
     _pulse_notes_per_person(con)
     _make_people(con)
+    _shared_becomes_people(con)
     _events_unique_per_person(con)
     _make_indexes(con)          # after every ALTER, so the columns exist
     os.makedirs(FILES_DIR, exist_ok=True)
@@ -502,11 +526,16 @@ def people_list(con):
                        " ORDER BY id").fetchall()
 
 
+VISIBLE_SQL = ("owner_id=? OR visibility='shared'"
+               " OR id IN (SELECT section_id FROM section_shares WHERE user_id=?)")
+
+
 def visible_ids(con, uid=None):
-    """Section ids this person may see. An empty list is a real answer."""
+    """Section ids this person may see: their own, shared-with-everyone, or
+    shared with them by name. An empty list is a real answer."""
     uid = uid if uid is not None else me()
     return [r[0] for r in con.execute(
-        "SELECT id FROM sections WHERE owner_id=? OR visibility='shared'", (uid,))]
+        "SELECT id FROM sections WHERE " + VISIBLE_SQL, (uid, uid))]
 
 
 def sec_clause(con, col="section_id", uid=None, first=False):
@@ -626,9 +655,19 @@ def board():
     where, args = sec_clause(con, "id", first=True)
     sections = con.execute("SELECT * FROM sections" + where + " ORDER BY pos, id",
                            args).fetchall()
+    order = [x for x in (uset(con, "secorder") or "").split(",") if x.strip().isdigit()]
+    if order:
+        rank = {int(x): i for i, x in enumerate(order)}
+        sections = sorted(sections, key=lambda r: (rank.get(r["id"], 10**6), r["pos"], r["id"]))
     cur_board = (request.args.get("b") or "").strip()
     if cur_board:
         sections = [r for r in sections if (r["board"] or "").strip() == cur_board]
+    shares = {}
+    for r in con.execute("SELECT ss.section_id, u.display_name FROM section_shares ss"
+                         " JOIN users u ON u.id = ss.user_id ORDER BY u.display_name"):
+        shares.setdefault(r["section_id"], []).append(r["display_name"])
+    collapsed = {int(x) for x in (uset(con, "collapsed") or "").split(",")
+                 if x.strip().isdigit()}
     where, args = sec_clause(con, "section_id", first=True)
     items = con.execute("SELECT * FROM items" + where + " ORDER BY pos, id", args).fetchall()
     if cur_board:
@@ -663,7 +702,7 @@ def board():
         "done": sum(1 for it in items if it["status"] == "done"),
     }
     return render_template("board.html", sections=sections, by_sec=by_sec,
-                           cur_board=cur_board,
+                           cur_board=cur_board, shares=shares, collapsed=collapsed,
                            projects_by_sec=projects_by_sec,
                            people={r["id"]: r["display_name"] for r in people_list(con)},
                            names=known_names(con),
@@ -2003,16 +2042,21 @@ def watchers(con, item_id, kind, exclude=None):
     row = con.execute("SELECT section_id FROM items WHERE id=?", (item_id,)).fetchone()
     if not row:
         return []
-    sec = con.execute("SELECT owner_id, visibility FROM sections WHERE id=?",
+    sec = con.execute("SELECT id, owner_id, visibility FROM sections WHERE id=?",
                       (row["section_id"],)).fetchone()
     if not sec:
         return []
-    if sec["visibility"] != "shared":
-        # nobody but the owner can see it, and the owner is whoever just acted
-        return []
     exclude = exclude if exclude is not None else me()
-    return [r["id"] for r in con.execute("SELECT id FROM users WHERE id<>?", (exclude,))
-            if wants(con, r["id"], kind)]
+    if sec["visibility"] == "shared":
+        pool = [r["id"] for r in con.execute("SELECT id FROM users WHERE id<>?", (exclude,))]
+    elif sec["visibility"] == "some":
+        pool = [r[0] for r in con.execute(
+            "SELECT user_id FROM section_shares WHERE section_id=?", (sec["id"],))]
+        pool.append(sec["owner_id"])
+        pool = [u for u in set(pool) if u != exclude]
+    else:
+        return []
+    return [u for u in pool if wants(con, u, kind)]
 
 
 def tell_others(con, item_id, kind, title, body, url):
@@ -2153,7 +2197,7 @@ def add_person():
     # shared - which is the point of them being here
     pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM sections").fetchone()[0]
     con.execute("INSERT INTO sections(title, pos, owner_id, visibility)"
-                " VALUES(?,?,?,'shared')", ("%s / Tracker" % display, pos, uid))
+                " VALUES(?,?,?,'private')", ("%s / Tracker" % display, pos, uid))
     con.execute("INSERT INTO sections(title, pos, owner_id, visibility)"
                 " VALUES('Inbox',?,?,'private')", (pos + 1, uid))
     commit_retry(con)
@@ -3172,20 +3216,55 @@ def bump_to_top(item_id):
     return jsonify(ok=True)
 
 
+@app.route("/sections/order", methods=["POST"])
+@login_required
+def order_sections():
+    """The arrangement is yours alone - dragging your boxes never moves anyone
+    else's view of the same shared section."""
+    raw = (request.form.get("ids") or "")[:2000]
+    ids = [x for x in raw.split(",") if x.strip().isdigit()]
+    con = db()
+    uset_put(con, "secorder", ",".join(ids[:200]))
+    commit_retry(con)
+    return jsonify(ok=True)
+
+
+@app.route("/sections/<int:sec_id>/fold", methods=["POST"])
+@login_required
+def fold_section(sec_id):
+    con = db()
+    require_section(con, sec_id)
+    cur = {x for x in (uset(con, "collapsed") or "").split(",") if x.strip().isdigit()}
+    key = str(sec_id)
+    folded = key not in cur
+    (cur.add if folded else cur.discard)(key)
+    uset_put(con, "collapsed", ",".join(sorted(cur)))
+    commit_retry(con)
+    return jsonify(folded=folded)
+
+
 @app.route("/sections/<int:sec_id>/share", methods=["POST"])
 @login_required
 def share_section(sec_id):
-    """Open a section to the other people on the board, or close it again."""
+    """Who may see this section: nobody, everyone, or exactly these people."""
     con = db()
-    row = con.execute("SELECT visibility FROM sections WHERE id=? AND owner_id=?",
-                      (sec_id, me())).fetchone()
-    if not row:
+    if not con.execute("SELECT 1 FROM sections WHERE id=? AND owner_id=?",
+                       (sec_id, me())).fetchone():
         abort(404)
-    new = "private" if row["visibility"] == "shared" else "shared"
-    con.execute("UPDATE sections SET visibility=? WHERE id=?", (new, sec_id))
+    scope = (request.form.get("scope") or "").strip()
+    con.execute("DELETE FROM section_shares WHERE section_id=?", (sec_id,))
+    if scope == "all":
+        con.execute("UPDATE sections SET visibility='shared' WHERE id=?", (sec_id,))
+    else:
+        uids = [u for u in request.form.getlist("uids", type=int) if u and u != me()]
+        uids = [u for u in uids if con.execute("SELECT 1 FROM users WHERE id=?",
+                                               (u,)).fetchone()]
+        for u in uids:
+            con.execute("INSERT OR IGNORE INTO section_shares(section_id, user_id)"
+                        " VALUES(?,?)", (sec_id, u))
+        con.execute("UPDATE sections SET visibility=? WHERE id=?",
+                    ("some" if uids else "private", sec_id))
     commit_retry(con)
-    if request.headers.get("X-Requested-With") == "fetch":
-        return jsonify(visibility=new)
     return redirect(url_for("board", _anchor="sec-%d" % sec_id))
 
 
@@ -3359,7 +3438,7 @@ def reminder_tick():
     for _u in con.execute("SELECT id FROM users ORDER BY id"):
       uid = _u["id"]
       vis = [r[0] for r in con.execute(
-          "SELECT id FROM sections WHERE owner_id=? OR visibility='shared'", (uid,))]
+          "SELECT id FROM sections WHERE " + VISIBLE_SQL, (uid, uid))]
       inq = ",".join("?" * len(vis)) if vis else "NULL"
 
       # 1. per-task reminders that have come due (within the last 2 hours, so a restart never misses one)

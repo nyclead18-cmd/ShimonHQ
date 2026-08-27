@@ -60,13 +60,19 @@
 {% set sec_projects = projects_by_sec.get(sec.id, []) %}
 {% set done = items | selectattr('status', 'equalto', 'done') | list %}
 {% set active = items | rejectattr('status', 'equalto', 'done') | list %}
-<section class="card" data-mine="{{ 1 if sec.owner_id == session.get('uid') else 0 }}" id="sec-{{ sec.id }}" style="--sa: {{ sec_colors.get(sec.id, '#C24E2A') }}">
+<section class="card{% if sec.id in collapsed %} folded{% endif %}" data-mine="{{ 1 if sec.owner_id == session.get('uid') else 0 }}" data-sec="{{ sec.id }}" id="sec-{{ sec.id }}" style="--sa: {{ sec_colors.get(sec.id, '#C24E2A') }}">
   <div class="sec-head">
+    <button type="button" class="foldbtn" data-fold="{{ sec.id }}"
+            title="Collapse or open this box">{{ '&#9656;'|safe if sec.id in collapsed else '&#9662;'|safe }}</button>
+    <button type="button" class="draghandle" data-drag="{{ sec.id }}"
+            title="Drag to rearrange your boxes">&#10495;</button>
     <h2>{% if sec.owner_id == session.get('uid') %}<button type="button" class="dot dotbtn2" data-color-sec="{{ sec.id }}" title="Tap to change this section's color"></button>{% else %}<span class="dot"></span>{% endif %}{{ sec.title }}
       {%- if sec.owner_id and sec.owner_id != session.get('uid') %}
       <span class="ownchip" title="{{ people.get(sec.owner_id, 'someone else') }}'s section">{{ people.get(sec.owner_id, '?') }}</span>
       {%- elif sec.visibility == 'shared' %}
-      <span class="ownchip shared" title="Everyone on the board can see this">shared</span>
+      <span class="ownchip shared" title="Everyone with a login can see this">everyone</span>
+      {%- elif shares.get(sec.id) %}
+      <span class="ownchip shared" title="Shared with {{ shares[sec.id]|join(', ') }}">{{ shares[sec.id][:2]|join(' + ') }}{% if shares[sec.id]|length > 2 %} +{{ shares[sec.id]|length - 2 }}{% endif %}</span>
       {%- endif %}
     </h2>
     <span class="counts">{{ active | length }}
@@ -84,9 +90,21 @@
         <input type="hidden" name="cur" value="{{ sec.cur }}">
         <button type="submit" class="linky" title="{{ 'Treat this as an ordinary list again' if sec.kind == 'pipeline' else 'Give this section deal numbers you can sort and total' }}">{{ 'plain list' if sec.kind == 'pipeline' else 'pipeline' }}</button>
       </form>
-      &middot; <form method="post" action="{{ url_for('share_section', sec_id=sec.id) }}" class="shareform">
-        <button type="submit" class="linky" title="{{ 'Make this private again' if sec.visibility == 'shared' else 'Let everyone on the board see this' }}">{{ 'unshare' if sec.visibility == 'shared' else 'share' }}</button>
-      </form>
+      &middot; <details class="sharepop">
+        <summary class="linky">share&hellip;</summary>
+        <form method="post" action="{{ url_for('share_section', sec_id=sec.id) }}" class="sharemenu">
+          <label class="checkrow"><input type="radio" name="scope" value="none"
+            {% if sec.visibility == 'private' %}checked{% endif %}> Just me</label>
+          {% for pid, pname in people.items() if pid != session.get('uid') %}
+          <label class="checkrow"><input type="checkbox" name="uids" value="{{ pid }}"
+            {% if pname in (shares.get(sec.id) or []) %}checked{% endif %}
+            onchange="this.form.scope[0].checked=false"> {{ pname }}</label>
+          {% endfor %}
+          <label class="checkrow"><input type="radio" name="scope" value="all"
+            {% if sec.visibility == 'shared' %}checked{% endif %}> Everyone</label>
+          <button type="submit">Save</button>
+        </form>
+      </details>
       {% endif %}
     </span>
   </div>

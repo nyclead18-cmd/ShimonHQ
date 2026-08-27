@@ -82,10 +82,14 @@ def _q(con, sql, args=()):
 # items to sections. A task that has since been deleted has no section any more;
 # it is left out rather than counted for everybody.
 
+VISIBLE_SQL = ("owner_id=? OR visibility='shared'"
+               " OR id IN (SELECT section_id FROM section_shares WHERE user_id=?)")
+
+
 def scope(con, uid):
     """(sql fragment, params) limiting item_events rows to this person's board."""
-    ids = [r[0] for r in _q(con, "SELECT id FROM sections"
-                                 " WHERE owner_id=? OR visibility='shared'", (uid,))]
+    ids = [r[0] for r in _q(con, "SELECT id FROM sections WHERE " + VISIBLE_SQL,
+                            (uid, uid))]
     if not ids:
         return " AND 0=1", []
     return (" AND e.item_id IN (SELECT id FROM items WHERE section_id IN (%s))"
@@ -93,8 +97,8 @@ def scope(con, uid):
 
 
 def _ids(con, uid):
-    return [r[0] for r in _q(con, "SELECT id FROM sections"
-                                  " WHERE owner_id=? OR visibility='shared'", (uid,))]
+    return [r[0] for r in _q(con, "SELECT id FROM sections WHERE " + VISIBLE_SQL,
+                             (uid, uid))]
 
 
 def _inq(con, uid, col="i.section_id"):

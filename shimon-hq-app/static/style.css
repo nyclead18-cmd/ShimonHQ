@@ -767,3 +767,61 @@ body:not([data-x]) .bchip.on{background:#1F3A5F;}
 .tchip:active{transform:scale(1.08);}
 .bform select{font:inherit; font-size:11px; color:var(--muted); background:transparent;
   border:none; text-transform:uppercase; letter-spacing:.04em; cursor:pointer; max-width:110px;}
+
+/* ---------- keep-shaped: smaller, foldable, draggable ----------
+   'Overpowering' was the review, and it was right. The density pass shrinks
+   type and padding across the board; the chevron folds a box to its header;
+   the handle drags boxes into an order that is yours alone. */
+.top h1{font-size:clamp(26px,5vw,34px);}
+.eyebrow{font-size:10.5px;}
+.stats{gap:10px; margin:14px 0 12px;}
+.stat{padding:10px 16px 8px; min-width:104px;}
+.stat .num{font-size:26px;}
+.capture input{padding:8px 14px; font-size:14px;}
+.capture button{padding:8px 18px; font-size:13px;}
+.toolbar{margin-bottom:14px;}
+.toolbar input{padding:7px 14px; font-size:13.5px;}
+.fpill{padding:5px 12px; font-size:11.5px;}
+.bchip{padding:5px 14px; font-size:12px;}
+.sec-head h2{font-size:16.5px;}
+.grid{columns:19rem; column-gap:14px;}
+.grid section.card{margin-bottom:14px;}
+li.item{padding:8px 12px 8px 28px; font-size:14px;}
+li.item .t{font-size:14px;}
+.pill{font-size:9.5px; padding:2px 8px;}
+.star{top:6px; font-size:14px;}
+form.respond input{font-size:12.5px; padding:4px 11px;}
+.respond button{font-size:12px;}
+.fadd{font-size:11.5px; padding:4px 10px;}
+.metaline{font-size:12px;}
+li.noterow{font-size:12.5px;}
+.addrow details summary{font-size:11.5px;}
+
+/* folding */
+.foldbtn{order:99; margin-left:auto; border:0; background:none; color:var(--muted);
+  font-size:13px; cursor:pointer; padding:2px 6px;}
+.sec-head{flex-wrap:wrap;}
+section.card.folded ul.items, section.card.folded .addrow,
+section.card.folded .project{display:none;}
+section.card.folded{padding-bottom:10px;}
+
+/* dragging */
+.draghandle{order:98; border:0; background:none; color:var(--border); font-size:15px;
+  cursor:grab; padding:2px 6px; touch-action:none;}
+.draghandle:hover{color:var(--muted);}
+section.card.dragging{opacity:.45; outline:2px dashed var(--accent);}
+section.card.dropwait{outline:2px solid var(--accent);}
+
+/* the share popover */
+.sharepop{display:inline; position:relative;}
+.sharepop summary{list-style:none; cursor:pointer;}
+.sharepop summary::-webkit-details-marker{display:none;}
+.sharemenu{position:absolute; right:0; top:20px; z-index:40; background:var(--card);
+  border:1px solid var(--border); border-radius:12px; padding:12px 14px;
+  box-shadow:0 6px 24px rgba(30,27,22,.18); display:flex; flex-direction:column;
+  gap:8px; min-width:170px;}
+.sharemenu .checkrow{font-size:13.5px; display:flex; gap:8px; align-items:center;
+  text-transform:none; letter-spacing:0; font-weight:600; color:var(--ink);}
+.sharemenu button{font:inherit; font-size:12px; font-weight:700; background:var(--btn-bg);
+  color:var(--btn-tx); border:0; border-radius:999px; padding:6px 14px; cursor:pointer;
+  align-self:flex-start;}
