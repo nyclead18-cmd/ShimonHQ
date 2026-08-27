@@ -617,3 +617,6 @@ li.prow .ptitle + .psec{justify-self:end;}
 .okline{background:var(--pill-done-bg); color:var(--pill-done-tx); border-radius:10px;
   padding:10px 14px; margin:16px 0; font-weight:600;}
 .ghostbtn{background:transparent; color:var(--muted); border:1px solid var(--border);}
+.checkrow{flex-direction:row; align-items:center; gap:10px; text-transform:none;
+  letter-spacing:0; font-size:14.5px; font-weight:400; color:var(--ink);}
+.checkrow input{width:18px; height:18px; flex:none; accent-color:var(--accent); padding:0;}

@@ -28,6 +28,20 @@
   </form>
 </section>
 
+{% if notify_kinds %}
+<section class="card acct">
+  <div class="sec-head"><h2>What buzzes your phone</h2></div>
+  <form method="post" action="{{ url_for('set_notify') }}" class="stack">
+    {% for key, label in notify_kinds.items() %}
+    <label class="checkrow"><input type="checkbox" name="{{ key }}" {% if notify_on.get(key) %}checked{% endif %}> {{ label }}</label>
+    {% endfor %}
+    <button type="submit">Save</button>
+  </form>
+  <p class="caveat">Only ever about tasks on a <b>shared</b> section. Nothing on a private
+  section can reach anyone else's phone, whatever these are set to.</p>
+</section>
+{% endif %}
+
 {% if api_token %}
 <section class="card acct">
   <div class="sec-head"><h2>Your board key</h2></div>

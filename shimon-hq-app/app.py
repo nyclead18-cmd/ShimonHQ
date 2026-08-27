@@ -687,6 +687,10 @@ def add_note(item_id):
             if request.headers.get("X-Requested-With") == "fetch":
                 return jsonify(error="busy"), 503
             abort(503)
+        it = con.execute("SELECT title FROM items WHERE id=?", (item_id,)).fetchone()
+        tell_others(con, item_id, "notes", "%s replied" % _actor_name(con),
+                    "%s  -  %s" % (_short(it["title"] if it else "", 40), _short(body)),
+                    "/#item-%d" % item_id)
     if request.headers.get("X-Requested-With") == "fetch":
         return jsonify(id=note_id, body=body, created_at=created)
     return redirect(url_for("board"))
@@ -711,12 +715,13 @@ def delete_note(note_id):
 def cycle_item(item_id):
     con = db()
     require_item(con, item_id)
-    row = con.execute("SELECT status FROM items WHERE id=?", (item_id,)).fetchone()
+    row = con.execute("SELECT status, title FROM items WHERE id=?", (item_id,)).fetchone()
     nxt = STATUSES[(STATUSES.index(row["status"]) + 1) % 3] \
         if row["status"] in STATUSES else "open"
     con.execute("UPDATE items SET status=?, updated_at=? WHERE id=?",
                 (nxt, datetime.now().isoformat(timespec="seconds"), item_id))
     commit_retry(con)
+    _tell_status(con, item_id, row, nxt)
     return jsonify(status=nxt)
 
 
@@ -729,10 +734,25 @@ def set_item_status(item_id):
         abort(400)
     con = db()
     require_item(con, item_id)
+    was = con.execute("SELECT status, title FROM items WHERE id=?", (item_id,)).fetchone()
     con.execute("UPDATE items SET status=?, updated_at=? WHERE id=?",
                 (st, datetime.now().isoformat(timespec="seconds"), item_id))
     commit_retry(con)
+    _tell_status(con, item_id, was, st)
     return jsonify(status=st)
+
+
+def _tell_status(con, item_id, was, now_status):
+    """Only the transitions worth a buzz: finished, or handed back."""
+    if not was or was["status"] == now_status:
+        return
+    who = _actor_name(con)
+    if now_status == "done":
+        tell_others(con, item_id, "done", "%s closed a task" % who,
+                    _short(was["title"], 70), "/#item-%d" % item_id)
+    elif was["status"] == "done":
+        tell_others(con, item_id, "done", "%s reopened a task" % who,
+                    _short(was["title"], 70), "/#item-%d" % item_id)
 
 
 @app.route("/items/<int:item_id>/delete", methods=["POST"])
@@ -780,6 +800,10 @@ def upload_file(item_id):
         (item_id, f.filename, stored, size,
          datetime.now().isoformat(timespec="seconds")))
     commit_retry(con)
+    it = con.execute("SELECT title FROM items WHERE id=?", (item_id,)).fetchone()
+    tell_others(con, item_id, "notes", "%s attached a file" % _actor_name(con),
+                "%s  -  %s" % (_short(it["title"] if it else "", 40), _short(f.filename, 40)),
+                "/#item-%d" % item_id)
     return jsonify(id=cur.lastrowid, filename=f.filename, size=size)
 
 
@@ -1557,6 +1581,58 @@ def _int_or_none(v):
     return n if 0 < n < 24 * 60 else None
 
 
+# ---------- telling the other person ----------
+# A notification carries the task's title in its body, so who may be told is
+# exactly who may see the task. That is derived from the section every time
+# rather than passed in, because the one way this goes badly wrong is a push
+# describing work somebody was not allowed to read.
+
+NOTIFY_KINDS = {"notes": "Someone responds on a shared task",
+                "done": "Someone closes a shared task"}
+
+
+def wants(con, uid, kind):
+    v = uset(con, "notify_" + kind, uid, default="1")
+    return v != "0"
+
+
+def watchers(con, item_id, kind, exclude=None):
+    """Everyone who can see this task and wants this kind of nudge, minus the
+    person who just did the thing. Empty for a private section, by construction."""
+    row = con.execute("SELECT section_id FROM items WHERE id=?", (item_id,)).fetchone()
+    if not row:
+        return []
+    sec = con.execute("SELECT owner_id, visibility FROM sections WHERE id=?",
+                      (row["section_id"],)).fetchone()
+    if not sec:
+        return []
+    if sec["visibility"] != "shared":
+        # nobody but the owner can see it, and the owner is whoever just acted
+        return []
+    exclude = exclude if exclude is not None else me()
+    return [r["id"] for r in con.execute("SELECT id FROM users WHERE id<>?", (exclude,))
+            if wants(con, r["id"], kind)]
+
+
+def tell_others(con, item_id, kind, title, body, url):
+    for uid in watchers(con, item_id, kind):
+        try:
+            send_push(title, body, url, uid=uid)
+        except Exception as e:                      # a push must never lose the write
+            app.logger.warning("push to %s failed: %s", uid, e)
+
+
+def _short(txt, n=90):
+    t = " ".join((txt or "").split())
+    return t if len(t) <= n else t[:n].rsplit(" ", 1)[0] + "\u2026"
+
+
+def _actor_name(con, uid=None):
+    row = con.execute("SELECT display_name FROM users WHERE id=?",
+                      (uid if uid is not None else me(),)).fetchone()
+    return row["display_name"] if row else "Someone"
+
+
 # ---------- account ----------
 
 @app.route("/account")
@@ -1566,6 +1642,8 @@ def account_view():
     return render_template("account.html",
                            who=user_row(con), folk=people_list(con),
                            api_token=api_token_for(con),
+                           notify_kinds=NOTIFY_KINDS,
+                           notify_on={k: wants(con, me(), k) for k in NOTIFY_KINDS},
                            feed_url=request.url_root.rstrip("/")
                            + url_for("ics_feed", token=_feed_token(con)))
 
@@ -1589,6 +1667,16 @@ def change_password():
     commit_retry(con)
     return render_template("account.html", who=row, folk=people_list(con),
                            feed_url="", api_token="", ok="Password changed.")
+
+
+@app.route("/account/notify", methods=["POST"])
+@login_required
+def set_notify():
+    con = db()
+    for kind in NOTIFY_KINDS:
+        uset_put(con, "notify_" + kind, "1" if request.form.get(kind) else "0")
+    commit_retry(con)
+    return redirect(url_for("account_view"))
 
 
 @app.route("/account/newkey", methods=["POST"])
@@ -2169,6 +2257,10 @@ def api_note():
     if chat and not it["wa_chat_id"]:
         con.execute("UPDATE items SET wa_chat_id=? WHERE id=?", (chat, it["id"]))
     commit_retry(con)
+    # a sweep filing onto shared work should nudge the other person too - that is
+    # the case where somebody genuinely wants to know without opening the app
+    tell_others(con, it["id"], "notes", "New on %s" % _short(it["title"], 40),
+                _short(body), "/#item-%d" % it["id"])
     return "FILED on %s: %s" % (it["title"], body[:60]), 200, \
         {"Content-Type": "text/plain; charset=utf-8"}
 
