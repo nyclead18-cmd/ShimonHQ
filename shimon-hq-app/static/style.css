@@ -945,3 +945,17 @@ form.listrespond input[name=body]{flex:1 1 0; min-width:0; font:inherit; font-si
   border:1px solid var(--border); border-radius:999px; padding:5px 12px; background:var(--card); color:var(--ink);}
 form.listrespond button{font:inherit; font-size:13px; border:1px solid var(--border);
   background:var(--card); color:var(--ink); border-radius:999px; padding:4px 12px; cursor:pointer;}
+
+/* ---------- three real columns, not masonry ----------
+   Masonry columns made sense for a dozen small boxes; with three big buckets
+   it stacked two in one column and left half the screen empty. The buckets
+   now stand side by side, each its own column, top-aligned. */
+.grid.board{display:grid; columns:auto; grid-template-columns:repeat(auto-fit, minmax(19rem, 1fr));
+  gap:14px; align-items:start;}
+.grid.board section.card{margin-bottom:0;}
+@media (min-width:1500px){ .wrap.wide{max-width:1500px; margin:0 auto;} }
+
+/* projects fold like boxes do */
+.pfoldbtn{order:0; margin-left:0; padding:2px 4px; font-size:12px;}
+.project.pfolded ul.items, .project.pfolded .addrow{display:none;}
+.project.pfolded .proj-head{border-bottom:none;}

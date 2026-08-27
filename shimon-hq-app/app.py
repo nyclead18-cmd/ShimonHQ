@@ -856,6 +856,8 @@ def board():
         shares.setdefault(r["section_id"], []).append(r["display_name"])
     collapsed = {int(x) for x in (uset(con, "collapsed") or "").split(",")
                  if x.strip().isdigit()}
+    pcollapsed = {int(x) for x in (uset(con, "pcollapsed") or "").split(",")
+                  if x.strip().isdigit()}
     where, args = sec_clause(con, "section_id", first=True)
     items = con.execute("SELECT * FROM items" + where + " ORDER BY pos, id", args).fetchall()
     if cur_board:
@@ -898,6 +900,7 @@ def board():
         ptags.setdefault(r["project_id"], set()).add(r["user_id"])
     return render_template("board.html", sections=sections, by_sec=by_sec,
                            cur_board=cur_board, shares=shares, collapsed=collapsed,
+                           pcollapsed=pcollapsed,
                            projects_by_sec=projects_by_sec, ltags=ltags, ptags=ptags,
                            people={r["id"]: r["display_name"] for r in people_list(con)},
                            names=known_names(con),
@@ -3613,6 +3616,24 @@ def fold_section(sec_id):
     folded = key not in cur
     (cur.add if folded else cur.discard)(key)
     uset_put(con, "collapsed", ",".join(sorted(cur)))
+    commit_retry(con)
+    return jsonify(folded=folded)
+
+
+@app.route("/projects/<int:proj_id>/fold", methods=["POST"])
+@login_required
+def fold_project(proj_id):
+    """A project folds to its title line - your view only, like section folds."""
+    con = db()
+    row = con.execute("SELECT section_id FROM projects WHERE id=?", (proj_id,)).fetchone()
+    if not row:
+        abort(404)
+    require_section(con, row["section_id"])
+    cur = {x for x in (uset(con, "pcollapsed") or "").split(",") if x.strip().isdigit()}
+    key = str(proj_id)
+    folded = key not in cur
+    (cur.add if folded else cur.discard)(key)
+    uset_put(con, "pcollapsed", ",".join(sorted(cur)))
     commit_retry(con)
     return jsonify(folded=folded)
 

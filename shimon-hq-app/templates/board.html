@@ -111,8 +111,10 @@
   {% set pitems = items | selectattr('project_id', 'equalto', p.id) | list %}
   {% set pdone = pitems | selectattr('status', 'equalto', 'done') | list %}
   {% set pactive = pitems | rejectattr('status', 'equalto', 'done') | list %}
-  <div class="project">
+  <div class="project{% if p.id in (pcollapsed or []) %} pfolded{% endif %}">
     <div class="proj-head">
+      <button type="button" class="foldbtn pfoldbtn" data-pfold="{{ p.id }}"
+              title="Collapse or open this project">{{ '&#9656;'|safe if p.id in (pcollapsed or []) else '&#9662;'|safe }}</button>
       <h3 dir="auto">{{ p.title }}</h3>
       {% set ptag = (ptags or {}).get(p.id) %}
       {% if ptag %}<span class="lwith" title="This whole project is on the list with">&#8646; {% for u in ptag|sort %}{{ people.get(u, '?') }}{% if not loop.last %} + {% endif %}{% endfor %}</span>{% endif %}

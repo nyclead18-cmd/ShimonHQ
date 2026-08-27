@@ -570,6 +570,19 @@ document.addEventListener('click', function (ev) {
 
 /* ---------- fold a box to its header ---------- */
 document.addEventListener('click', function (ev) {
+  var pf = ev.target.closest && ev.target.closest('[data-pfold]');
+  if (pf) {
+    ev.preventDefault();
+    var proj = pf.closest('.project');
+    fetch('/projects/' + pf.getAttribute('data-pfold') + '/fold', {method: 'POST'})
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        if (!j) { return; }
+        proj.classList.toggle('pfolded', j.folded);
+        pf.innerHTML = j.folded ? '▸' : '▾';
+      });
+    return;
+  }
   var f = ev.target.closest && ev.target.closest('.foldbtn');
   if (!f) { return; }
   ev.preventDefault();
