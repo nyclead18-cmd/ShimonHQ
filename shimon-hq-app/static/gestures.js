@@ -226,6 +226,13 @@
                 run: function () { st.click(); }});
     }
 
+    if (itemId(li)) {
+      out.push({label: 'Move to top', run: function () {
+        fetch('/items/' + itemId(li) + '/top', {method: 'POST'})
+          .then(function (r) { if (r.ok) { location.reload(); } });
+      }});
+    }
+
 
     // anything on the row that points at a map or an email
     Array.prototype.forEach.call(li.querySelectorAll('a.maplink, a.dirlink, a.outlookbtn:not(.done)'),

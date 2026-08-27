@@ -484,3 +484,22 @@ document.addEventListener('click', function (ev) {
     li.classList.toggle('expanded');
   }, false);
 })();
+
+/* ---------- tap the dot, get the next color ---------- */
+document.addEventListener('click', function (ev) {
+  var d = ev.target.closest && ev.target.closest('[data-color-sec]');
+  if (!d) { return; }
+  ev.preventDefault();
+  var sec = d.closest('section.card');
+  fetch('/sections/' + d.getAttribute('data-color-sec') + '/color', {
+    method: 'POST', headers: {'X-Requested-With': 'fetch'}
+  }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+    if (j && sec) {
+      sec.style.setProperty('--sa', j.color);
+      // rows carry their own copy of the color when set inline - repaint them too
+      sec.querySelectorAll('li.item').forEach(function (li) {
+        if (li.style.getPropertyValue('--sa')) { li.style.setProperty('--sa', j.color); }
+      });
+    }
+  });
+}, false);

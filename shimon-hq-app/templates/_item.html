@@ -1,4 +1,5 @@
 <li class="item {{ it.status }}{% if hidden %} donerow{% endif %}" id="item-{{ it.id }}"
+    {% if sec_colors and sec_colors.get(it.section_id) %}style="--sa: {{ sec_colors[it.section_id] }}"{% endif %}
     data-due="{{ it.due_date or '' }}" data-rem="{{ it.remind_at or '' }}"
     data-kind="{{ (sec_kind or {}).get(it.section_id, 'tasks') }}"
     data-amount="{{ it.amount or '' }}" data-ebitda="{{ it.ebitda or '' }}"

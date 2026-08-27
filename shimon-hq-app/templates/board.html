@@ -46,15 +46,14 @@
 </div>
 
 <div class="grid">
-{% set palette = ['#B8892E', '#1F3A5F', '#3A6B3E', '#C24E2A', '#6B4A8A', '#2A6B6B'] %}
 {% for sec in sections %}
 {% set items = by_sec.get(sec.id, []) %}
 {% set sec_projects = projects_by_sec.get(sec.id, []) %}
 {% set done = items | selectattr('status', 'equalto', 'done') | list %}
 {% set active = items | rejectattr('status', 'equalto', 'done') | list %}
-<section class="card" data-mine="{{ 1 if sec.owner_id == session.get('uid') else 0 }}" id="sec-{{ sec.id }}" style="--sa: {{ palette[loop.index0 % 6] }}">
+<section class="card" data-mine="{{ 1 if sec.owner_id == session.get('uid') else 0 }}" id="sec-{{ sec.id }}" style="--sa: {{ sec_colors.get(sec.id, '#C24E2A') }}">
   <div class="sec-head">
-    <h2><span class="dot"></span>{{ sec.title }}
+    <h2>{% if sec.owner_id == session.get('uid') %}<button type="button" class="dot dotbtn2" data-color-sec="{{ sec.id }}" title="Tap to change this section's color"></button>{% else %}<span class="dot"></span>{% endif %}{{ sec.title }}
       {%- if sec.owner_id and sec.owner_id != session.get('uid') %}
       <span class="ownchip" title="{{ people.get(sec.owner_id, 'someone else') }}'s section">{{ people.get(sec.owner_id, '?') }}</span>
       {%- elif sec.visibility == 'shared' %}

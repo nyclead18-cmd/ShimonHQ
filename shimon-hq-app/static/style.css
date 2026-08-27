@@ -698,3 +698,13 @@ body.simple li.item.expanded ul.notes{display:block;}
 body.simple li.item.expanded .files{display:flex;}
 body.simple li.item.expanded .ncount{display:none;}
 body.simple li.item.expanded{background:var(--row);}
+
+/* ---------- color that means something ----------
+   Every row wears its section's color on the left edge, so on Today a US deal,
+   a UK deal and weekly noise are told apart before they are read. Tap a
+   section's dot to change its color - no picker, the next one just arrives. */
+li.item{border-left:4px solid var(--sa, transparent);}
+li.item.done{border-left-color:color-mix(in srgb, var(--sa, transparent) 35%, transparent);}
+button.dotbtn2{border:none; padding:0; cursor:pointer; width:14px; height:14px;
+  vertical-align:1px; transition:transform .12s ease;}
+button.dotbtn2:active{transform:scale(1.5);}

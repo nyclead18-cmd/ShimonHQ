@@ -440,6 +440,8 @@ def init_db():
         con.execute("ALTER TABLE sections ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'")
     if "kind" not in scols:
         con.execute("ALTER TABLE sections ADD COLUMN kind TEXT NOT NULL DEFAULT 'tasks'")
+    if "color" not in scols:
+        con.execute("ALTER TABLE sections ADD COLUMN color TEXT")
     if "cur" not in scols:
         con.execute("ALTER TABLE sections ADD COLUMN cur TEXT NOT NULL DEFAULT '\u00a3'")
     if ecols and "owner_id" not in ecols:
@@ -702,6 +704,18 @@ def _money(n, cur="\u00a3"):
     else:
         body = str(n)
     return "%s%s%s" % (sign, cur or "", body)
+
+
+# Section colors: distinct at a glance on cream and on dark, and stable - a
+# section keeps its color whatever position it sits in. Recognition beats
+# reading, which matters most for the people this board is for.
+SECTION_PALETTE = ("#C24E2A", "#1F3A5F", "#3A6B3E", "#B8892E",
+                   "#6B4A8A", "#2A6B6B", "#A33B63", "#41586E")
+
+
+def sec_color(row):
+    c = (row["color"] or "").strip() if "color" in row.keys() else ""
+    return c or SECTION_PALETTE[row["id"] % len(SECTION_PALETTE)]
 
 
 TENURES = ("", "freehold", "leasehold", "mixed")
@@ -1299,10 +1313,13 @@ def inject_identity():
         con = db()
         ids = visible_ids(con)
         q = ",".join("?" * len(ids)) if ids else "NULL"
+        secrows = con.execute(
+            "SELECT id, color FROM sections WHERE id IN (%s)" % q, ids).fetchall() if ids else []
         return {
             "board_name": board_title(con),
             "tagline": uset(con, "tagline"),
             "display_mode": display_mode(con),
+            "sec_colors": {r["id"]: sec_color(r) for r in secrows},
             "has_brief": bool(con.execute(
                 "SELECT 1 FROM brief_items WHERE owner_id=? LIMIT 1", (me(),)).fetchone()),
             "has_cal": bool(con.execute(
@@ -3008,6 +3025,38 @@ def delete_section(sec_id):
         con.execute("DELETE FROM sections WHERE id=?", (sec_id,))
         commit_retry(con)
     return redirect(url_for("board"))
+
+
+@app.route("/sections/<int:sec_id>/color", methods=["POST"])
+@login_required
+def cycle_section_color(sec_id):
+    """Tap the section's dot, get the next color. No picker, no dialog."""
+    con = db()
+    row = con.execute("SELECT id, color FROM sections WHERE id=? AND owner_id=?",
+                      (sec_id, me())).fetchone()
+    if not row:
+        abort(404)
+    cur = sec_color(row)
+    i = SECTION_PALETTE.index(cur) if cur in SECTION_PALETTE else -1
+    nxt = SECTION_PALETTE[(i + 1) % len(SECTION_PALETTE)]
+    con.execute("UPDATE sections SET color=? WHERE id=?", (nxt, sec_id))
+    commit_retry(con)
+    return jsonify(color=nxt)
+
+
+@app.route("/items/<int:item_id>/top", methods=["POST"])
+@login_required
+def bump_to_top(item_id):
+    """The thing that just became urgent goes first, one tap."""
+    con = db()
+    require_item(con, item_id)
+    row = con.execute("SELECT section_id FROM items WHERE id=?", (item_id,)).fetchone()
+    low = con.execute("SELECT COALESCE(MIN(pos),0)-1 FROM items WHERE section_id=?",
+                      (row["section_id"],)).fetchone()[0]
+    con.execute("UPDATE items SET pos=?, updated_at=? WHERE id=?",
+                (low, datetime.now().isoformat(timespec="seconds"), item_id))
+    commit_retry(con)
+    return jsonify(ok=True)
 
 
 @app.route("/sections/<int:sec_id>/share", methods=["POST"])
