@@ -893,3 +893,31 @@ section.card.folded .sec-head{border-bottom:none; padding-bottom:9px;}
 .idrag:hover{color:var(--muted);}
 li.item.dragging{opacity:.5; outline:2px dashed var(--accent); background:var(--row);}
 ul.items:empty{min-height:8px;}
+
+/* ---------- the pill is a menu now, and looks like one ----------
+   A stray tap on 'Open' was quietly closing tasks. The pill stopped being a
+   button that flips things and became a small dropdown: it changes nothing
+   until a choice is made. It also stops stretching to fill its column -
+   the wide watery capsule was the 'pink boxes look off' complaint. */
+li.item{position:relative;}
+li.item .pill{justify-self:start; align-self:start; white-space:nowrap;}
+.pill::after{content:'\25BE'; font-size:8px; margin-left:4px; opacity:.6;}
+.pill.open{border:1px solid color-mix(in srgb, var(--pill-open-tx) 30%, transparent);}
+.pill.waiting{border:1px solid color-mix(in srgb, var(--pill-wait-tx) 30%, transparent);}
+.pill.done{border:1px solid color-mix(in srgb, var(--pill-done-tx) 30%, transparent);}
+.grid.board .pill{padding:2px 8px; font-size:9.5px; letter-spacing:.06em;}
+.statusmenu{position:absolute; z-index:60; background:var(--card); border:1px solid var(--border);
+  border-radius:10px; box-shadow:0 6px 24px rgba(30,27,22,.2); display:flex;
+  flex-direction:column; min-width:118px; overflow:hidden;}
+.statuschoice{font:inherit; font-size:12.5px; font-weight:700; text-align:left;
+  border:0; background:none; padding:9px 14px; cursor:pointer; color:var(--ink);}
+.statuschoice:hover{background:var(--row);}
+.statuschoice.open{color:var(--pill-open-tx);}
+.statuschoice.waiting{color:var(--pill-wait-tx);}
+.statuschoice.done{color:var(--pill-done-tx);}
+.statuschoice.now::after{content:' \2713';}
+.statuschoice + .statuschoice{border-top:1px solid var(--border);}
+
+/* popovers must not be cut off at the card's edge */
+section.card:has(details.sharepop[open]),
+section.card:has(.statusmenu){overflow:visible;}

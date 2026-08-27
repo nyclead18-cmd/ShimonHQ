@@ -75,23 +75,57 @@ document.querySelectorAll('.fpill').forEach(function (b) {
   });
 });
 
+/* A tap on the pill no longer flips the status - one stray tap was closing
+   tasks and they would vanish from the list. The pill now opens a small menu
+   and the status only changes when a choice is actually made. */
+function closeStatusMenu() {
+  var m = document.querySelector('.statusmenu');
+  if (m) { m.remove(); }
+}
+function openStatusMenu(pill) {
+  closeStatusMenu();
+  var li = pill.closest('li.item');
+  var id = pill.getAttribute('data-id');
+  var menu = document.createElement('div');
+  menu.className = 'statusmenu';
+  [['open', 'Open'], ['waiting', 'Waiting'], ['done', 'Done']].forEach(function (s) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'statuschoice ' + s[0] + (pill.classList.contains(s[0]) ? ' now' : '');
+    b.textContent = s[1];
+    b.addEventListener('click', function (e) {
+      e.stopPropagation();
+      closeStatusMenu();
+      if (pill.classList.contains(s[0])) { return; }   // already there - nothing to do
+      var fd = new FormData();
+      fd.append('status', s[0]);
+      fetch('/items/' + id + '/status', {method: 'POST', body: fd})
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          pill.className = 'pill ' + d.status;
+          pill.textContent = d.status === 'open' ? 'Open' : d.status === 'waiting' ? 'Waiting' : 'Done';
+          li.classList.remove('open', 'waiting', 'done', 'donerow');
+          li.classList.add(d.status);
+          if (d.status === 'done') { li.classList.add('donerow'); }
+          if (window.applyFilter) { window.applyFilter(); }
+        });
+    });
+    menu.appendChild(b);
+  });
+  li.appendChild(menu);
+  menu.style.top = (pill.offsetTop + pill.offsetHeight + 3) + 'px';
+  menu.style.left = pill.offsetLeft + 'px';
+}
 document.addEventListener('click', function (ev) {
   var pill = ev.target.closest('.pill');
-  if (pill) {
-    var id = pill.getAttribute('data-id');
-    fetch('/items/' + id + '/cycle', {method: 'POST'})
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
-        pill.className = 'pill ' + d.status;
-        pill.textContent = d.status === 'open' ? 'Open' : d.status === 'waiting' ? 'Waiting' : 'Done';
-        var li = pill.closest('li');
-        li.classList.remove('open', 'waiting', 'done', 'donerow');
-        li.classList.add(d.status);
-        if (d.status === 'done') { li.classList.add('donerow'); }
-        applyFilter();
-      });
+  if (pill && pill.getAttribute('data-id')) {
+    ev.preventDefault();
+    var open = document.querySelector('.statusmenu');
+    if (open && open.closest('li.item') === pill.closest('li.item')) { closeStatusMenu(); }
+    else { openStatusMenu(pill); }
     return;
   }
+  if (!ev.target.closest('.statusmenu')) { closeStatusMenu(); }
   var tog = ev.target.closest('[data-toggle-done]');
   if (tog) {
     document.getElementById('sec-' + tog.getAttribute('data-toggle-done')).classList.toggle('show-done');

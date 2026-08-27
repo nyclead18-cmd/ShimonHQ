@@ -351,6 +351,45 @@ def _shared_becomes_people(con):
     con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES('mig:shares','1')")
 
 
+def _pipeline_becomes_plain(con):
+    """The pipeline confused the people it was built for, so it goes.
+
+    Nothing anyone typed is lost: every deal figure a task carried is folded
+    into its note as plain words ("£220m · EBITDA £30m") before the section
+    becomes an ordinary list. The numbers also stay in their columns, unread,
+    in case the idea ever earns its way back.
+    """
+    if con.execute("SELECT 1 FROM settings WHERE k='mig:nopipe'").fetchone():
+        return
+    for (sid, cur) in con.execute(
+            "SELECT id, cur FROM sections WHERE kind='pipeline'").fetchall():
+        cur = cur or "£"
+        for (iid, note, amount, ebitda, units, tenure, stage) in con.execute(
+                "SELECT id, note, amount, ebitda, units, tenure, stage FROM items"
+                " WHERE section_id=?", (sid,)).fetchall():
+            bits = []
+            if amount:
+                bits.append(_money(amount, cur))
+            if ebitda:
+                bits.append("EBITDA " + _money(ebitda, cur))
+            if units:
+                bits.append("%s units" % units)
+            if tenure:
+                bits.append(str(tenure))
+            if stage:
+                bits.append(str(stage))
+            if not bits:
+                continue
+            extra = " · ".join(bits)
+            note = (note or "").strip()
+            if extra in note:
+                continue
+            note = (note + " · " + extra) if note else extra
+            con.execute("UPDATE items SET note=? WHERE id=?", (note, iid))
+        con.execute("UPDATE sections SET kind='tasks' WHERE id=?", (sid,))
+    con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES('mig:nopipe','1')")
+
+
 def _make_people(con):
     """Turn the single hard-coded login into a real account, once.
 
@@ -479,6 +518,7 @@ def init_db():
     _pulse_notes_per_person(con)
     _make_people(con)
     _shared_becomes_people(con)
+    _pipeline_becomes_plain(con)
     _events_unique_per_person(con)
     _make_indexes(con)          # after every ALTER, so the columns exist
     os.makedirs(FILES_DIR, exist_ok=True)
