@@ -365,6 +365,8 @@ def _make_people(con):
             con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES(?,?)",
                         ("u%d:%s" % (me, k), row[0]))
     con.execute("UPDATE sections SET visibility='shared' WHERE title LIKE '%Joel%'")
+    con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES(?,?)",
+                ("u%d:tagline" % me, "Pinta \u00b7 Ohr Chaim \u00b7 Personal"))
 
 
 def init_db():
@@ -1019,17 +1021,31 @@ def _unread_count(con):
     return row["c"] if row else 0
 
 
+def board_title(con, uid=None):
+    """What this person's board calls itself. Theirs to name."""
+    uid = uid if uid is not None else me()
+    t = uset(con, "board_title", uid)
+    if t:
+        return t
+    row = con.execute("SELECT display_name FROM users WHERE id=?", (uid,)).fetchone()
+    name = (row["display_name"] if row else "").strip()
+    if not name:
+        return "HQ"
+    return "%s' HQ" % name if name.endswith("s") else "%s's HQ" % name
+
+
 @app.context_processor
-def inject_people():
-    """Whose board this is, and who else is on it - shown in the eyebrow so nobody
-    has to wonder whether what they are typing is visible to the other person."""
+def inject_identity():
+    """The board is named for the person looking at it, not for the person who
+    happens to have built it. Somebody using this with a dozen other people
+    should never see another person's name over their own work."""
     try:
         if not me():
-            return {"shared_with": ""}
-        others = [r["display_name"] for r in people_list(db()) if r["id"] != me()]
-        return {"shared_with": ", ".join(others)}
+            return {"board_name": "HQ", "tagline": ""}
+        con = db()
+        return {"board_name": board_title(con), "tagline": uset(con, "tagline")}
     except Exception:
-        return {"shared_with": ""}
+        return {"board_name": "HQ", "tagline": ""}
 
 
 @app.context_processor
@@ -1670,8 +1686,12 @@ def _actor_name(con, uid=None):
 @login_required
 def account_view():
     con = db()
+    folk = people_list(con)
     return render_template("account.html",
-                           who=user_row(con), folk=people_list(con),
+                           who=user_row(con), folk=folk,
+                           titles={r["id"]: board_title(con, r["id"]) for r in folk},
+                           taglines={r["id"]: uset(con, "tagline", r["id"]) for r in folk},
+                           my_title=uset(con, "board_title"),
                            api_token=api_token_for(con),
                            notify_kinds=NOTIFY_KINDS,
                            notify_on={k: wants(con, me(), k) for k in NOTIFY_KINDS},
@@ -1698,6 +1718,30 @@ def change_password():
     commit_retry(con)
     return render_template("account.html", who=row, folk=people_list(con),
                            feed_url="", api_token="", ok="Password changed.")
+
+
+@app.route("/account/identity", methods=["POST"])
+@login_required
+def set_identity():
+    """Rename yourself and your board. An admin may do it for anyone - the person
+    who sets someone up is usually the person who knows what to call them."""
+    con = db()
+    target = request.form.get("uid", type=int) or me()
+    if target != me() and not session.get("admin"):
+        abort(403)
+    if not con.execute("SELECT 1 FROM users WHERE id=?", (target,)).fetchone():
+        abort(404)
+    name = (request.form.get("display_name") or "").strip()[:40]
+    if name:
+        con.execute("UPDATE users SET display_name=? WHERE id=?", (name, target))
+        if target == me():
+            session["name"] = name
+    title = (request.form.get("board_title") or "").strip()[:40]
+    uset_put(con, "board_title", title, target)      # empty falls back to "<Name>'s HQ"
+    if "tagline" in request.form:
+        uset_put(con, "tagline", (request.form.get("tagline") or "").strip()[:60], target)
+    commit_retry(con)
+    return redirect(url_for("account_view"))
 
 
 @app.route("/account/notify", methods=["POST"])

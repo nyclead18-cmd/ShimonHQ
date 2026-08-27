@@ -20,6 +20,17 @@
 {% if ok %}<div class="okline">{{ ok }}</div>{% endif %}
 
 <section class="card acct">
+  <div class="sec-head"><h2>Your name and board</h2></div>
+  <form method="post" action="{{ url_for('set_identity') }}" class="stack">
+    <label>Your name<input name="display_name" value="{{ who.display_name if who else '' }}" maxlength="40"></label>
+    <label>What this board is called<input name="board_title" value="{{ my_title }}" placeholder="{{ board_name }}" maxlength="40"></label>
+    <label>Small line above it<input name="tagline" value="{{ tagline }}" placeholder="leave empty for none" maxlength="60"></label>
+    <button type="submit">Save</button>
+  </form>
+  <p class="caveat">Leave the board name empty and it uses your name.</p>
+</section>
+
+<section class="card acct">
   <div class="sec-head"><h2>Your password</h2></div>
   <form method="post" action="{{ url_for('change_password') }}" class="stack">
     <label>Current password<input type="password" name="current" autocomplete="current-password" required></label>
@@ -66,16 +77,26 @@
 
 <section class="card acct">
   <div class="sec-head"><h2>On the board</h2></div>
-  <ul class="prows">
-    {% for f in folk %}
-    <li class="prow rhythm">
+  {% for f in folk %}
+    {% if session.get('admin') and f.id != session.get('uid') %}
+    <form method="post" action="{{ url_for('set_identity') }}" class="stack peoplerow">
+      <input type="hidden" name="uid" value="{{ f.id }}">
+      <label>Name<input name="display_name" value="{{ f.display_name }}" maxlength="40"></label>
+      <label>Their board is called<input name="board_title" value="{{ titles.get(f.id, '') }}" maxlength="40"></label>
+      <label>Small line above it<input name="tagline" value="{{ taglines.get(f.id, '') }}" placeholder="leave empty for none" maxlength="60"></label>
+      <button type="submit">Save {{ f.display_name }}</button>
+    </form>
+    {% else %}
+    <ul class="prows"><li class="prow rhythm">
       <span class="pwho">{{ f.display_name }}</span>
       <span class="ptitle">{{ f.username }}{% if f.is_admin %} &middot; admin{% endif %}</span>
-    </li>
-    {% endfor %}
-  </ul>
+    </li></ul>
+    {% endif %}
+  {% endfor %}
   <p class="caveat">Sections you own are private until you tap <b>share</b> on them.
-  Shared sections are visible to everyone here, and they can close and comment on those tasks.</p>
+  Shared sections are visible to everyone here, and they can close and comment on those tasks.
+  The <b>Mine</b> filter on the board hides everything anyone else has shared, so a board
+  can be entirely your own whenever you want it to be.</p>
 </section>
 
 {% if session.get('admin') %}

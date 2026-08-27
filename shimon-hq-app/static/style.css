@@ -620,3 +620,5 @@ li.prow .ptitle + .psec{justify-self:end;}
 .checkrow{flex-direction:row; align-items:center; gap:10px; text-transform:none;
   letter-spacing:0; font-size:14.5px; font-weight:400; color:var(--ink);}
 .checkrow input{width:18px; height:18px; flex:none; accent-color:var(--accent); padding:0;}
+.peoplerow{border-top:1px solid var(--border); padding-top:14px; margin-top:14px;}
+.peoplerow:first-of-type{border-top:none; margin-top:4px;}

@@ -4,8 +4,8 @@
 <div class="wrap wide">
 <header class="top">
   <div>
-    <div class="eyebrow">{% if shared_with %}Shared with {{ shared_with }}{% else %}Pinta &middot; Ohr Chaim &middot; Personal{% endif %}</div>
-    <h1>{{ (session.get('name') ~ ' HQ') if session.get('name') else 'HQ' }}</h1>
+    {% if tagline %}<div class="eyebrow">{{ tagline }}</div>{% endif %}
+    <h1>{{ board_name }}</h1>
   </div>
   <div class="right">
     <nav class="tabs">

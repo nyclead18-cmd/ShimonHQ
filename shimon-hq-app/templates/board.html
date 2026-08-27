@@ -3,8 +3,8 @@
 <div class="wrap wide">
 <header class="top">
   <div>
-    <div class="eyebrow">{% if shared_with %}Shared with {{ shared_with }}{% else %}Pinta &middot; Ohr Chaim &middot; Personal{% endif %}</div>
-    <h1>{{ (session.get('name') ~ ' HQ') if session.get('name') else 'HQ' }}</h1>
+    {% if tagline %}<div class="eyebrow">{{ tagline }}</div>{% endif %}
+    <h1>{{ board_name }}</h1>
   </div>
   <div class="right">
     <nav class="tabs">
@@ -22,9 +22,9 @@
 </header>
 
 <div class="stats">
-  <div class="stat"><div class="num">{{ stats.open }}</div><div class="lbl">on me</div></div>
-  <div class="stat"><div class="num">{{ stats.waiting }}</div><div class="lbl">waiting on others</div></div>
-  <div class="stat"><div class="num">{{ stats.done }}</div><div class="lbl">done</div></div>
+  <div class="stat"><div class="num" data-count="open">{{ stats.open }}</div><div class="lbl">on me</div></div>
+  <div class="stat"><div class="num" data-count="waiting">{{ stats.waiting }}</div><div class="lbl">waiting on others</div></div>
+  <div class="stat"><div class="num" data-count="done">{{ stats.done }}</div><div class="lbl">done</div></div>
 </div>
 
 <form class="capture" method="post" action="{{ url_for('capture') }}">
@@ -36,6 +36,7 @@
   <input id="q" type="search" placeholder="Find anything&hellip;" dir="auto" autocomplete="off">
   <div class="fpills">
     <button type="button" class="fpill on" data-f="all">All</button>
+    <button type="button" class="fpill" data-f="mine" title="Only sections you own">Mine</button>
     <button type="button" class="fpill" data-f="open">On me</button>
     <button type="button" class="fpill" data-f="waiting">Waiting</button>
     <button type="button" class="fpill" data-f="done">Done</button>
@@ -49,7 +50,7 @@
 {% set sec_projects = projects_by_sec.get(sec.id, []) %}
 {% set done = items | selectattr('status', 'equalto', 'done') | list %}
 {% set active = items | rejectattr('status', 'equalto', 'done') | list %}
-<section class="card" id="sec-{{ sec.id }}" style="--sa: {{ palette[loop.index0 % 6] }}">
+<section class="card" data-mine="{{ 1 if sec.owner_id == session.get('uid') else 0 }}" id="sec-{{ sec.id }}" style="--sa: {{ palette[loop.index0 % 6] }}">
   <div class="sec-head">
     <h2><span class="dot"></span>{{ sec.title }}
       {%- if sec.owner_id and sec.owner_id != session.get('uid') %}

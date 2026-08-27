@@ -25,11 +25,19 @@ var q = document.getElementById('q');
 function applyFilter() {
   var needle = (q && q.value ? q.value : '').toLowerCase().trim();
   var filtering = needle !== '' || MODE !== 'all';
+  // "Mine" hides sections other people have shared in. Somebody running this
+  // with a dozen colleagues needs to be able to see only their own work without
+  // anybody having to unshare anything.
+  var mineOnly = MODE === 'mine';
   document.querySelectorAll('li.item').forEach(function (li) {
     var okText = !needle || li.textContent.toLowerCase().indexOf(needle) !== -1;
     var st = li.classList.contains('open') ? 'open' : li.classList.contains('waiting') ? 'waiting' : 'done';
-    var okMode = MODE === 'all' ? (st !== 'done' || li.closest('section').classList.contains('show-done') || needle) : st === MODE;
-    li.style.display = (okText && okMode)
+    var sec = li.closest('section.card');
+    var okOwner = !mineOnly || !sec || sec.dataset.mine === '1';
+    var okMode = (MODE === 'all' || mineOnly)
+      ? (st !== 'done' || (sec && sec.classList.contains('show-done')) || needle)
+      : st === MODE;
+    li.style.display = (okText && okMode && okOwner)
       ? (li.classList.contains('donerow') ? 'grid' : '')
       : 'none';
   });
@@ -37,7 +45,21 @@ function applyFilter() {
     var any = Array.prototype.some.call(pr.querySelectorAll('li.item'), function (li) { return li.style.display !== 'none'; });
     pr.style.display = (any || !filtering) ? '' : 'none';
   });
+  // the tiles count what the board is currently showing - saying "10 on me"
+  // above four visible tasks reads as a bug even when it is not
+  var tally = {open: 0, waiting: 0, done: 0};
+  document.querySelectorAll('li.item').forEach(function (li) {
+    var sec = li.closest('section.card');
+    if (mineOnly && sec && sec.dataset.mine !== '1') { return; }
+    var st = li.classList.contains('open') ? 'open'
+           : li.classList.contains('waiting') ? 'waiting' : 'done';
+    tally[st] += 1;
+  });
+  document.querySelectorAll('.stat .num[data-count]').forEach(function (n) {
+    n.textContent = tally[n.getAttribute('data-count')];
+  });
   document.querySelectorAll('section.card').forEach(function (sec) {
+    if (mineOnly && sec.dataset.mine !== '1') { sec.style.display = 'none'; return; }
     var any = Array.prototype.some.call(sec.querySelectorAll('li.item'), function (li) { return li.style.display !== 'none'; });
     sec.style.display = (any || !filtering) ? '' : 'none';
   });
