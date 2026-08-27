@@ -351,6 +351,42 @@ def _shared_becomes_people(con):
     con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES('mig:shares','1')")
 
 
+BOARDS = ["Personal/Family", "Pinta", "Community/Charity"]
+
+_BOARD_ALIASES = {
+    "personal": "Personal/Family", "family": "Personal/Family",
+    "personal/family": "Personal/Family", "personal / family": "Personal/Family",
+    "pinta": "Pinta",
+    "community": "Community/Charity", "charity": "Community/Charity",
+    "community/charity": "Community/Charity", "community/religious": "Community/Charity",
+    "religious": "Community/Charity", "ohr chaim": "Community/Charity",
+}
+
+
+def canonical_board(raw):
+    """Three boards, spelled the same way for everyone.
+
+    Anything that plainly means one of them - 'personal', 'community',
+    'charity', old names, API calls that cannot carry a slash - lands on the
+    canonical spelling. A genuinely new name passes through untouched, so a
+    board can still be invented when one is needed.
+    """
+    b = (raw or "").strip()[:30]
+    return _BOARD_ALIASES.get(b.lower(), b)
+
+
+def _three_boards(con):
+    """One-time rename of every filed section onto the canonical board names."""
+    if con.execute("SELECT 1 FROM settings WHERE k='mig:boards3'").fetchone():
+        return
+    for (sid, b) in con.execute(
+            "SELECT id, board FROM sections WHERE board IS NOT NULL AND board!=''").fetchall():
+        nb = canonical_board(b)
+        if nb != b:
+            con.execute("UPDATE sections SET board=? WHERE id=?", (nb, sid))
+    con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES('mig:boards3','1')")
+
+
 def _pipeline_becomes_plain(con):
     """The pipeline confused the people it was built for, so it goes.
 
@@ -519,6 +555,7 @@ def init_db():
     _make_people(con)
     _shared_becomes_people(con)
     _pipeline_becomes_plain(con)
+    _three_boards(con)
     _events_unique_per_person(con)
     _make_indexes(con)          # after every ALTER, so the columns exist
     os.makedirs(FILES_DIR, exist_ok=True)
@@ -699,7 +736,7 @@ def board():
     if order:
         rank = {int(x): i for i, x in enumerate(order)}
         sections = sorted(sections, key=lambda r: (rank.get(r["id"], 10**6), r["pos"], r["id"]))
-    cur_board = (request.args.get("b") or "").strip()
+    cur_board = canonical_board(request.args.get("b"))
     if cur_board:
         sections = [r for r in sections if (r["board"] or "").strip() == cur_board]
     shares = {}
@@ -1457,7 +1494,9 @@ def inject_identity():
         secrows = con.execute(
             "SELECT id, color, board FROM sections WHERE id IN (%s)" % q,
             ids).fetchall() if ids else []
-        boards = []
+        # everyone sees the same three boards, in the same order, plus any
+        # extra name somebody has invented for themselves
+        boards = list(BOARDS)
         for r in secrows:
             b = (r["board"] or "").strip()
             if b and b not in boards:
@@ -2373,7 +2412,7 @@ def api_section_board():
     con = db()
     row = con.execute("SELECT id FROM sections WHERE lower(title)=lower(?) AND owner_id=?",
                       (title, me())).fetchone()
-    b = (request.args.get("board") or "").strip()[:30]
+    b = canonical_board(request.args.get("board"))
     if not row:
         if (request.args.get("create") or "") != "1":
             return "NOT FOUND: " + title, 404, {"Content-Type": "text/plain; charset=utf-8"}
@@ -2713,7 +2752,7 @@ def api_quickadd():
     sid = sec["id"] if sec else con.execute(
         "INSERT INTO sections(title, pos, owner_id, visibility, board)"
         " VALUES(?,99,?,'private',?)",
-        (sec_title, me(), (request.args.get("board") or "").strip()[:30])).lastrowid
+        (sec_title, me(), canonical_board(request.args.get("board")))).lastrowid
     where, args = sec_clause(con, "section_id")
     dup = con.execute("SELECT 1 FROM items WHERE lower(title)=lower(?)" + where,
                       [title] + args).fetchone()
@@ -3189,7 +3228,7 @@ def add_section():
         con.execute("INSERT INTO sections(title, pos, owner_id, visibility, board)"
                     " VALUES(?,?,?,?,?)",
                     (title, pos, me(), shared,
-                     (request.form.get("board") or "").strip()[:30]))
+                     canonical_board(request.form.get("board"))))
         commit_retry(con)
     return redirect(url_for("board"))
 
@@ -3218,7 +3257,7 @@ def set_section_board(sec_id):
     if not con.execute("SELECT 1 FROM sections WHERE id=? AND owner_id=?",
                        (sec_id, me())).fetchone():
         abort(404)
-    b = (request.form.get("board") or "").strip()[:30]
+    b = canonical_board(request.form.get("board"))
     con.execute("UPDATE sections SET board=? WHERE id=?", (b, sec_id))
     commit_retry(con)
     return redirect(url_for("board", b=b or None))
