@@ -1276,16 +1276,32 @@ def edit_item(item_id):
     con = db()
     require_item(con, item_id)
     cur_row = con.execute("SELECT section_id FROM items WHERE id=?", (item_id,)).fetchone()
-    sid = request.form.get("section_id", type=int) or cur_row["section_id"]
-    require_section(con, sid)
-    pid = request.form.get("project_id", type=int) or None
-    if pid:
-        # a project decides the section it lives in
-        prow = con.execute("SELECT section_id FROM projects WHERE id=?", (pid,)).fetchone()
-        if prow:
-            sid = prow["section_id"]
-        else:
-            pid = None
+    # "+ New section..." / "+ New project..." straight from the dropdown
+    new_sec = (request.form.get("new_section") or "").strip()[:60]
+    new_proj = (request.form.get("new_project") or "").strip()[:80]
+    if (request.form.get("section_id") or "") == "__new__" and new_sec:
+        pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM sections").fetchone()[0]
+        sid = con.execute(
+            "INSERT INTO sections(title, pos, owner_id, visibility, board)"
+            " VALUES(?,?,?,'private','')", (new_sec, pos, me())).lastrowid
+    else:
+        sid = request.form.get("section_id", type=int) or cur_row["section_id"]
+        require_section(con, sid)
+    if (request.form.get("project_id") or "") == "__new__" and new_proj:
+        ppos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM projects WHERE section_id=?",
+                           (sid,)).fetchone()[0]
+        pid = con.execute("INSERT INTO projects(section_id, title, pos) VALUES(?,?,?)",
+                          (sid, new_proj, ppos)).lastrowid
+    else:
+        pid = request.form.get("project_id", type=int) or None
+        if pid:
+            # a project decides the section it lives in
+            prow = con.execute("SELECT section_id FROM projects WHERE id=?", (pid,)).fetchone()
+            if prow:
+                require_section(con, prow["section_id"])
+                sid = prow["section_id"]
+            else:
+                pid = None
     con.execute(
         "UPDATE items SET title=?, note=?, waiting_on=?, due_date=?, section_id=?, project_id=?,"
         " updated_at=? WHERE id=?",

@@ -20,8 +20,10 @@
     <label class="taglabel">Section
       <select name="section_id">
         {% for s in sections %}<option value="{{ s.id }}">{{ s.title }}</option>{% endfor %}
+        <option value="__new__">+ New section&hellip;</option>
       </select>
     </label>
+    <input name="new_section" placeholder="New section name" dir="auto" autocomplete="off" hidden>
     <label class="taglabel">Project
       <select name="project_id">
         <option value="">&mdash; none &mdash;</option>
@@ -29,8 +31,10 @@
         <optgroup label="{{ s.title }}">
           {% for p in ps %}<option value="{{ p.id }}">{{ p.title }}</option>{% endfor %}
         </optgroup>{% endif %}{% endfor %}
+        <option value="__new__">+ New project&hellip;</option>
       </select>
     </label>
+    <input name="new_project" placeholder="New project name" dir="auto" autocomplete="off" hidden>
     <label class="duelabel">Due <input type="date" name="due_date"></label>
     <label class="duelabel">Remind <input type="datetime-local" name="remind_at"></label>
     <div class="dealfields" hidden>

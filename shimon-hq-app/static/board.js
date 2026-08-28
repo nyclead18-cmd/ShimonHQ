@@ -771,3 +771,15 @@ function updateCkChip(li) {
   }
   chip.innerHTML = '☑ ' + done + '/' + rows.length;
 }
+
+/* ---------- "+ New..." inside the section and project dropdowns ---------- */
+document.addEventListener('change', function (ev) {
+  var sel = ev.target.closest && ev.target.closest(
+    'form.edit select[name=section_id], form.edit select[name=project_id]');
+  if (!sel) { return; }
+  var field = sel.name === 'section_id' ? 'new_section' : 'new_project';
+  var inp = sel.closest('form').querySelector('[name=' + field + ']');
+  if (!inp) { return; }
+  inp.hidden = sel.value !== '__new__';
+  if (sel.value === '__new__') { inp.focus(); }
+});
