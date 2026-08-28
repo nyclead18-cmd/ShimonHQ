@@ -27,7 +27,8 @@
       <span class="staleday{% if d >= 5 %} hot{% endif %}">{{ d }}d on today</span>{% endif %}{% endif %}
       {% if ltags and ltags.get(it.id) %}<span class="lwith" title="On the list with">&#8646; {% for u in ltags[it.id].split(',') %}{{ (people or {}).get(u|int, '?') }}{% if not loop.last %} + {% endif %}{% endfor %}</span>{% endif %}
       {% set icks = (checks_by_item or {}).get(it.id, []) %}
-      {% if icks %}<span class="ckchip" title="Checklist">&#9745; {{ icks|selectattr('done')|list|length }}/{{ icks|length }}</span>{% endif %}
+      {% if icks %}<span class="ckchip" title="Checklist: done / steps">&#9745; {{ icks|selectattr('done')|list|length }}/{{ icks|length }}</span>{% endif %}
+      {% if show_where %}<span class="whence" dir="auto">{{ it.proj_title or '' }}{% if it.proj_title and it.sec_title %} &middot; {% endif %}{{ it.sec_title or '' }}</span>{% endif %}
     </div>
     {% set inotes = notes_by_item.get(it.id, []) %}
     {% if inotes %}

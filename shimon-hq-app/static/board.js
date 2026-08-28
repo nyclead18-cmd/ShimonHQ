@@ -801,3 +801,75 @@ document.addEventListener('change', function (ev) {
   inp.hidden = sel.value !== '__new__';
   if (sel.value === '__new__') { inp.focus(); }
 });
+
+/* ---------- right-click on open space: create things where you clicked ----------
+   The board's blank stretches now answer: a task or project born under the
+   cursor, and Archive lives here instead of a too-easy arrow on the header. */
+(function () {
+  var menu = null;
+  function close() { if (menu) { menu.remove(); menu = null; } }
+  document.addEventListener('click', function (ev) {
+    if (menu && !menu.contains(ev.target)) { close(); }
+  });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { close(); } });
+  function act(label, fn, danger) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'statuschoice' + (danger ? ' spot-danger' : '');
+    b.textContent = label;
+    b.addEventListener('click', function () { close(); fn(); });
+    return b;
+  }
+  function openForm(det) {
+    if (!det) { return; }
+    det.setAttribute('open', '');
+    det.scrollIntoView({block: 'center', behavior: 'smooth'});
+    var inp = det.querySelector('input[name=title]');
+    if (inp) { setTimeout(function () { inp.focus(); }, 250); }
+  }
+  document.addEventListener('contextmenu', function (ev) {
+    if (ev.target.closest('li.item, a, input, textarea, select, button, summary, form, .sheet-wrap')) { return; }
+    var card = ev.target.closest('.grid.board section.card');
+    if (!card) { return; }
+    ev.preventDefault();
+    close();
+    var proj = ev.target.closest('.project');
+    var secName = (card.querySelector('.sec-head h2') || {textContent: ''}).textContent.trim().replace(/\s+/g, ' ');
+    menu = document.createElement('div');
+    menu.className = 'statusmenu spotmenu';
+    if (proj) {
+      var pname = ((proj.querySelector('.proj-head h3') || {textContent: ''}).textContent || '').trim();
+      menu.appendChild(act('+ Task in ' + pname.slice(0, 26), function () {
+        openForm(proj.querySelector('.addrow details'));
+      }));
+    }
+    var secAdds = Array.prototype.filter.call(
+      card.querySelectorAll('.addrow details'),
+      function (d) { return !d.closest('.project'); });
+    menu.appendChild(act('+ Task in ' + secName.slice(0, 26), function () { openForm(secAdds[0]); }));
+    if (secAdds[1]) {
+      menu.appendChild(act('+ New project here', function () { openForm(secAdds[1]); }));
+    }
+    var addsec = document.querySelector('.addsec details');
+    if (addsec) {
+      menu.appendChild(act('+ New section', function () { openForm(addsec); }));
+    }
+    if (proj) {
+      var ul = proj.querySelector('ul.items');
+      var pid = ul && ul.getAttribute('data-proj');
+      if (pid) {
+        menu.appendChild(act('Archive this project (put away)', function () {
+          fetch('/projects/' + pid + '/arch', {method: 'POST'})
+            .then(function (r) { if (r.ok) { location.reload(); } });
+        }, true));
+      }
+    }
+    menu.style.position = 'fixed';
+    menu.style.visibility = 'hidden';
+    document.body.appendChild(menu);
+    var w = menu.offsetWidth || 200, h = menu.offsetHeight || 160;
+    menu.style.left = Math.min(Math.max(8, ev.clientX), window.innerWidth - w - 8) + 'px';
+    menu.style.top = Math.min(Math.max(8, ev.clientY), window.innerHeight - h - 8) + 'px';
+    menu.style.visibility = '';
+  });
+})();

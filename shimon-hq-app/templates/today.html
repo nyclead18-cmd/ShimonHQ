@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Today · HQ{% endblock %}
 {% block body %}
-<div class="wrap">
+<div class="wrap wide">
 <header class="top">
   <div>
     <div class="eyebrow">{{ pretty }}</div>
@@ -25,28 +25,39 @@
   </div>
 </header>
 
-{% if not rows %}
+<div class="stats">
+  <div class="stat{% if overdue %} alarm{% endif %}"><div class="num">{{ overdue|length }}</div><div class="lbl">overdue</div></div>
+  <div class="stat"><div class="num">{{ due_now|length }}</div><div class="lbl">due today</div></div>
+  <div class="stat"><div class="num">{{ chosen|length }}</div><div class="lbl">picked for today</div></div>
+  <div class="stat"><div class="num">{{ waiting|length }}</div><div class="lbl">waiting on others</div></div>
+  <div class="stat"><div class="num">{{ done_today }}</div><div class="lbl">finished today</div></div>
+</div>
+
+{% if not rows and not evs and not timed %}
 <p class="pageintro">Nothing starred and nothing overdue. Star a task on the board and it
 lands here &mdash; it stays where it lives, so there is only ever one copy of it.</p>
 {% endif %}
 
-{% macro lane(title, items, note) %}
-{% if items %}
-<section class="card" style="--sa: {{ '#C24E2A' if title == 'On you' else '#8A671D' }}">
+{% set show_where = true %}
+{% macro lane(title, items, color, empty_note) %}
+<section class="card" style="--sa: {{ color }}">
   <div class="sec-head"><h2><span class="dot"></span>{{ title }}</h2>
-    <span class="counts">{{ items|length }}</span></div>
+    <span class="counts">{{ items|length }} task{{ '' if items|length == 1 else 's' }}</span></div>
+  {% if items %}
+  <div class="seccols">
   <ul class="items">
     {% for it in items %}{% include "_item.html" %}{% endfor %}
   </ul>
-  {% if note %}<p class="caveat">{{ note }}</p>{% endif %}
+  </div>
+  {% elif empty_note %}<p class="caveat">{{ empty_note }}</p>{% endif %}
 </section>
-{% endif %}
 {% endmacro %}
 
+<div class="grid board tdash">
 {% if evs or timed %}
 <section class="card" style="--sa:#1F3A5F">
-  <div class="sec-head"><h2><span class="dot"></span>Today&rsquo;s schedule</h2>
-    <span class="counts">{{ evs|length + timed|length }}</span></div>
+  <div class="sec-head"><h2><span class="dot"></span>Schedule</h2>
+    <span class="counts">{{ evs|length + timed|length }} today</span></div>
   <ul class="prows">
     {% for e in evs %}
     <li class="prow rhythm">
@@ -66,8 +77,14 @@ lands here &mdash; it stays where it lives, so there is only ever one copy of it
 </section>
 {% endif %}
 
-{{ lane('On you', on_me, '') }}
-{{ lane('Waiting on someone', waiting, 'Starred, but the next move is not yours. Open People to see everything that person owes you before you call them.') }}
+{% if overdue %}{{ lane('Overdue', overdue, '#A33B2E', '') }}{% endif %}
+{% if due_now %}{{ lane('Due today', due_now, '#C24E2A', '') }}{% endif %}
+{{ lane('Picked for today', chosen, '#3A6B3E', 'Star a task on the board and it lands here.') }}
+{% if waiting %}{{ lane('Waiting on someone', waiting, '#8A671D', '') }}{% endif %}
+</div>
+
+<p class="meta noprint tdhint">Numbers up top are live counts &mdash; tap any row to open it,
+tap its title again to fold it away.</p>
 
 </div>
 {% include "_edittpl.html" %}

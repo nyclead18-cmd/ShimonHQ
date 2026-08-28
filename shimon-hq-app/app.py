@@ -1236,8 +1236,10 @@ def today_view():
     iso = _now_local().date().isoformat()
     where, args = sec_clause(con, "items.section_id")
     rows = con.execute(
-        "SELECT items.*, sections.title AS sec_title FROM items"
+        "SELECT items.*, sections.title AS sec_title,"
+        " COALESCE(p.title,'') AS proj_title FROM items"
         " JOIN sections ON items.section_id = sections.id"
+        " LEFT JOIN projects p ON p.id = items.project_id"
         " WHERE items.status != 'done'"
         "   AND (items.today = 1 OR (COALESCE(items.due_date,'') != ''"
         "        AND items.due_date <= ?))" + where +
@@ -1263,6 +1265,16 @@ def today_view():
         projects_by_sec.setdefault(p["section_id"], []).append(p)
     on_me = [r for r in rows if r["status"] == "open"]
     waiting = [r for r in rows if r["status"] == "waiting"]
+    # the dashboard cuts: what is late, what is due, what was chosen for today
+    overdue = [r for r in on_me if (r["due_date"] or "") and r["due_date"] < iso]
+    due_now = [r for r in on_me if (r["due_date"] or "") == iso]
+    hot_ids = {r["id"] for r in overdue} | {r["id"] for r in due_now}
+    chosen = [r for r in on_me if r["id"] not in hot_ids]
+    where3, args3 = sec_clause(con, "section_id", first=True)
+    done_today = con.execute(
+        "SELECT COUNT(*) FROM items" + where3 +
+        " AND status='done' AND substr(COALESCE(updated_at,''),1,10) = ?",
+        args3 + [iso]).fetchone()[0]
     evs = con.execute("SELECT * FROM events WHERE day=? AND owner_id=?"
                       " ORDER BY COALESCE(start_time,'99:99'), id", (iso, me())).fetchall()
     where2, args2 = sec_clause(con, "section_id")
@@ -1280,6 +1292,8 @@ def today_view():
         if c["item_id"] in tkeep:
             checks_by_item.setdefault(c["item_id"], []).append(c)
     return render_template("today.html", rows=rows, on_me=on_me, waiting=waiting,
+                           overdue=overdue, due_now=due_now, chosen=chosen,
+                           done_today=done_today,
                            evs=evs, timed=timed, ltags=ltags,
                            checks_by_item=checks_by_item,
                            people={r["id"]: r["display_name"] for r in people_list(con)},

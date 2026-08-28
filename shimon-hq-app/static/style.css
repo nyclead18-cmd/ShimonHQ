@@ -1120,3 +1120,15 @@ section.card.folded .seccols{display:none;}
 .grid.board .proj-head h3{white-space:normal; overflow:visible; text-overflow:clip;
   line-height:1.25;}
 .grid.board .proj-head{align-items:flex-start;}
+
+/* ---------- Today, dressed as a dashboard ---------- */
+.stat.alarm{border-color:var(--danger);}
+.stat.alarm .num{color:var(--danger);}
+.whence{color:var(--muted); font-size:10px; letter-spacing:.03em; text-transform:uppercase;}
+.tdhint{margin-top:14px;}
+.tdash .prow .pwho{font-size:12px;}
+.tdash .caveat{padding:4px 14px 12px; color:var(--muted); font-size:12.5px;}
+
+/* the open-space menu */
+.spotmenu{min-width:190px;}
+.statuschoice.spot-danger{color:var(--danger); border-top:1px solid var(--border);}

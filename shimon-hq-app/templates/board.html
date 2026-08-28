@@ -76,7 +76,7 @@
       <span class="ownchip shared" title="Shared with {{ shares[sec.id]|join(', ') }}">{{ shares[sec.id][:2]|join(' + ') }}{% if shares[sec.id]|length > 2 %} +{{ shares[sec.id]|length - 2 }}{% endif %}</span>
       {%- endif %}
     </h2>
-    <span class="counts">{{ active | length }}{% if done %} <button type="button" class="linky donetog" data-toggle-done="{{ sec.id }}" title="Show or hide the {{ done | length }} finished here">&#10003;{{ done | length }}</button>{% endif %}</span>
+    <span class="counts" title="{{ active | length }} open tasks in this bucket">{{ active | length }}{% if done %} <button type="button" class="linky donetog" data-toggle-done="{{ sec.id }}" title="Show or hide the {{ done | length }} finished here">&#10003;{{ done | length }}</button>{% endif %}</span>
     {% if sec.owner_id == session.get('uid') %}
     <details class="sharepop secmenu">
       <summary title="Board, sharing&hellip;">&#8943;</summary>
@@ -119,7 +119,7 @@
       <h3 dir="auto">{{ p.title }}</h3>
       {% set ptag = (ptags or {}).get(p.id) %}
       {% if ptag %}<span class="lwith" title="This whole project is on the list with">&#8646; {% for u in ptag|sort %}{{ people.get(u, '?') }}{% if not loop.last %} + {% endif %}{% endfor %}</span>{% endif %}
-      <span class="pcount">{{ pdone | length }}/{{ pitems | length }}</span>
+      <span class="pcount" title="{{ pdone | length }} done of {{ pitems | length }} tasks">{{ pdone | length }}/{{ pitems | length }}</span>
       {% if sec.owner_id == session.get('uid') %}
       <details class="sharepop secmenu projtag">
         <summary title="Put this project on a list">&#8646;</summary>
@@ -132,11 +132,6 @@
           <button type="submit">Save</button>
         </form>
       </details>
-      {% endif %}
-      {% if sec.owner_id == session.get('uid') %}
-      <form method="post" action="{{ url_for('archive_project', proj_id=p.id) }}" class="pdelform">
-        <button type="submit" class="archbtn" title="Archive this whole project (nothing is deleted)">&#8615;</button>
-      </form>
       {% endif %}
       <form method="post" action="{{ url_for('delete_project', proj_id=p.id) }}" class="pdelform">
         <button type="submit" class="del" title="Remove project (tasks stay)">&#x2715;</button>
