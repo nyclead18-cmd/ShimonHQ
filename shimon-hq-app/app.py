@@ -522,6 +522,47 @@ def _joel_fresh_start(con):
     con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES('mig:joelfresh','1')")
 
 
+def _keep_seed(con):
+    """One-time import of a Google Keep takeout, staged as keep_seed.json beside
+    the app. Each note became a project, its checkboxes became tasks, checked
+    means done, and archived notes go straight to the Archive. The file only
+    exists on the instance it is meant for; everywhere else this is a no-op."""
+    path = os.path.join(BASE, "keep_seed.json")
+    if not os.path.exists(path):
+        return
+    if con.execute("SELECT 1 FROM settings WHERE k='mig:keepseed'").fetchone():
+        return
+    row = con.execute("SELECT id FROM users WHERE username=?", (HQ_USER.lower(),)).fetchone()
+    if not row:
+        return    # the account is not born yet; no marker, so next boot retries
+    uid = row[0]
+    buckets = ensure_buckets(con, uid)
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    now = datetime.now().isoformat(timespec="seconds")
+    for bname, projects in data.items():
+        sec = buckets.get(bname, buckets["Pinta"])
+        for p in projects:
+            ppos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM projects"
+                               " WHERE section_id=?", (sec,)).fetchone()[0]
+            pid = con.execute(
+                "INSERT INTO projects(section_id, title, pos, archived)"
+                " VALUES(?,?,?,?)",
+                (sec, p["title"][:80], ppos, 1 if p.get("archived") else 0)).lastrowid
+            ipos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM items"
+                               " WHERE section_id=?", (sec,)).fetchone()[0]
+            for i, t in enumerate(p.get("tasks", [])):
+                con.execute(
+                    "INSERT INTO items(section_id, project_id, title, note, status, pos,"
+                    " today, today_at, archived, created_at, updated_at)"
+                    " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                    (sec, pid, t["t"], t.get("n", ""),
+                     "done" if t.get("done") else "open", ipos + i,
+                     1 if t.get("today") else 0, now if t.get("today") else None,
+                     1 if p.get("archived") else 0, now, now))
+    con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES('mig:keepseed','1')")
+
+
 def _pipeline_becomes_plain(con):
     """The pipeline confused the people it was built for, so it goes.
 
@@ -732,6 +773,7 @@ def init_db():
                      it.get("s", "open"), pi, now))
     _everything_into_buckets(con)   # after seeding, so a brand-new board is born bucketed
     _joel_fresh_start(con)          # after bucketing, so it trims projects, not sections
+    _keep_seed(con)                 # after the buckets exist to receive it
     commit_retry(con)
     con.close()
 
@@ -823,7 +865,7 @@ def ensure_buckets(con, uid):
     for t in BOARDS:
         row = con.execute("SELECT id FROM sections WHERE owner_id=? AND lower(title)=lower(?)",
                           (uid, t)).fetchone()
-        out[t] = row["id"] if row else con.execute(
+        out[t] = row[0] if row else con.execute(
             "INSERT INTO sections(title, pos, owner_id, visibility, board)"
             " VALUES(?,?,?,'private',?)", (t, BUCKET_POS[t], uid, t)).lastrowid
     return out
@@ -836,7 +878,7 @@ def my_inbox(con, uid=None):
     sec = ensure_buckets(con, uid)["Pinta"]
     row = con.execute("SELECT id FROM projects WHERE section_id=? AND lower(title)='inbox'",
                       (sec,)).fetchone()
-    proj = row["id"] if row else con.execute(
+    proj = row[0] if row else con.execute(
         "INSERT INTO projects(section_id, title, pos) VALUES(?, 'Inbox', -1)",
         (sec,)).lastrowid
     return sec, proj
