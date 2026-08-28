@@ -1104,3 +1104,19 @@ section.card.folded .seccols{display:none;}
 /* dropping a task on a project lights the whole project up */
 .grid.board .project.dropwait{outline:2px solid var(--accent); outline-offset:-2px;
   border-radius:8px;}
+
+/* ---------- the Keep look: narrow columns, wrapping lines ----------
+   Keep won the side-by-side: narrower columns, more of them, and a long
+   task takes a second line instead of a wider box. The status pill sits
+   in the line like Keep's checkbox, so nothing overlaps anything. */
+.seccols{column-width:12.5rem; column-gap:16px;}
+.grid.board li.item{display:block; padding:3px 18px 3px 20px;}
+.grid.board li.item .pill{float:left; margin:2px 6px 0 0;}
+.grid.board li.item .body{overflow:hidden;}
+.grid.board li.item .t{font-size:12.5px; line-height:1.35;}
+.grid.board li.donerow{display:none;}
+.grid.board section.show-done li.donerow{display:block;}
+@media (min-width:1500px){ .wrap.wide{max-width:min(97vw, 2200px);} }
+.grid.board .proj-head h3{white-space:normal; overflow:visible; text-overflow:clip;
+  line-height:1.25;}
+.grid.board .proj-head{align-items:flex-start;}
