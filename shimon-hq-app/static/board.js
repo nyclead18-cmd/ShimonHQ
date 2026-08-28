@@ -654,7 +654,8 @@ document.addEventListener('click', function (ev) {
   var li = null;
   function clear() {
     document.querySelectorAll('.dropline').forEach(function (x) { x.classList.remove('dropline'); });
-    document.querySelectorAll('section.card.dropwait').forEach(function (x) { x.classList.remove('dropwait'); });
+    document.querySelectorAll('section.card.dropwait, .project.dropwait')
+      .forEach(function (x) { x.classList.remove('dropwait'); });
   }
   document.addEventListener('pointerdown', function (ev) {
     var h = ev.target.closest && ev.target.closest('.idrag');
@@ -677,6 +678,23 @@ document.addEventListener('click', function (ev) {
     if (row) {
       var r = row.getBoundingClientRect();
       row.parentNode.insertBefore(li, ev.clientY < r.top + r.height / 2 ? row : row.nextSibling);
+      return;
+    }
+    // anywhere on a project - its header, its + task row, the blank space
+    // under a short list - means "into this project", same bucket or not
+    var proj = els.map(function (el) { return el.closest && el.closest('.grid.board .project'); })
+      .filter(Boolean)[0];
+    if (proj) {
+      var pul = proj.querySelector('ul.items');
+      if (pul && li.parentNode !== pul) { pul.appendChild(li); proj.classList.add('dropwait'); }
+      else if (pul) { proj.classList.add('dropwait'); }
+      return;
+    }
+    // an empty patch of list (the loose tasks area) takes the row directly
+    var bare = els.map(function (el) { return el.closest && el.closest('.grid.board ul.items'); })
+      .filter(Boolean)[0];
+    if (bare) {
+      if (li.parentNode !== bare) { bare.appendChild(li); }
       return;
     }
     var card = els.map(function (el) { return el.closest && el.closest('.grid.board section.card'); })

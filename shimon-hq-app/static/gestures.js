@@ -290,6 +290,7 @@
       '<div class="sheet" role="dialog" aria-modal="true">' +
       '<div class="sheet-grab"></div>' +
       '<div class="sheet-title"></div>' +
+      '<div class="sheet-sub"></div>' +
       '<div class="sheet-list"></div>' +
       '<button type="button" class="sheet-cancel">Cancel</button>' +
       '</div>';
@@ -300,12 +301,25 @@
     sheet.querySelector('.sheet-cancel').addEventListener('click', guardedClose);
   }
 
-  function openSheet(li) {
+  function openSheet(li, atX, atY) {
     var acts = sheetActions(li);
     if (!acts.length) return;
     if (!sheet) { buildSheet(); }
     var t = q(li, '.t');
     sheetTitle.textContent = t ? t.textContent.trim().slice(0, 90) : '';
+    // say where this task lives, so the menu never loses its row
+    var crumbs = [];
+    var proj = li.closest && li.closest('.project');
+    var ph = proj && proj.querySelector('.proj-head h3');
+    if (ph) { crumbs.push(ph.textContent.trim().slice(0, 40)); }
+    var card = li.closest && li.closest('section.card');
+    var sh = card && card.querySelector('.sec-head h2');
+    if (sh) { crumbs.push(sh.textContent.trim().slice(0, 40)); }
+    var sub = sheet.querySelector('.sheet-sub');
+    if (sub) {
+      sub.textContent = crumbs.join(' · ');
+      sub.hidden = !crumbs.length;
+    }
     sheetList.innerHTML = '';
     acts.forEach(function (a) {
       var b = document.createElement(a.href ? 'a' : 'button');
@@ -330,6 +344,19 @@
     sheetOpenedAt = new Date().getTime();
     sheet.classList.add('on');
     document.body.classList.add('sheet-open');
+    // at a desk the menu lands beside the click, not across the room
+    var panel = sheet.querySelector('.sheet');
+    panel.classList.remove('at-point');
+    panel.style.left = panel.style.top = panel.style.bottom = '';
+    if (atX != null && window.matchMedia('(min-width:700px)').matches) {
+      panel.classList.add('at-point');
+      var w = panel.offsetWidth || 260, h = panel.offsetHeight || 320;
+      var x = Math.min(Math.max(8, atX + 4), window.innerWidth - w - 8);
+      var y = Math.min(Math.max(8, atY + 4), window.innerHeight - h - 8);
+      panel.style.left = x + 'px';
+      panel.style.top = y + 'px';
+      panel.style.bottom = 'auto';
+    }
   }
 
   // lifting your finger after a long press fires a click right where the sheet
@@ -535,6 +562,6 @@
     if (!li || !rowKind(li)) return;
     if (ev.target.closest('a, input, textarea, select')) return;
     ev.preventDefault();
-    openSheet(li);
+    openSheet(li, ev.clientX, ev.clientY);
   });
 })();

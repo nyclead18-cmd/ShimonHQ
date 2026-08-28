@@ -1080,14 +1080,27 @@ section.card.folded .seccols{display:none;}
 .sheet-act{padding:10px 12px;}
 .sheet-cancel{padding:10px;}
 @media (min-width:700px){
-  .sheet{left:50%; right:auto; bottom:34px; width:300px;
-    border-radius:16px; border:1px solid var(--border);
-    padding:4px 8px 8px; max-height:72vh;
+  .sheet{left:50%; right:auto; bottom:34px; width:250px;
+    border-radius:14px; border:1px solid var(--border);
+    padding:2px 6px 6px; max-height:80vh; gap:3px;
     transform:translate(-50%, 14px); opacity:0;
     transition:transform .16s ease, opacity .16s ease;}
   .sheet-wrap.on .sheet{transform:translate(-50%, 0); opacity:1;}
+  .sheet.at-point{transform:none !important;}
   .sheet-grab{display:none;}
-  .sheet-title{font-size:13.5px; padding:8px 6px;}
-  .sheet-act{font-size:13px; padding:6px 10px; border-radius:8px;}
-  .sheet-cancel{font-size:12.5px; padding:7px; margin-top:2px;}
+  .sheet-title{font-size:13px; padding:7px 6px 1px; border-bottom:0; margin-bottom:0;}
+  .sheet-sub{padding:0 6px 6px;}
+  .sheet-list{gap:0;}
+  .sheet-act{font-size:12.5px; padding:4px 9px; border-radius:7px;}
+  .sheet-cancel{display:none;}
 }
+.sheet-sub{color:var(--muted); font-size:11px; letter-spacing:.02em;
+  border-bottom:1px solid var(--border); padding:0 6px 8px;}
+.sheet-sub[hidden]{display:none;}
+.sheet .sheet-title{border-bottom:0; margin-bottom:0; padding-bottom:2px;}
+.sheet:has(.sheet-sub[hidden]) .sheet-title{border-bottom:1px solid var(--border);
+  padding-bottom:8px;}
+
+/* dropping a task on a project lights the whole project up */
+.grid.board .project.dropwait{outline:2px solid var(--accent); outline-offset:-2px;
+  border-radius:8px;}
