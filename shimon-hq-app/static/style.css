@@ -1173,3 +1173,9 @@ section.card.folded .seccols{display:none;}
   border:1px solid var(--border); background:var(--card); color:var(--muted);
   border-radius:999px; cursor:pointer; white-space:nowrap;}
 .fapill:hover{color:var(--ink); border-color:var(--ink);}
+
+/* quiet history: the stamps only show when a task is opened */
+.stamps{display:none; color:var(--muted); font-size:11px; letter-spacing:.02em;
+  margin-top:8px;}
+.stamps span{margin-right:4px;}
+li.item.expanded .stamps{display:block;}

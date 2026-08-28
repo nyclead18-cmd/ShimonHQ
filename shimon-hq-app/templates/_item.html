@@ -30,6 +30,11 @@
       {% if icks %}<span class="ckchip" title="Checklist: done / steps">&#9745; {{ icks|selectattr('done')|list|length }}/{{ icks|length }}</span>{% endif %}
       {% if show_where %}<span class="whence" dir="auto">{{ it.proj_title or '' }}{% if it.proj_title and it.sec_title %} &middot; {% endif %}{{ it.sec_title or '' }}</span>{% endif %}
     </div>
+    <div class="stamps noprint">
+      {% if it.created_at %}<span>added {{ it.created_at|stamp }}</span>{% endif %}
+      {% if it.done_at %}<span>&middot; done {{ it.done_at|stamp }}</span>
+      {%- elif it.updated_at and it.updated_at != it.created_at %}<span>&middot; last touched {{ it.updated_at|stamp }}</span>{% endif %}
+    </div>
     {% set inotes = notes_by_item.get(it.id, []) %}
     {% if inotes %}
     <button type="button" class="ncount" title="Show the conversation">{{ inotes|length }} update{{ '' if inotes|length == 1 else 's' }}</button>

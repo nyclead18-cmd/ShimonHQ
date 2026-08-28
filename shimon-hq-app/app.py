@@ -718,9 +718,18 @@ def init_db():
     for col, decl in (("amount", "INTEGER"), ("ebitda", "INTEGER"),
                       ("units", "INTEGER"), ("tenure", "TEXT"), ("stage", "TEXT"),
                       ("pinned", "INTEGER NOT NULL DEFAULT 0"),
-                      ("archived", "INTEGER NOT NULL DEFAULT 0")):
+                      ("archived", "INTEGER NOT NULL DEFAULT 0"),
+                      ("done_at", "TEXT")):
         if col not in cols:
             con.execute("ALTER TABLE items ADD COLUMN %s %s" % (col, decl))
+    # quiet history: every task knows when it was born and when it was finished
+    if not con.execute("SELECT 1 FROM settings WHERE k='mig:stamps1'").fetchone():
+        con.execute("UPDATE items SET created_at = updated_at"
+                    " WHERE COALESCE(created_at,'') = '' AND COALESCE(updated_at,'') != ''")
+        con.execute("UPDATE items SET done_at = updated_at"
+                    " WHERE status='done' AND COALESCE(done_at,'') = ''"
+                    " AND COALESCE(updated_at,'') != ''")
+        con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES('mig:stamps1','1')")
     prcols = [r[1] for r in con.execute("PRAGMA table_info(projects)")]
     if prcols and "archived" not in prcols:
         con.execute("ALTER TABLE projects ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
@@ -1353,11 +1362,12 @@ def add_item():
                       (sid,)).fetchone()[0]
     con.execute(
         "INSERT INTO items(section_id, title, note, waiting_on, status, pos, due_date,"
-        " project_id, updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+        " project_id, updated_at, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
         (sid, title, (request.form.get("note") or "").strip(),
          (request.form.get("waiting_on") or "").strip(), "open", pos,
          (request.form.get("due_date") or "").strip() or None,
          request.form.get("project_id", type=int) or None,
+         datetime.now().isoformat(timespec="seconds"),
          datetime.now().isoformat(timespec="seconds")))
     commit_retry(con)
     if (request.form.get("due_date") or "").strip():
@@ -1489,8 +1499,9 @@ def cycle_item(item_id):
     row = con.execute("SELECT status, title FROM items WHERE id=?", (item_id,)).fetchone()
     nxt = STATUSES[(STATUSES.index(row["status"]) + 1) % 3] \
         if row["status"] in STATUSES else "open"
-    con.execute("UPDATE items SET status=?, updated_at=? WHERE id=?",
-                (nxt, datetime.now().isoformat(timespec="seconds"), item_id))
+    now = datetime.now().isoformat(timespec="seconds")
+    con.execute("UPDATE items SET status=?, updated_at=?, done_at=? WHERE id=?",
+                (nxt, now, now if nxt == "done" else None, item_id))
     commit_retry(con)
     _tell_status(con, item_id, row, nxt)
     return jsonify(status=nxt)
@@ -1506,8 +1517,9 @@ def set_item_status(item_id):
     con = db()
     require_item(con, item_id)
     was = con.execute("SELECT status, title FROM items WHERE id=?", (item_id,)).fetchone()
-    con.execute("UPDATE items SET status=?, updated_at=? WHERE id=?",
-                (st, datetime.now().isoformat(timespec="seconds"), item_id))
+    now = datetime.now().isoformat(timespec="seconds")
+    con.execute("UPDATE items SET status=?, updated_at=?, done_at=? WHERE id=?",
+                (st, now, now if st == "done" else None, item_id))
     commit_retry(con)
     _tell_status(con, item_id, was, st)
     return jsonify(status=st)
@@ -1548,9 +1560,10 @@ def capture():
     pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM items WHERE section_id=?",
                       (sid,)).fetchone()[0]
     con.execute(
-        "INSERT INTO items(section_id, project_id, title, status, pos, updated_at)"
-        " VALUES(?,?,?,?,?,?)",
-        (sid, pid, title, "open", pos, datetime.now().isoformat(timespec="seconds")))
+        "INSERT INTO items(section_id, project_id, title, status, pos, updated_at, created_at)"
+        " VALUES(?,?,?,?,?,?,?)",
+        (sid, pid, title, "open", pos, datetime.now().isoformat(timespec="seconds"),
+         datetime.now().isoformat(timespec="seconds")))
     commit_retry(con)
     return redirect(url_for("board"))
 
@@ -2093,9 +2106,10 @@ def brief_to_task(bid):
                       (sid,)).fetchone()[0]
     iid = con.execute(
         "INSERT INTO items(section_id, project_id, title, note, waiting_on, status, pos,"
-        " due_date, updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+        " due_date, updated_at, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
         (sid, pid, title, note, (request.form.get("waiting_on") or "").strip(), "open", pos,
          (request.form.get("due_date") or "").strip() or None,
+         datetime.now().isoformat(timespec="seconds"),
          datetime.now().isoformat(timespec="seconds"))).lastrowid
     con.execute("UPDATE brief_items SET item_id=?, is_read=1 WHERE id=?", (iid, bid))
     commit_retry(con)
@@ -3279,14 +3293,15 @@ def api_quickadd():
     tenure = (request.args.get("tenure") or "").strip().lower()
     con.execute(
         "INSERT INTO items(section_id, project_id, title, note, waiting_on, status, pos,"
-        " due_date, today, today_at, amount, ebitda, units, tenure, updated_at)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        " due_date, today, today_at, amount, ebitda, units, tenure, updated_at, created_at)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (sid, pid, title, request.args.get("note", ""), request.args.get("waiting_on", ""),
          "open", pos, request.args.get("due") or None,
          star, _now_local().isoformat(timespec="seconds") if star else None,
          parse_money(request.args.get("amount")), parse_money(request.args.get("ebitda")),
          request.args.get("units", type=int) or None,
          tenure if tenure in TENURES else "",
+         datetime.now().isoformat(timespec="seconds"),
          datetime.now().isoformat(timespec="seconds")))
     new_id = con.execute("SELECT last_insert_rowid()").fetchone()[0]
     key = thread_key(request.args.get("subject"))
@@ -3710,10 +3725,11 @@ def api_add_item():
     pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM items WHERE section_id=?",
                       (sid,)).fetchone()[0]
     cur = con.execute(
-        "INSERT INTO items(section_id, title, note, waiting_on, status, pos, due_date, updated_at)"
-        " VALUES(?,?,?,?,?,?,?,?)",
+        "INSERT INTO items(section_id, title, note, waiting_on, status, pos, due_date,"
+        " updated_at, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
         (sid, title, d.get("note", ""), d.get("waiting_on", ""), "open", pos,
-         d.get("due_date"), datetime.now().isoformat(timespec="seconds")))
+         d.get("due_date"), datetime.now().isoformat(timespec="seconds"),
+         datetime.now().isoformat(timespec="seconds")))
     commit_retry(con)
     return jsonify(id=cur.lastrowid), 201
 
