@@ -1037,3 +1037,57 @@ form.ckadd input::placeholder{color:var(--muted);}
   word-break:break-word;}
 footer a{color:var(--muted);}
 .si-step{font-size:13px; color:var(--ink); margin-top:2px;}
+
+/* ---------- the board breathes by weight ----------
+   Three equal columns gave an empty bucket a third of the screen while a
+   heavy one ran off the bottom. Each bucket now takes width in proportion
+   to what it holds, and inside a wide bucket the projects flow into
+   newspaper columns, so the whole screen is working. */
+.grid.board section.card{overflow:hidden;}
+.seccols{column-width:15rem; column-gap:26px; column-rule:1px solid var(--border);
+  padding:0 2px;}
+.seccols li.item, .seccols .addrow{break-inside:avoid-column;}
+.seccols .proj-head{break-inside:avoid-column; break-after:avoid-column;}
+.seccols .project{margin-bottom:2px;}
+.seccols ul.items:empty{min-height:0;}
+section.card.folded .seccols{display:none;}
+@media (max-width:1199.9px){
+  .grid.board{grid-template-columns:repeat(auto-fit, minmax(19rem, 1fr)) !important;}
+  .grid.board section.card{grid-column:auto !important;}
+}
+
+/* smaller still: the whole board, one notch down */
+.grid.board .sec-head{padding:7px 10px 6px;}
+.grid.board .sec-head h2{font-size:14px;}
+.grid.board .counts{font-size:10.5px;}
+.grid.board .proj-head{padding:6px 12px 4px; gap:6px;}
+.grid.board .proj-head h3{font-size:14px;}
+.grid.board .proj-head .pcount{font-size:10.5px;}
+.grid.board li.item{padding:4px 8px 4px 20px; grid-template-columns:52px minmax(0,1fr); gap:6px;}
+.grid.board li.item .t{font-size:12.5px; line-height:1.3;}
+.grid.board .pill{padding:1px 6px; font-size:8.5px; letter-spacing:.04em;}
+.grid.board .metaline{font-size:10.5px; margin-top:0;}
+.grid.board li.noterow{font-size:11px;}
+.grid.board .star{font-size:12px; top:4px;}
+.grid.board .idrag{top:2px; font-size:12px; padding:1px 4px;}
+.grid.board .lwith{font-size:9.5px; padding:0 6px;}
+.grid.board .ckchip{font-size:9.5px;}
+.grid.board .addrow details summary{font-size:10.5px;}
+.grid.board .addrow.slim{padding-top:2px; padding-bottom:3px;}
+.grid.board .photostrip img{height:40px; max-width:84px;}
+
+/* the long-press menu grew into a wall; on a desk it is a small card now */
+.sheet-act{padding:10px 12px;}
+.sheet-cancel{padding:10px;}
+@media (min-width:700px){
+  .sheet{left:50%; right:auto; bottom:34px; width:300px;
+    border-radius:16px; border:1px solid var(--border);
+    padding:4px 8px 8px; max-height:72vh;
+    transform:translate(-50%, 14px); opacity:0;
+    transition:transform .16s ease, opacity .16s ease;}
+  .sheet-wrap.on .sheet{transform:translate(-50%, 0); opacity:1;}
+  .sheet-grab{display:none;}
+  .sheet-title{font-size:13.5px; padding:8px 6px;}
+  .sheet-act{font-size:13px; padding:6px 10px; border-radius:8px;}
+  .sheet-cancel{font-size:12.5px; padding:7px; margin-top:2px;}
+}

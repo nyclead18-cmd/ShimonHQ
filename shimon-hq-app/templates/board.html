@@ -55,13 +55,13 @@
   </div>
 </div>
 
-<div class="grid board">
+<div class="grid board" style="grid-template-columns:repeat({{ tracks or 6 }}, minmax(0,1fr))">
 {% for sec in sections %}
 {% set items = by_sec.get(sec.id, []) %}
 {% set sec_projects = projects_by_sec.get(sec.id, []) %}
 {% set done = items | selectattr('status', 'equalto', 'done') | list %}
 {% set active = items | rejectattr('status', 'equalto', 'done') | list %}
-<section class="card{% if sec.id in collapsed %} folded{% endif %}" data-mine="{{ 1 if sec.owner_id == session.get('uid') else 0 }}" data-sec="{{ sec.id }}" id="sec-{{ sec.id }}" style="--sa: {{ sec_colors.get(sec.id, '#C24E2A') }}">
+<section class="card{% if sec.id in collapsed %} folded{% endif %}" data-mine="{{ 1 if sec.owner_id == session.get('uid') else 0 }}" data-sec="{{ sec.id }}" id="sec-{{ sec.id }}" style="--sa: {{ sec_colors.get(sec.id, '#C24E2A') }}; grid-column:span {{ (spans or {}).get(sec.id, 2) }}">
   <div class="sec-head">
     <button type="button" class="foldbtn" data-fold="{{ sec.id }}"
             title="Collapse or open this box">{{ '&#9656;'|safe if sec.id in collapsed else '&#9662;'|safe }}</button>
@@ -107,6 +107,7 @@
     {% endif %}
   </div>
 
+  <div class="seccols">
   {% for p in sec_projects %}
   {% set pitems = items | selectattr('project_id', 'equalto', p.id) | list %}
   {% set pdone = pitems | selectattr('status', 'equalto', 'done') | list %}
@@ -196,6 +197,7 @@
         <div class="btns"><button type="submit">Add</button></div>
       </form>
     </details>
+  </div>
   </div>
 </section>
 {% endfor %}

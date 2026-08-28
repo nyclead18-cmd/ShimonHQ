@@ -1039,7 +1039,24 @@ def board():
     ptags = {}
     for r in con.execute("SELECT project_id, user_id FROM project_tags"):
         ptags.setdefault(r["project_id"], set()).add(r["user_id"])
+    # A bucket's share of the screen follows its share of the work: an empty
+    # box narrows to a sliver, a heavy one widens and flows into inner columns.
+    weights, spans, tracks = {}, {}, max(2, 2 * len(sections))
+    for sec in sections:
+        w = sum(1 for it in by_sec.get(sec["id"], []) if it["status"] != "done")
+        w += len(projects_by_sec.get(sec["id"], []))
+        weights[sec["id"]] = 1 if sec["id"] in collapsed else max(1, w)
+    if sections:
+        total = sum(weights.values()) or 1
+        spans = {sid: max(1, round(tracks * w / total)) for sid, w in weights.items()}
+        heavy = max(weights, key=lambda k: weights[k])
+        while sum(spans.values()) > tracks and any(v > 1 for v in spans.values()):
+            big = max(spans, key=lambda k: spans[k])
+            spans[big] -= 1
+        while sum(spans.values()) < tracks:
+            spans[heavy] += 1
     return render_template("board.html", sections=sections, by_sec=by_sec,
+                           spans=spans, tracks=tracks,
                            cur_board=cur_board, shares=shares, collapsed=collapsed,
                            pcollapsed=pcollapsed,
                            projects_by_sec=projects_by_sec, ltags=ltags, ptags=ptags,
