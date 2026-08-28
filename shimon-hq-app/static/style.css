@@ -1179,3 +1179,12 @@ section.card.folded .seccols{display:none;}
   margin-top:8px;}
 .stamps span{margin-right:4px;}
 li.item.expanded .stamps{display:block;}
+
+/* the opened card scrolls on a phone: full sheet, native momentum */
+.grid.board li.item.expanded{-webkit-overflow-scrolling:touch; touch-action:pan-y;
+  overscroll-behavior:contain;}
+@media (max-width:700px){
+  .grid.board li.item.expanded{left:3vw !important; right:3vw !important;
+    top:5svh !important; width:auto !important; max-height:88svh;
+    padding:16px 16px 24px 22px;}
+}

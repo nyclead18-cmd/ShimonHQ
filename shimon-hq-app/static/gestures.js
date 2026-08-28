@@ -473,6 +473,9 @@
     if (ev.touches && ev.touches.length > 1) return;
     var li = ev.target.closest(ROWS);
     if (!li || !rowKind(li)) return;
+    // an opened (popped-out) task is a reading surface - it must scroll
+    // natively, so no swipe or hold tracking starts inside it
+    if (li.classList.contains('expanded')) return;
     // Never hijack a real control. Text boxes are strictly off limits: a tap that
     // lingers even slightly is how you get a cursor into one, and stealing that
     // stops you writing a response at all.
