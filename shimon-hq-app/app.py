@@ -3007,7 +3007,7 @@ def api_brief():
         return "ERROR: text required", 400, {"Content-Type": "text/plain; charset=utf-8"}
     day = (request.args.get("day") or _now_local().strftime("%Y-%m-%d")).strip()
     kind = (request.args.get("kind") or "note").strip().lower()
-    if kind not in ("meeting", "email", "due", "added", "note", "update"):
+    if kind not in ("meeting", "email", "due", "added", "note", "update", "rec"):
         kind = "note"
     con = db()
     target = None

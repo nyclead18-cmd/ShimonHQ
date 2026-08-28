@@ -44,7 +44,7 @@
 </section>
 {% endif %}
 
-{% set kinds = [('due','Needs you today','#A33B2E'), ('meeting','Schedule','#1F3A5F'), ('update','Picked up on open work','#7A5C2E'), ('email','From your inbox','#B8892E'), ('added','Added to the board','#3A6B3E'), ('note','Notes','#6B4A8A')] %}
+{% set kinds = [('due','Needs you today','#A33B2E'), ('meeting','Schedule','#1F3A5F'), ('update','Picked up on open work','#7A5C2E'), ('email','From your inbox','#B8892E'), ('added','Added to the board','#3A6B3E'), ('rec','From your recorder','#8A3B5C'), ('note','Notes','#6B4A8A')] %}
 {% for key, label, color in kinds %}
 {% set group = lines | selectattr('kind','equalto',key) | list %}
 {% if group %}
