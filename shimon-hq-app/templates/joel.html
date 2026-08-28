@@ -21,13 +21,13 @@
   </div>
 </header>
 
-<div class="agsheet">
-  <div class="sheet-top">
+<div class="agsheet revsheet">
+  <div class="printhead">
     <div>
-      <div class="sheet-kicker">Pinta HQ &middot; board review</div>
-      <h2 class="sheet-name">{{ session.get('name') or 'Review' }}</h2>
+      <div class="joel-eyebrow">{{ session.get('name') or 'Board' }} Review</div>
+      <div class="joel-date">{{ today }}</div>
     </div>
-    <div class="sheet-date">{{ today }}</div>
+    <div class="joel-brand">Pinta Capital Partners</div>
   </div>
 
   {% set counter = namespace(n=0) %}

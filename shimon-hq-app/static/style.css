@@ -962,3 +962,10 @@ form.listrespond button{font:inherit; font-size:13px; border:1px solid var(--bor
 
 /* the review sheet's project lines */
 .rev-proj{font-weight:700; font-size:14px; margin:12px 0 2px; color:var(--ink);}
+
+/* the review wears the navy-and-gold it wore before */
+.revsheet .printhead{margin-top:0;}
+.revsheet .lane-kicker{color:#1F3A5F; border-bottom:2px solid #B8892E;}
+.revsheet .rev-proj{color:#1F3A5F;}
+.revsheet .si-title{color:#1E1B16;}
+@media print{ .revsheet .lane-kicker{color:#1F3A5F; border-bottom-color:#B8892E;} }
