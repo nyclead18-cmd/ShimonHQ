@@ -519,20 +519,55 @@ document.addEventListener('click', function (ev) {
   });
 })();
 
-/* ---------- tap a row to open it (every mode, now that rows fold) ---------- */
+/* ---------- tap a row to open it - and on the board it POPS OUT ----------
+   In narrow Keep columns an in-place expansion squeezed the edit form into
+   twelve characters. An opened row now lifts out of its column into a
+   readable card in the middle of the screen; a tap outside puts it back. */
 (function () {
+  function collapseAll() {
+    document.querySelectorAll('li.item.expanded').forEach(function (x) {
+      x.classList.remove('expanded');
+    });
+    var sc = document.querySelector('.expscrim');
+    if (sc) { sc.remove(); }
+  }
+  function syncScrim() {
+    var open = document.querySelector('.grid.board li.item.expanded');
+    var sc = document.querySelector('.expscrim');
+    if (open && !sc) {
+      sc = document.createElement('div');
+      sc.className = 'expscrim';
+      sc.addEventListener('click', collapseAll);
+      document.body.appendChild(sc);
+    } else if (!open && sc) {
+      sc.remove();
+    }
+  }
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') { collapseAll(); }
+  });
   document.addEventListener('click', function (ev) {
     // a tap on a real control is that control's business
     if (ev.target.closest('button, a, input, select, textarea, label, summary, form')) {
       var chip = ev.target.closest('.ncount');
       if (!chip) { return; }
       ev.preventDefault();
-      chip.closest('li.item').classList.add('expanded');
+      var cli = chip.closest('li.item');
+      if (cli.closest('.grid.board')) { collapseAll(); }
+      cli.classList.add('expanded');
+      syncScrim();
       return;
     }
     var li = ev.target.closest('li.item');
     if (!li) { return; }
-    li.classList.toggle('expanded');
+    if (li.closest('.grid.board')) {
+      var was = li.classList.contains('expanded');
+      collapseAll();
+      if (!was) { li.classList.add('expanded'); }
+      syncScrim();
+    } else {
+      li.classList.toggle('expanded');
+    }
   }, false);
 })();
 
@@ -858,6 +893,22 @@ document.addEventListener('change', function (ev) {
       var ul = proj.querySelector('ul.items');
       var pid = ul && ul.getAttribute('data-proj');
       if (pid) {
+        // move the whole project to another bucket
+        Array.prototype.forEach.call(
+          document.querySelectorAll('.grid.board section.card'),
+          function (other) {
+            if (other === card) { return; }
+            var name = (other.querySelector('.sec-head h2') || {textContent: ''})
+              .textContent.trim().replace(/\s+/g, ' ');
+            var sid = other.getAttribute('data-sec');
+            if (!sid || !name) { return; }
+            menu.appendChild(act('Move project → ' + name.slice(0, 24), function () {
+              var fd = new FormData();
+              fd.append('section_id', sid);
+              fetch('/projects/' + pid + '/move', {method: 'POST', body: fd})
+                .then(function (r) { if (r.ok) { location.reload(); } });
+            }));
+          });
         menu.appendChild(act('Archive this project (put away)', function () {
           fetch('/projects/' + pid + '/arch', {method: 'POST'})
             .then(function (r) { if (r.ok) { location.reload(); } });

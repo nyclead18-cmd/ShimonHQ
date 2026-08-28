@@ -3812,6 +3812,27 @@ def archive_item(item_id):
     return jsonify(archived=0 if now else 1)
 
 
+@app.route("/projects/<int:proj_id>/move", methods=["POST"])
+@login_required
+def move_project(proj_id):
+    """A whole project picks up and moves to another bucket - the box, its
+    tasks, everything - keeping done/archived flags exactly as they were."""
+    con = db()
+    row = con.execute("SELECT section_id FROM projects WHERE id=?", (proj_id,)).fetchone()
+    if not row:
+        abort(404)
+    require_section(con, row["section_id"])
+    dest = int(request.form.get("section_id") or 0)
+    require_section(con, dest)
+    pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM projects"
+                      " WHERE section_id=?", (dest,)).fetchone()[0]
+    con.execute("UPDATE projects SET section_id=?, pos=? WHERE id=?",
+                (dest, pos, proj_id))
+    con.execute("UPDATE items SET section_id=? WHERE project_id=?", (dest, proj_id))
+    commit_retry(con)
+    return jsonify(ok=True)
+
+
 @app.route("/projects/<int:proj_id>/arch", methods=["POST"])
 @login_required
 def archive_project(proj_id):
