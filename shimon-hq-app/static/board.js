@@ -527,9 +527,19 @@ document.addEventListener('click', function (ev) {
   function collapseAll() {
     document.querySelectorAll('li.item.expanded').forEach(function (x) {
       x.classList.remove('expanded');
+      x.style.left = x.style.top = '';
     });
     var sc = document.querySelector('.expscrim');
     if (sc) { sc.remove(); }
+  }
+  // the card opens like a balloon, right where the row is - no flying
+  function popAt(li) {
+    var r = li.getBoundingClientRect();
+    li.classList.add('expanded');
+    var w = Math.min(540, window.innerWidth * 0.94);
+    li.style.left = Math.min(Math.max(8, r.left - 12), window.innerWidth - w - 8) + 'px';
+    var h = Math.min(li.offsetHeight || 200, window.innerHeight * 0.84);
+    li.style.top = Math.min(Math.max(8, r.top - 12), window.innerHeight - h - 12) + 'px';
   }
   function syncScrim() {
     var open = document.querySelector('.grid.board li.item.expanded');
@@ -553,8 +563,8 @@ document.addEventListener('click', function (ev) {
       if (!chip) { return; }
       ev.preventDefault();
       var cli = chip.closest('li.item');
-      if (cli.closest('.grid.board')) { collapseAll(); }
-      cli.classList.add('expanded');
+      if (cli.closest('.grid.board')) { collapseAll(); popAt(cli); }
+      else { cli.classList.add('expanded'); }
       syncScrim();
       return;
     }
@@ -563,7 +573,7 @@ document.addEventListener('click', function (ev) {
     if (li.closest('.grid.board')) {
       var was = li.classList.contains('expanded');
       collapseAll();
-      if (!was) { li.classList.add('expanded'); }
+      if (!was) { popAt(li); }
       syncScrim();
     } else {
       li.classList.toggle('expanded');

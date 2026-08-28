@@ -1135,10 +1135,13 @@ section.card.folded .seccols{display:none;}
 
 /* ---------- an opened task lifts out of its column ---------- */
 .expscrim{position:fixed; inset:0; z-index:91; background:rgba(20,17,12,.38);}
-.grid.board li.item.expanded{position:fixed; z-index:92; left:50%; top:7vh;
-  transform:translateX(-50%); width:min(540px, 94vw); max-height:84vh; overflow:auto;
+.grid.board li.item.expanded{position:fixed; z-index:92;
+  width:min(540px, 94vw); max-height:84vh; overflow:auto;
   background:var(--card); border:1px solid var(--border); border-radius:16px;
-  box-shadow:0 22px 70px rgba(20,17,12,.4); padding:18px 22px 20px 26px;}
+  box-shadow:0 14px 50px rgba(20,17,12,.32); padding:18px 22px 20px 26px;
+  animation:balloonin .13s ease-out;}
+@keyframes balloonin{from{transform:scale(.97); opacity:.7} to{transform:none; opacity:1}}
+@media (prefers-reduced-motion: reduce){ .grid.board li.item.expanded{animation:none;} }
 .grid.board li.item.expanded .t{font-size:15.5px; line-height:1.4;}
 .grid.board li.item.expanded .metaline{font-size:12px;}
 .grid.board li.item.expanded .pill{margin-top:3px;}
