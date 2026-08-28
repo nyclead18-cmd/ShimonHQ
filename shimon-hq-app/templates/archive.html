@@ -11,40 +11,64 @@
     <nav class="tabs">
       <a class="tab" href="{{ url_for('today_view') }}">Today</a>
       <a class="tab" href="{{ url_for('board') }}">Board</a>
+      <a class="tab" href="{{ url_for('briefing_view') }}">Brief{% if brief_unread %} <span class="badge">{{ brief_unread }}</span>{% endif %}</a>
       <a class="tab" href="{{ url_for('list_view') }}">List</a>
       <a class="tab" href="{{ url_for('people_view') }}">People</a>
+      <a class="tab" href="{{ url_for('joel_view') }}">Review</a>
+      <a class="tab" href="{{ url_for('pulse_view') }}">Pulse</a>
     </nav>
     <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
   </div>
 </header>
 
-{% if projs %}
-<h2 class="archsub">Projects</h2>
-<ul class="archlist">
-  {% for p in projs %}
-  <li><span class="archt" dir="auto">{{ p.title }}</span> <span class="archwhere">{{ p.sec_title }}</span>
+{% if projs or items %}
+<div class="stats">
+  <div class="stat"><div class="num">{{ projs|length }}</div><div class="lbl">projects put away</div></div>
+  <div class="stat"><div class="num">{{ items|length }}</div><div class="lbl">tasks put away</div></div>
+</div>
+<p class="meta archhint">Bring back returns something to exactly where it lived on the board
+&mdash; same bucket, same project, nothing lost.</p>
+
+{% for sec_title, lane in lanes.items() %}
+<section class="card archcard">
+  <div class="archlane" dir="auto">{{ sec_title }}</div>
+
+  {% for p in lane['projs'] %}
+  <div class="archrow">
+    <div class="archmain">
+      <span class="archkind">Project</span>
+      <span class="archt" dir="auto">{{ p.title }}</span>
+      <span class="archcount">{% if p.n_all %}{{ p.n_open }} open &middot; {{ p.n_all }} tasks{% else %}empty{% endif %}</span>
+    </div>
     <form method="post" action="{{ url_for('archive_project', proj_id=p.id) }}" class="archform">
-      <button type="submit">Bring back</button>
+      <button type="submit" class="archback">&#8617; Bring back</button>
     </form>
-  </li>
+  </div>
   {% endfor %}
-</ul>
-{% endif %}
 
-{% if items %}
-<h2 class="archsub">Tasks</h2>
-<ul class="archlist">
-  {% for it in items %}
-  <li><span class="archt" dir="auto">{{ it.title }}{% if it.note %} <span class="archnote" dir="auto">&mdash; {{ it.note }}</span>{% endif %}</span>
-    <span class="archwhere">{{ it.sec_title }}{% if it.proj_title %} &middot; {{ it.proj_title }}{% endif %}</span>
-    <button type="button" class="archback" data-unarch="{{ it.id }}">Bring back</button>
-  </li>
+  {% for it in lane['items'] %}
+  <div class="archrow">
+    <div class="archmain">
+      <span class="archt" dir="auto">{{ it.title }}</span>
+      {% if it.proj_title %}<span class="archwhere" dir="auto">{{ it.proj_title }}</span>{% endif %}
+      {% if it.note %}<span class="archnote" dir="auto">{{ it.note }}</span>{% endif %}
+    </div>
+    <button type="button" class="archback" data-unarch="{{ it.id }}">&#8617; Bring back</button>
+  </div>
   {% endfor %}
-</ul>
-{% endif %}
+</section>
+{% endfor %}
 
-{% if not items and not projs %}
-<p class="meta">Nothing archived. Hold a task and choose Archive to put it away without deleting it.</p>
+{% else %}
+<div class="card archempty">
+  <div class="archempty-mark">&#9634;</div>
+  <h2>Nothing put away</h2>
+  <p class="meta">When a task or a project is finished with &mdash; but you are not ready
+  to delete it &mdash; hold it and choose <strong>Archive</strong>, or tap the
+  <strong>&#8675;</strong> on a project's header. It rests here, out of the way,
+  one tap from coming back.</p>
+  <a class="oops-btn" href="{{ url_for('board') }}">Back to the board</a>
+</div>
 {% endif %}
 </div>
 <script>
@@ -52,7 +76,13 @@ document.addEventListener('click', function (ev) {
   var b = ev.target.closest('[data-unarch]');
   if (!b) { return; }
   fetch('/items/' + b.getAttribute('data-unarch') + '/arch', {method: 'POST'})
-    .then(function (r) { if (r.ok) { b.closest('li').remove(); } });
+    .then(function (r) {
+      if (!r.ok) { return; }
+      var row = b.closest('.archrow'), card = b.closest('.archcard');
+      row.remove();
+      if (card && !card.querySelector('.archrow')) { card.remove(); }
+      if (!document.querySelector('.archrow')) { location.reload(); }
+    });
 });
 </script>
 {% endblock %}

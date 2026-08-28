@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Hmm · Pinta HQ{% endblock %}
+{% block body %}
+<div class="wrap">
+<div class="oops-card">
+  <div class="eyebrow">That wasn't supposed to happen</div>
+  <h1>Something snapped</h1>
+  <p class="meta">The page hit an error. Nothing was lost &mdash; your board and
+  everything on it are fine. The details were saved so it can be fixed.</p>
+  <div class="btnrow">
+    <a class="oops-btn" href="{{ url_for('board') }}">Back to the board</a>
+    {% if not detail %}<a class="oops-btn ghost" href="{{ url_for('oops_view') }}">Show the details</a>{% endif %}
+  </div>
+  {% if detail %}
+  <div class="oops-sub">Most recent error &mdash; a screenshot of this is all Shimon needs.</div>
+  <pre class="oops-tb">{{ detail }}</pre>
+  {% endif %}
+</div>
+</div>
+{% endblock %}

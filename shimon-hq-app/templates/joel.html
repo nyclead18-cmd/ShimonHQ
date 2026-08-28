@@ -47,7 +47,7 @@
       <div class="si-head">
         <span class="si-title" dir="auto">{{ it.title }}</span>
         {% if it.status == 'waiting' %}<span class="si-due">waiting{% if it.waiting_on %} on {{ it.waiting_on }}{% endif %}</span>{% endif %}
-        {% if it.due_date %}<span class="si-due">due {{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}</span>{% endif %}
+        {% if it.due_date and (it.due_date|string)|length >= 10 %}<span class="si-due">due {{ (it.due_date|string)[5:7]|int }}/{{ (it.due_date|string)[8:10]|int }}</span>{% endif %}
       </div>
       {% if it.note %}<div class="si-note" dir="auto">{{ it.note }}</div>{% endif %}
       {% for c in (checks_by_item or {}).get(it.id, []) %}<div class="si-step" dir="auto">&#9744; {{ c.body }}</div>{% endfor %}
@@ -68,7 +68,7 @@
       <div class="si-head">
         <span class="si-title" dir="auto">{{ it.title }}</span>
         {% if it.status == 'waiting' %}<span class="si-due">waiting{% if it.waiting_on %} on {{ it.waiting_on }}{% endif %}</span>{% endif %}
-        {% if it.due_date %}<span class="si-due">due {{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}</span>{% endif %}
+        {% if it.due_date and (it.due_date|string)|length >= 10 %}<span class="si-due">due {{ (it.due_date|string)[5:7]|int }}/{{ (it.due_date|string)[8:10]|int }}</span>{% endif %}
       </div>
       {% if it.note %}<div class="si-note" dir="auto">{{ it.note }}</div>{% endif %}
       {% for c in (checks_by_item or {}).get(it.id, []) %}<div class="si-step" dir="auto">&#9744; {{ c.body }}</div>{% endfor %}

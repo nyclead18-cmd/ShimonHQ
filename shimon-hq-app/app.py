@@ -563,6 +563,22 @@ def _keep_seed(con):
     con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES('mig:keepseed','1')")
 
 
+def _bring_back_archive(con):
+    """The Keep import tucked whole projects into the Archive, and a stray tap
+    on the put-away arrow is easy to make - so once, everything archived comes
+    back to the board. The Archive stays; anything put away after this stays
+    put away until its own Bring back tap. Runs only where a Keep import ran."""
+    if not os.path.exists(os.path.join(BASE, "keep_seed.json")):
+        return
+    if not con.execute("SELECT 1 FROM settings WHERE k='mig:keepseed'").fetchone():
+        return
+    if con.execute("SELECT 1 FROM settings WHERE k='mig:bringback1'").fetchone():
+        return
+    con.execute("UPDATE projects SET archived=0 WHERE archived=1")
+    con.execute("UPDATE items SET archived=0 WHERE archived=1")
+    con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES('mig:bringback1','1')")
+
+
 def _pipeline_becomes_plain(con):
     """The pipeline confused the people it was built for, so it goes.
 
@@ -774,6 +790,7 @@ def init_db():
     _everything_into_buckets(con)   # after seeding, so a brand-new board is born bucketed
     _joel_fresh_start(con)          # after bucketing, so it trims projects, not sections
     _keep_seed(con)                 # after the buckets exist to receive it
+    _bring_back_archive(con)        # after the import, so it can undo the put-away
     commit_retry(con)
     con.close()
 
@@ -1920,6 +1937,42 @@ def inject_unread():
         return {"brief_unread": _unread_count(db())}
     except Exception:
         return {"brief_unread": 0}
+
+
+# ---------- when something snaps ----------
+# A bare "Internal Server Error" tells nobody anything. The traceback goes to
+# the server log AND to one row in settings, so whoever is signed in can open
+# /oops and read exactly what broke - a two-person board can afford that.
+
+@app.errorhandler(Exception)
+def _unhandled(e):
+    from werkzeug.exceptions import HTTPException
+    if isinstance(e, HTTPException):
+        return e
+    import traceback
+    tb = traceback.format_exc()
+    print("HQ-ERROR %s %s\n%s" % (request.method, request.path, tb), flush=True)
+    try:
+        con = sqlite3.connect(DB_PATH, timeout=10)
+        con.execute(
+            "INSERT OR REPLACE INTO settings(k, v) VALUES('last_error', ?)",
+            ("%s · %s %s\n%s" % (datetime.now().isoformat(timespec="seconds"),
+                                 request.method, request.path, tb),))
+        con.commit()
+        con.close()
+    except Exception:
+        pass
+    try:
+        return render_template("oops.html", detail=None), 500
+    except Exception:
+        return "Something snapped. The details are saved at /oops.", 500
+
+
+@app.route("/oops")
+@login_required
+def oops_view():
+    row = db().execute("SELECT v FROM settings WHERE k='last_error'").fetchone()
+    return render_template("oops.html", detail=row[0] if row else None)
 
 
 @app.route("/briefing")
@@ -3755,14 +3808,27 @@ def archive_view():
         "SELECT items.*, sections.title AS sec_title, COALESCE(p.title,'') AS proj_title"
         " FROM items JOIN sections ON sections.id = items.section_id"
         " LEFT JOIN projects p ON p.id = items.project_id"
-        " WHERE items.archived=1" + where + " ORDER BY items.id DESC", args).fetchall()
+        " WHERE items.archived=1"
+        " AND (items.project_id IS NULL OR items.project_id NOT IN"
+        "      (SELECT id FROM projects WHERE archived=1))" + where +
+        " ORDER BY sections.pos, sections.id, items.id DESC", args).fetchall()
     where, args = sec_clause(con, "projects.section_id")
     projs = con.execute(
-        "SELECT projects.*, sections.title AS sec_title FROM projects"
-        " JOIN sections ON sections.id = projects.section_id"
-        " WHERE projects.archived=1" + where + " ORDER BY projects.id DESC",
+        "SELECT projects.*, sections.title AS sec_title,"
+        " (SELECT COUNT(*) FROM items i WHERE i.project_id = projects.id"
+        "  AND i.status != 'done') AS n_open,"
+        " (SELECT COUNT(*) FROM items i WHERE i.project_id = projects.id) AS n_all"
+        " FROM projects JOIN sections ON sections.id = projects.section_id"
+        " WHERE projects.archived=1" + where +
+        " ORDER BY sections.pos, sections.id, projects.id DESC",
         args).fetchall()
-    return render_template("archive.html", items=items, projs=projs)
+    # one lane per bucket, in board order, projects first and loose tasks after
+    lanes = {}
+    for p in projs:
+        lanes.setdefault(p["sec_title"], {"projs": [], "items": []})["projs"].append(p)
+    for it in items:
+        lanes.setdefault(it["sec_title"], {"projs": [], "items": []})["items"].append(it)
+    return render_template("archive.html", items=items, projs=projs, lanes=lanes)
 
 
 @app.route("/items/<int:item_id>/checks", methods=["POST"])
