@@ -711,3 +711,63 @@ document.addEventListener('click', function (ev) {
       });
   });
 })();
+
+/* ---------- checklists: Keep's checkboxes, living on the row ---------- */
+document.addEventListener('change', function (ev) {
+  var t = ev.target.closest && ev.target.closest('.cktick');
+  if (!t) { return; }
+  var row = t.closest('.ckrow');
+  fetch('/checks/' + t.getAttribute('data-ck') + '/toggle', {method: 'POST'})
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (j) {
+      if (!j) { t.checked = !t.checked; return; }
+      row.classList.toggle('ckdone', !!j.done);
+      updateCkChip(t.closest('li.item'));
+    });
+});
+document.addEventListener('click', function (ev) {
+  var d = ev.target.closest && ev.target.closest('[data-ckdel]');
+  if (!d) { return; }
+  ev.preventDefault();
+  var li = d.closest('li.item');
+  fetch('/checks/' + d.getAttribute('data-ckdel') + '/delete', {method: 'POST'})
+    .then(function (r) { if (r.ok) { d.closest('.ckrow').remove(); updateCkChip(li); } });
+});
+document.addEventListener('submit', function (ev) {
+  var f = ev.target.closest && ev.target.closest('form.ckadd');
+  if (!f) { return; }
+  ev.preventDefault();
+  var inp = f.querySelector('[name=body]');
+  var body = (inp.value || '').trim();
+  if (!body) { return; }
+  var fd = new FormData();
+  fd.append('body', body);
+  fetch('/items/' + f.getAttribute('data-id') + '/checks', {method: 'POST', body: fd})
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (j) {
+      if (!j) { return; }
+      var lab = document.createElement('label');
+      lab.className = 'ckrow';
+      lab.innerHTML = '<input type="checkbox" class="cktick" data-ck="' + j.id + '"> ' +
+        '<span dir="auto"></span> <button type="button" class="ckdel" data-ckdel="' + j.id + '" title="Remove step">✕</button>';
+      lab.querySelector('span').textContent = j.body;
+      f.parentNode.insertBefore(lab, f);
+      inp.value = '';
+      updateCkChip(f.closest('li.item'));
+    });
+});
+function updateCkChip(li) {
+  if (!li) { return; }
+  var rows = li.querySelectorAll('.ckrow');
+  var done = li.querySelectorAll('.ckrow.ckdone').length;
+  var chip = li.querySelector('.ckchip');
+  if (!rows.length) { if (chip) { chip.remove(); } return; }
+  if (!chip) {
+    chip = document.createElement('span');
+    chip.className = 'ckchip';
+    chip.title = 'Checklist';
+    var meta = li.querySelector('.metaline');
+    if (meta) { meta.appendChild(chip); }
+  }
+  chip.innerHTML = '☑ ' + done + '/' + rows.length;
+}

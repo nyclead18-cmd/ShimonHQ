@@ -231,6 +231,29 @@
         fetch('/items/' + itemId(li) + '/top', {method: 'POST'})
           .then(function (r) { if (r.ok) { location.reload(); } });
       }});
+      var pinned = !!q(li, '.pinmark');
+      out.push({label: pinned ? 'Unpin' : 'Pin to top', run: function () {
+        fetch('/items/' + itemId(li) + '/pin', {method: 'POST'})
+          .then(function (r) { if (r.ok) { location.reload(); } });
+      }});
+      var ck = q(li, '.checklist');
+      if (ck) {
+        out.push({label: 'Add a checklist step', run: function () {
+          ck.hidden = false;
+          li.classList.add('expanded');
+          var inp = ck.querySelector('.ckadd input');
+          if (inp) { scrollTo(inp); inp.focus(); }
+        }});
+      }
+      out.push({label: 'Archive (put away, not deleted)', run: function () {
+        fetch('/items/' + itemId(li) + '/arch', {method: 'POST'})
+          .then(function (r) {
+            if (!r.ok) { return; }
+            li.style.transition = 'opacity .18s ease';
+            li.style.opacity = '0';
+            setTimeout(function () { li.remove(); if (window.applyFilter) { window.applyFilter(); } }, 200);
+          });
+      }});
     }
 
 

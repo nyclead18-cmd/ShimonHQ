@@ -132,6 +132,11 @@
         </form>
       </details>
       {% endif %}
+      {% if sec.owner_id == session.get('uid') %}
+      <form method="post" action="{{ url_for('archive_project', proj_id=p.id) }}" class="pdelform">
+        <button type="submit" class="archbtn" title="Archive this whole project (nothing is deleted)">&#8615;</button>
+      </form>
+      {% endif %}
       <form method="post" action="{{ url_for('delete_project', proj_id=p.id) }}" class="pdelform">
         <button type="submit" class="del" title="Remove project (tasks stay)">&#x2715;</button>
       </form>
@@ -209,7 +214,7 @@
   </details>
 </div>
 
-<footer>Tap a status pill and pick Open, Waiting or Done.</footer>
+<footer>Tap a status pill and pick Open, Waiting or Done. &middot; <a href="{{ url_for('archive_view') }}">Archive</a></footer>
 </div>
 {% endblock %}
 

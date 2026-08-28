@@ -50,6 +50,7 @@
         {% if it.due_date %}<span class="si-due">due {{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}</span>{% endif %}
       </div>
       {% if it.note %}<div class="si-note" dir="auto">{{ it.note }}</div>{% endif %}
+      {% for c in (checks_by_item or {}).get(it.id, []) %}<div class="si-step" dir="auto">&#9744; {{ c.body }}</div>{% endfor %}
       {% set n = latest.get(it.id) %}
       {% if n %}<div class="si-last" dir="auto">Last: {{ n.body }} <span class="si-when">({{ n.created_at|stamp }})</span></div>{% endif %}
       <div class="si-outcome">Outcome:</div>
@@ -70,6 +71,7 @@
         {% if it.due_date %}<span class="si-due">due {{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}</span>{% endif %}
       </div>
       {% if it.note %}<div class="si-note" dir="auto">{{ it.note }}</div>{% endif %}
+      {% for c in (checks_by_item or {}).get(it.id, []) %}<div class="si-step" dir="auto">&#9744; {{ c.body }}</div>{% endfor %}
       {% set n = latest.get(it.id) %}
       {% if n %}<div class="si-last" dir="auto">Last: {{ n.body }} <span class="si-when">({{ n.created_at|stamp }})</span></div>{% endif %}
       <div class="si-outcome">Outcome:</div>

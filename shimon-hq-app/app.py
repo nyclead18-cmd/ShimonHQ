@@ -653,9 +653,18 @@ def init_db():
     # an age - but it also has numbers, and numbers buried in a title cannot be
     # sorted, compared or totalled.
     for col, decl in (("amount", "INTEGER"), ("ebitda", "INTEGER"),
-                      ("units", "INTEGER"), ("tenure", "TEXT"), ("stage", "TEXT")):
+                      ("units", "INTEGER"), ("tenure", "TEXT"), ("stage", "TEXT"),
+                      ("pinned", "INTEGER NOT NULL DEFAULT 0"),
+                      ("archived", "INTEGER NOT NULL DEFAULT 0")):
         if col not in cols:
             con.execute("ALTER TABLE items ADD COLUMN %s %s" % (col, decl))
+    prcols = [r[1] for r in con.execute("PRAGMA table_info(projects)")]
+    if prcols and "archived" not in prcols:
+        con.execute("ALTER TABLE projects ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+    con.executescript(
+        "CREATE TABLE IF NOT EXISTS checks ("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER NOT NULL,"
+        " body TEXT NOT NULL, done INTEGER NOT NULL DEFAULT 0, pos INTEGER NOT NULL DEFAULT 0);")
     _seed_history(con)
     ecols = [r[1] for r in con.execute("PRAGMA table_info(events)")]
     if ecols and "source" not in ecols:
@@ -927,7 +936,8 @@ def board():
     pcollapsed = {int(x) for x in (uset(con, "pcollapsed") or "").split(",")
                   if x.strip().isdigit()}
     where, args = sec_clause(con, "section_id", first=True)
-    items = con.execute("SELECT * FROM items" + where + " ORDER BY pos, id", args).fetchall()
+    items = con.execute("SELECT * FROM items" + where + " AND archived=0"
+                        " ORDER BY pinned DESC, pos, id", args).fetchall()
     if cur_board:
         keep_secs = {r["id"] for r in sections}
         items = [it for it in items if it["section_id"] in keep_secs]
@@ -943,8 +953,8 @@ def board():
     for f in files:
         files_by_item.setdefault(f["item_id"], []).append(f)
     where, args = sec_clause(con, "section_id", first=True)
-    projects = con.execute("SELECT * FROM projects" + where + " ORDER BY pos, id",
-                           args).fetchall()
+    projects = con.execute("SELECT * FROM projects" + where + " AND archived=0"
+                           " ORDER BY pos, id", args).fetchall()
     projects_by_sec = {}
     for p in projects:
         projects_by_sec.setdefault(p["section_id"], []).append(p)
@@ -959,6 +969,10 @@ def board():
         "waiting": sum(1 for it in items if it["status"] == "waiting"),
         "done": sum(1 for it in items if it["status"] == "done"),
     }
+    checks_by_item = {}
+    for c in con.execute("SELECT * FROM checks ORDER BY pos, id"):
+        if c["item_id"] in keep:
+            checks_by_item.setdefault(c["item_id"], []).append(c)
     ltags = {}
     for r in con.execute("SELECT item_id, user_id FROM list_tags"):
         ltags.setdefault(r["item_id"], []).append(r["user_id"])
@@ -970,6 +984,7 @@ def board():
                            cur_board=cur_board, shares=shares, collapsed=collapsed,
                            pcollapsed=pcollapsed,
                            projects_by_sec=projects_by_sec, ltags=ltags, ptags=ptags,
+                           checks_by_item=checks_by_item,
                            people={r["id"]: r["display_name"] for r in people_list(con)},
                            names=known_names(con),
                            sec_kind={r["id"]: r["kind"] for r in sections},
@@ -1150,6 +1165,7 @@ def today_view():
         " WHERE items.status != 'done'"
         "   AND (items.today = 1 OR (COALESCE(items.due_date,'') != ''"
         "        AND items.due_date <= ?))" + where +
+        " AND items.archived=0"
         " ORDER BY items.today DESC, items.due_date IS NULL, items.due_date,"
         "          items.today_at, items.id", [iso] + args).fetchall()
     keep = set(r["id"] for r in rows)
@@ -1164,8 +1180,8 @@ def today_view():
     sections = con.execute("SELECT * FROM sections" + where + " ORDER BY pos, id",
                            args).fetchall()
     where, args = sec_clause(con, "section_id", first=True)
-    projects = con.execute("SELECT * FROM projects" + where + " ORDER BY pos, id",
-                           args).fetchall()
+    projects = con.execute("SELECT * FROM projects" + where + " AND archived=0"
+                           " ORDER BY pos, id", args).fetchall()
     projects_by_sec = {}
     for p in projects:
         projects_by_sec.setdefault(p["section_id"], []).append(p)
@@ -1175,15 +1191,21 @@ def today_view():
                       " ORDER BY COALESCE(start_time,'99:99'), id", (iso, me())).fetchall()
     where2, args2 = sec_clause(con, "section_id")
     timed = con.execute(
-        "SELECT * FROM items WHERE status != 'done'"
+        "SELECT * FROM items WHERE status != 'done' AND archived=0"
         " AND COALESCE(remind_at,'') != '' AND substr(remind_at,1,10) = ?"
         + where2 + " ORDER BY remind_at", [iso] + args2).fetchall()
     ltags = {}
     for r in con.execute("SELECT item_id, user_id FROM list_tags"):
         ltags.setdefault(r["item_id"], []).append(r["user_id"])
     ltags = {k: ",".join(str(u) for u in sorted(v)) for k, v in ltags.items()}
+    tkeep = {r["id"] for r in rows} | {r["id"] for r in timed}
+    checks_by_item = {}
+    for c in con.execute("SELECT * FROM checks ORDER BY pos, id"):
+        if c["item_id"] in tkeep:
+            checks_by_item.setdefault(c["item_id"], []).append(c)
     return render_template("today.html", rows=rows, on_me=on_me, waiting=waiting,
                            evs=evs, timed=timed, ltags=ltags,
+                           checks_by_item=checks_by_item,
                            people={r["id"]: r["display_name"] for r in people_list(con)},
                            sections=sections, projects_by_sec=projects_by_sec,
                            sec_kind={r["id"]: r["kind"] for r in sections},
@@ -1514,7 +1536,7 @@ def people_view():
     rows = con.execute(
         "SELECT items.*, sections.title AS sec_title FROM items"
         " JOIN sections ON items.section_id = sections.id"
-        " WHERE items.status != 'done' AND COALESCE(items.waiting_on,'') != ''"
+        " WHERE items.status != 'done' AND items.archived=0 AND COALESCE(items.waiting_on,'') != ''"
         + where +
         " ORDER BY items.due_date IS NULL, items.due_date, items.id", args).fetchall()
     groups = {}
@@ -1541,14 +1563,15 @@ def joel_view():
     sec_ids = [s["id"] for s in sections]
     q = ",".join("?" * len(sec_ids)) if sec_ids else "NULL"
     projects = con.execute(
-        "SELECT * FROM projects WHERE section_id IN (%s) ORDER BY pos, id" % q,
-        sec_ids).fetchall() if sec_ids else []
+        "SELECT * FROM projects WHERE section_id IN (%s) AND archived=0"
+        " ORDER BY pos, id" % q, sec_ids).fetchall() if sec_ids else []
     projects_by_sec = {}
     for p in projects:
         projects_by_sec.setdefault(p["section_id"], []).append(p)
     items = con.execute(
-        "SELECT * FROM items WHERE section_id IN (%s)"
-        " ORDER BY status='done', pos, id" % q, sec_ids).fetchall() if sec_ids else []
+        "SELECT * FROM items WHERE section_id IN (%s) AND archived=0"
+        " ORDER BY status='done', pinned DESC, pos, id" % q,
+        sec_ids).fetchall() if sec_ids else []
     keep = {it["id"] for it in items}
     latest, done_count = {}, sum(1 for it in items if it["status"] == "done")
     for n in con.execute("SELECT item_id, body, created_at FROM item_notes ORDER BY id"):
@@ -1557,7 +1580,12 @@ def joel_view():
     by_sec = {}
     for it in items:
         by_sec.setdefault(it["section_id"], []).append(it)
+    checks_by_item = {}
+    for c in con.execute("SELECT * FROM checks WHERE done=0 ORDER BY pos, id"):
+        if c["item_id"] in keep:
+            checks_by_item.setdefault(c["item_id"], []).append(c)
     return render_template("joel.html", sections=sections, by_sec=by_sec,
+                           checks_by_item=checks_by_item,
                            projects_by_sec=projects_by_sec, latest=latest,
                            done_count=done_count,
                            today=_now_local().strftime("%B %-d, %Y")
@@ -1579,14 +1607,14 @@ def agenda_view(who):
     rows = con.execute(
         "SELECT items.*, sections.title AS sec_title FROM items"
         " JOIN sections ON items.section_id = sections.id"
-        " WHERE items.status != 'done' AND lower(trim(items.waiting_on)) = lower(?)"
+        " WHERE items.status != 'done' AND items.archived=0 AND lower(trim(items.waiting_on)) = lower(?)"
         + where + " ORDER BY items.due_date IS NULL, items.due_date, items.id",
         [who] + args).fetchall()
     if not rows:
         rows = con.execute(
             "SELECT items.*, sections.title AS sec_title FROM items"
             " JOIN sections ON items.section_id = sections.id"
-            " WHERE items.status != 'done'"
+            " WHERE items.status != 'done' AND items.archived=0"
             " AND lower(items.waiting_on) LIKE lower(?)"
             + where + " ORDER BY items.due_date IS NULL, items.due_date, items.id",
             ["%" + who + "%"] + args).fetchall()
@@ -1608,7 +1636,7 @@ def _tagged_between(con, a, b):
         "SELECT items.*, COALESCE(p.title, '') AS proj_title FROM items"
         " JOIN sections s ON s.id = items.section_id"
         " LEFT JOIN projects p ON p.id = items.project_id"
-        " WHERE s.owner_id=? AND items.id IN ("
+        " WHERE s.owner_id=? AND items.archived=0 AND items.id IN ("
         "   SELECT item_id FROM list_tags WHERE user_id=?"
         "   UNION SELECT i2.id FROM items i2"
         "     JOIN project_tags pt ON pt.project_id = i2.project_id WHERE pt.user_id=?)"
@@ -3618,6 +3646,110 @@ def bump_to_top(item_id):
     return jsonify(ok=True)
 
 
+@app.route("/items/<int:item_id>/pin", methods=["POST"])
+@login_required
+def pin_item(item_id):
+    """Keep-style pin: it stays at the very top of its box until unpinned."""
+    con = db()
+    require_item(con, item_id)
+    now = con.execute("SELECT pinned FROM items WHERE id=?", (item_id,)).fetchone()[0]
+    con.execute("UPDATE items SET pinned=? WHERE id=?", (0 if now else 1, item_id))
+    commit_retry(con)
+    return jsonify(pinned=0 if now else 1)
+
+
+@app.route("/items/<int:item_id>/arch", methods=["POST"])
+@login_required
+def archive_item(item_id):
+    """Out of sight without being gone: off every list, waiting in the Archive."""
+    con = db()
+    require_item(con, item_id)
+    now = con.execute("SELECT archived FROM items WHERE id=?", (item_id,)).fetchone()[0]
+    con.execute("UPDATE items SET archived=? WHERE id=?", (0 if now else 1, item_id))
+    commit_retry(con)
+    return jsonify(archived=0 if now else 1)
+
+
+@app.route("/projects/<int:proj_id>/arch", methods=["POST"])
+@login_required
+def archive_project(proj_id):
+    """Archive a whole project - the box and everything in it - or bring it back."""
+    con = db()
+    row = con.execute("SELECT section_id, archived FROM projects WHERE id=?",
+                      (proj_id,)).fetchone()
+    if not row:
+        abort(404)
+    require_section(con, row["section_id"])
+    nxt = 0 if row["archived"] else 1
+    con.execute("UPDATE projects SET archived=? WHERE id=?", (nxt, proj_id))
+    con.execute("UPDATE items SET archived=? WHERE project_id=?", (nxt, proj_id))
+    commit_retry(con)
+    return redirect(url_for("archive_view") if nxt == 0 else url_for("board"))
+
+
+@app.route("/archive")
+@login_required
+def archive_view():
+    """Everything put away, still searchable, one tap from coming back."""
+    con = db()
+    where, args = sec_clause(con, "items.section_id")
+    items = con.execute(
+        "SELECT items.*, sections.title AS sec_title, COALESCE(p.title,'') AS proj_title"
+        " FROM items JOIN sections ON sections.id = items.section_id"
+        " LEFT JOIN projects p ON p.id = items.project_id"
+        " WHERE items.archived=1" + where + " ORDER BY items.id DESC", args).fetchall()
+    where, args = sec_clause(con, "projects.section_id")
+    projs = con.execute(
+        "SELECT projects.*, sections.title AS sec_title FROM projects"
+        " JOIN sections ON sections.id = projects.section_id"
+        " WHERE projects.archived=1" + where + " ORDER BY projects.id DESC",
+        args).fetchall()
+    return render_template("archive.html", items=items, projs=projs)
+
+
+@app.route("/items/<int:item_id>/checks", methods=["POST"])
+@login_required
+def add_check(item_id):
+    """A checkbox inside a task - Keep's checklists, living on the row."""
+    con = db()
+    require_item(con, item_id)
+    body = (request.form.get("body") or "").strip()[:200]
+    if not body:
+        return jsonify(error="empty"), 400
+    pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM checks WHERE item_id=?",
+                      (item_id,)).fetchone()[0]
+    cid = con.execute("INSERT INTO checks(item_id, body, pos) VALUES(?,?,?)",
+                      (item_id, body, pos)).lastrowid
+    commit_retry(con)
+    return jsonify(id=cid, body=body)
+
+
+@app.route("/checks/<int:check_id>/toggle", methods=["POST"])
+@login_required
+def toggle_check(check_id):
+    con = db()
+    row = con.execute("SELECT item_id, done FROM checks WHERE id=?", (check_id,)).fetchone()
+    if not row:
+        abort(404)
+    require_item(con, row["item_id"])
+    con.execute("UPDATE checks SET done=? WHERE id=?", (0 if row["done"] else 1, check_id))
+    commit_retry(con)
+    return jsonify(done=0 if row["done"] else 1)
+
+
+@app.route("/checks/<int:check_id>/delete", methods=["POST"])
+@login_required
+def delete_check(check_id):
+    con = db()
+    row = con.execute("SELECT item_id FROM checks WHERE id=?", (check_id,)).fetchone()
+    if not row:
+        abort(404)
+    require_item(con, row["item_id"])
+    con.execute("DELETE FROM checks WHERE id=?", (check_id,))
+    commit_retry(con)
+    return jsonify(ok=True)
+
+
 @app.route("/items/<int:item_id>/move", methods=["POST"])
 @login_required
 def move_item(item_id):
@@ -3907,6 +4039,7 @@ def reminder_tick():
       back = (now - _td(hours=2)).strftime("%Y-%m-%dT%H:%M")
       for it in con.execute(
               "SELECT * FROM items WHERE remind_at IS NOT NULL AND remind_at != ''"
+              " AND archived=0"
               " AND remind_at <= ? AND remind_at >= ? AND status != 'done'"
               " AND section_id IN (%s)" % inq, [now_s, back] + vis):
         ref = "u%d:item:%d:%s" % (uid, it["id"], it["remind_at"])

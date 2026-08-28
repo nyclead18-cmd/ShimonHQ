@@ -969,3 +969,42 @@ form.listrespond button{font:inherit; font-size:13px; border:1px solid var(--bor
 .revsheet .rev-proj{color:#1F3A5F;}
 .revsheet .si-title{color:#1E1B16;}
 @media print{ .revsheet .lane-kicker{color:#1F3A5F; border-bottom-color:#B8892E;} }
+
+/* ---------- the Keep pass: checklists, pins, photos, archive ---------- */
+.ckchip{font-size:10.5px; font-weight:700; color:var(--muted); background:var(--row);
+  border:1px solid var(--border); border-radius:999px; padding:0 8px; white-space:nowrap;}
+.checklist{margin:6px 0 2px; display:flex; flex-direction:column; gap:2px;}
+.checklist[hidden]{display:none;}
+.ckrow{display:flex; align-items:center; gap:8px; font-size:13px; color:var(--ink);}
+.ckrow .cktick{width:15px; height:15px; accent-color:var(--pill-done-tx, #3A6B3E);}
+.ckrow.ckdone span{text-decoration:line-through; color:var(--muted);}
+.ckrow .ckdel{border:0; background:none; color:var(--border); cursor:pointer;
+  font-size:11px; padding:0 4px; margin-left:auto;}
+.ckrow:hover .ckdel{color:var(--muted);}
+form.ckadd input{font:inherit; font-size:12.5px; border:none; border-bottom:1px dashed var(--border);
+  background:transparent; color:var(--ink); padding:2px 0; width:12em;}
+form.ckadd input::placeholder{color:var(--muted);}
+.grid.board li.item .checklist{display:none;}
+.grid.board li.item.expanded .checklist{display:flex;}
+.grid.board li.item.expanded .checklist[hidden]{display:none;}
+
+.pinmark{font-size:11px; margin-right:5px;}
+
+.photostrip{display:flex; gap:6px; margin-top:5px; flex-wrap:wrap;}
+.photostrip img{height:54px; max-width:110px; object-fit:cover; border-radius:8px;
+  border:1px solid var(--border); display:block;}
+
+.archbtn{border:0; background:none; color:var(--muted); cursor:pointer; font-size:13px; padding:0 4px;}
+.archbtn:hover{color:var(--ink);}
+.archsub{font-family:'Playfair Display','Frank Ruhl Libre',Georgia,serif; font-size:18px; margin:20px 0 8px;}
+.archlist{list-style:none; margin:0; padding:0;}
+.archlist li{display:flex; align-items:center; gap:10px; padding:8px 4px;
+  border-bottom:1px solid var(--border); font-size:14px;}
+.archt{flex:1 1 auto; min-width:0;}
+.archnote{color:var(--muted);}
+.archwhere{color:var(--muted); font-size:12px; white-space:nowrap;}
+.archlist button, .archform button{font:inherit; font-size:12px; font-weight:700;
+  border:1px solid var(--border); background:var(--card); color:var(--ink);
+  border-radius:999px; padding:4px 12px; cursor:pointer;}
+footer a{color:var(--muted);}
+.si-step{font-size:13px; color:var(--ink); margin-top:2px;}

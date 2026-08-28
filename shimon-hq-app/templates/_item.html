@@ -16,7 +16,7 @@
           title="{% if it.today %}On today{% else %}Put on today{% endif %}"
           aria-label="Today">{% if it.today %}&#9733;{% else %}&#9734;{% endif %}</button>
   <div class="body">
-    <div class="t" dir="auto"><span class="tt">{{ it.title }}</span>{% if it.note %} <span class="n" dir="auto">&mdash; {{ it.note }}</span>{% endif %}</div>
+    <div class="t" dir="auto">{% if it.pinned %}<span class="pinmark" title="Pinned to the top">&#128204;</span>{% endif %}<span class="tt">{{ it.title }}</span>{% if it.note %} <span class="n" dir="auto">&mdash; {{ it.note }}</span>{% endif %}</div>
     <div class="metaline">
       {% if it.due_date %}
         <span class="due{% if it.status != 'done' %}{% if it.due_date < today_iso %} over{% elif it.due_date <= soon_iso %} soon{% endif %}{% endif %}">due {{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}</span>
@@ -26,6 +26,8 @@
       {% if it.today and it.today_at %}{% set d = days_since(it.today_at) %}{% if d and d >= 1 %}
       <span class="staleday{% if d >= 5 %} hot{% endif %}">{{ d }}d on today</span>{% endif %}{% endif %}
       {% if ltags and ltags.get(it.id) %}<span class="lwith" title="On the list with">&#8646; {% for u in ltags[it.id].split(',') %}{{ (people or {}).get(u|int, '?') }}{% if not loop.last %} + {% endif %}{% endfor %}</span>{% endif %}
+      {% set icks = (checks_by_item or {}).get(it.id, []) %}
+      {% if icks %}<span class="ckchip" title="Checklist">&#9745; {{ icks|selectattr('done')|list|length }}/{{ icks|length }}</span>{% endif %}
     </div>
     {% set inotes = notes_by_item.get(it.id, []) %}
     {% if inotes %}
@@ -42,6 +44,19 @@
     </ul>
     {% endif %}
     {% set ifiles = files_by_item.get(it.id, []) %}
+    {% set imgs = [] %}{% for f in ifiles %}{% if f.filename.lower().rsplit('.', 1)[-1] in ('jpg','jpeg','png','gif','webp') %}{% if imgs.append(f) %}{% endif %}{% endif %}{% endfor %}
+    {% if imgs %}
+    <div class="photostrip">
+      {% for f in imgs %}<a href="{{ url_for('get_file', file_id=f.id) }}" target="_blank" rel="noopener"><img src="{{ url_for('get_file', file_id=f.id) }}" alt="{{ f.filename }}" loading="lazy"></a>{% endfor %}
+    </div>
+    {% endif %}
+    <div class="checklist"{% if not icks %} hidden{% endif %} data-id="{{ it.id }}">
+      {% for c in icks %}
+      <label class="ckrow{% if c.done %} ckdone{% endif %}"><input type="checkbox" class="cktick" data-ck="{{ c.id }}"{% if c.done %} checked{% endif %}> <span dir="auto">{{ c.body }}</span>
+        <button type="button" class="ckdel" data-ckdel="{{ c.id }}" title="Remove step">&#x2715;</button></label>
+      {% endfor %}
+      <form class="ckadd" data-id="{{ it.id }}"><input name="body" placeholder="+ step" dir="auto" autocomplete="off"></form>
+    </div>
     <div class="files"{% if not ifiles %} hidden{% endif %}>
       {% for f in ifiles %}
       <span class="fchip"><a href="{{ url_for('get_file', file_id=f.id) }}" target="_blank" rel="noopener">{{ f.filename }}</a>

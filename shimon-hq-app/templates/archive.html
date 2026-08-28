@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Archive · Pinta HQ{% endblock %}
+{% block body %}
+<div class="wrap">
+<header class="top">
+  <div>
+    <div class="eyebrow">Put away, not gone</div>
+    <h1>Archive</h1>
+  </div>
+  <div class="right">
+    <nav class="tabs">
+      <a class="tab" href="{{ url_for('today_view') }}">Today</a>
+      <a class="tab" href="{{ url_for('board') }}">Board</a>
+      <a class="tab" href="{{ url_for('list_view') }}">List</a>
+      <a class="tab" href="{{ url_for('people_view') }}">People</a>
+    </nav>
+    <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
+  </div>
+</header>
+
+{% if projs %}
+<h2 class="archsub">Projects</h2>
+<ul class="archlist">
+  {% for p in projs %}
+  <li><span class="archt" dir="auto">{{ p.title }}</span> <span class="archwhere">{{ p.sec_title }}</span>
+    <form method="post" action="{{ url_for('archive_project', proj_id=p.id) }}" class="archform">
+      <button type="submit">Bring back</button>
+    </form>
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+{% if items %}
+<h2 class="archsub">Tasks</h2>
+<ul class="archlist">
+  {% for it in items %}
+  <li><span class="archt" dir="auto">{{ it.title }}{% if it.note %} <span class="archnote" dir="auto">&mdash; {{ it.note }}</span>{% endif %}</span>
+    <span class="archwhere">{{ it.sec_title }}{% if it.proj_title %} &middot; {{ it.proj_title }}{% endif %}</span>
+    <button type="button" class="archback" data-unarch="{{ it.id }}">Bring back</button>
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+{% if not items and not projs %}
+<p class="meta">Nothing archived. Hold a task and choose Archive to put it away without deleting it.</p>
+{% endif %}
+</div>
+<script>
+document.addEventListener('click', function (ev) {
+  var b = ev.target.closest('[data-unarch]');
+  if (!b) { return; }
+  fetch('/items/' + b.getAttribute('data-unarch') + '/arch', {method: 'POST'})
+    .then(function (r) { if (r.ok) { b.closest('li').remove(); } });
+});
+</script>
+{% endblock %}
