@@ -919,6 +919,18 @@ document.addEventListener('change', function (ev) {
                 .then(function (r) { if (r.ok) { location.reload(); } });
             }));
           });
+        // what kind of box is this - tasks, codes, phones, or notes
+        var curKind = (proj.className.match(/pk-(\w+)/) || [0, 'tasks'])[1];
+        [['tasks', 'a task list'], ['codes', 'a codes box (doors, combos, passwords)'],
+         ['phones', 'a phone book'], ['notes', 'a notes box']].forEach(function (k) {
+          if (k[0] === curKind) { return; }
+          menu.appendChild(act('Make this ' + k[1], function () {
+            var fd = new FormData();
+            fd.append('kind', k[0]);
+            fetch('/projects/' + pid + '/kind', {method: 'POST', body: fd})
+              .then(function (r) { if (r.ok) { location.reload(); } });
+          }));
+        });
         menu.appendChild(act('Archive this project (put away)', function () {
           fetch('/projects/' + pid + '/arch', {method: 'POST'})
             .then(function (r) { if (r.ok) { location.reload(); } });
@@ -933,4 +945,61 @@ document.addEventListener('change', function (ev) {
     menu.style.top = Math.min(Math.max(8, ev.clientY), window.innerHeight - h - 8) + 'px';
     menu.style.visibility = '';
   });
+})();
+
+/* ---------- fold all / open all ---------- */
+document.addEventListener('click', function (ev) {
+  var b = ev.target.closest && ev.target.closest('[data-foldall]');
+  if (!b) { return; }
+  var fd = new FormData();
+  fd.append('mode', b.getAttribute('data-foldall'));
+  fetch('/board/foldall', {method: 'POST', body: fd})
+    .then(function (r) { if (r.ok) { location.reload(); } });
+});
+
+/* ---------- boxes with a trade: codes, phones, notes ----------
+   The rows are ordinary tasks underneath; the dressing changes. A code row
+   copies itself on a tap of the little button; a phone row dials. */
+(function () {
+  function flash(el, msg) {
+    var t = document.createElement('span');
+    t.className = 'copied-note';
+    t.textContent = msg;
+    el.appendChild(t);
+    setTimeout(function () { t.remove(); }, 1200);
+  }
+  function decorate() {
+    document.querySelectorAll('.project.pk-codes li.item, .project.pk-phones li.item')
+      .forEach(function (li) {
+        if (li.querySelector('.copybtn')) { return; }
+        var body = li.querySelector('.body');
+        if (!body) { return; }
+        var isPhone = !!li.closest('.pk-phones');
+        var n = li.querySelector('.t .n');
+        var value = (n ? n.textContent.replace(/^\s*—\s*/, '') : '').trim();
+        if (!value) {
+          var tt = li.querySelector('.t .tt');
+          value = tt ? tt.textContent.trim() : '';
+        }
+        if (!value) { return; }
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'copybtn';
+        btn.textContent = isPhone ? '☎ call' : '⧉ copy';
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          if (isPhone) {
+            var num = value.replace(/[^\d+]/g, '');
+            if (num.length >= 7) { location.href = 'tel:' + num; return; }
+          }
+          (navigator.clipboard ? navigator.clipboard.writeText(value)
+            : Promise.reject()).then(function () { flash(btn, 'copied'); },
+            function () { flash(btn, value); });
+        });
+        var t = li.querySelector('.t');
+        if (t) { t.appendChild(btn); }
+      });
+  }
+  decorate();
+  window.decorateKinds = decorate;
 })();

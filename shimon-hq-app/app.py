@@ -23,6 +23,12 @@ FILES_DIR = os.environ.get("FILES_DIR",
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-key-change-me")
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20 MB per upload
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 86400  # static is cache-busted by ?v=
+try:
+    from flask_compress import Compress
+    Compress(app)   # a 400-task board gzips to a tenth of its size on the wire
+except Exception:
+    pass
 
 _URL_RE = re.compile(r"(https?://[^\s<>\"]+)")
 
@@ -718,6 +724,8 @@ def init_db():
     prcols = [r[1] for r in con.execute("PRAGMA table_info(projects)")]
     if prcols and "archived" not in prcols:
         con.execute("ALTER TABLE projects ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+    if prcols and "kind" not in prcols:
+        con.execute("ALTER TABLE projects ADD COLUMN kind TEXT NOT NULL DEFAULT 'tasks'")
     con.executescript(
         "CREATE TABLE IF NOT EXISTS checks ("
         " id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER NOT NULL,"
@@ -3978,6 +3986,46 @@ def order_sections():
     uset_put(con, "secorder", ",".join(ids[:200]))
     commit_retry(con)
     return jsonify(ok=True)
+
+
+@app.route("/board/foldall", methods=["POST"])
+@login_required
+def fold_all():
+    """One tap folds every box and project to its title line - or opens them all."""
+    con = db()
+    mode = (request.form.get("mode") or "").strip()
+    where, args = sec_clause(con, "id", first=True)
+    secs = [str(r[0]) for r in con.execute("SELECT id FROM sections" + where, args)]
+    where, args = sec_clause(con, "section_id", first=True)
+    projs = [str(r[0]) for r in con.execute("SELECT id FROM projects" + where, args)]
+    if mode == "fold":
+        # every project folds to its title line; the buckets stay open
+        uset_put(con, "collapsed", "")
+        uset_put(con, "pcollapsed", ",".join(projs))
+    else:
+        uset_put(con, "collapsed", "")
+        uset_put(con, "pcollapsed", "")
+    _ = secs
+    commit_retry(con)
+    return jsonify(ok=True)
+
+
+@app.route("/projects/<int:proj_id>/kind", methods=["POST"])
+@login_required
+def project_kind(proj_id):
+    """A box can be a task list, a code book, a phone book, or plain notes -
+    same rows underneath, dressed for what they hold."""
+    con = db()
+    row = con.execute("SELECT section_id FROM projects WHERE id=?", (proj_id,)).fetchone()
+    if not row:
+        abort(404)
+    require_section(con, row["section_id"])
+    kind = (request.form.get("kind") or "tasks").strip()
+    if kind not in ("tasks", "codes", "phones", "notes"):
+        return jsonify(error="unknown kind"), 400
+    con.execute("UPDATE projects SET kind=? WHERE id=?", (kind, proj_id))
+    commit_retry(con)
+    return jsonify(kind=kind)
 
 
 @app.route("/sections/<int:sec_id>/fold", methods=["POST"])

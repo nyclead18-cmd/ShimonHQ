@@ -1147,3 +1147,29 @@ section.card.folded .seccols{display:none;}
 .grid.board li.item.expanded .pill{margin-top:3px;}
 .grid.board li.item.expanded .idrag{display:none;}
 .grid.board li.item.expanded .star{top:20px; left:6px;}
+
+/* ---------- boxes with a trade: codes, phones, notes ---------- */
+.pkbadge{font-size:9.5px; font-weight:800; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--pill-wait-tx); background:var(--pill-wait-bg); border-radius:6px;
+  padding:2px 7px; white-space:nowrap;}
+.project.pk-codes li.item .pill, .project.pk-codes li.item .star,
+.project.pk-phones li.item .pill, .project.pk-phones li.item .star,
+.project.pk-notes li.item .pill, .project.pk-notes li.item .star{display:none;}
+.grid.board .project.pk-codes li.item, .grid.board .project.pk-phones li.item,
+.grid.board .project.pk-notes li.item{padding-left:10px;}
+.project.pk-codes .t .n{font-family:ui-monospace,'Courier New',monospace;
+  font-weight:700; color:var(--ink); letter-spacing:.03em;}
+.project.pk-phones .t .n{font-variant-numeric:tabular-nums; font-weight:600; color:var(--ink);}
+.copybtn{font:inherit; font-size:10px; font-weight:700; margin-left:8px;
+  border:1px solid var(--border); background:var(--row); color:var(--muted);
+  border-radius:999px; padding:1px 8px; cursor:pointer; white-space:nowrap; position:relative;}
+.copybtn:hover{color:var(--ink); border-color:var(--ink);}
+.copied-note{position:absolute; top:-22px; left:50%; transform:translateX(-50%);
+  background:var(--btn-bg); color:var(--btn-tx); font-size:10px; border-radius:6px;
+  padding:2px 8px; white-space:nowrap;}
+
+/* fold all / open all */
+.fapill{font:inherit; font-size:11.5px; font-weight:700; padding:5px 12px;
+  border:1px solid var(--border); background:var(--card); color:var(--muted);
+  border-radius:999px; cursor:pointer; white-space:nowrap;}
+.fapill:hover{color:var(--ink); border-color:var(--ink);}

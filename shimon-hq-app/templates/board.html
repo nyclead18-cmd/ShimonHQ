@@ -53,6 +53,10 @@
     <button type="button" class="fpill" data-f="waiting">Waiting</button>
     <button type="button" class="fpill" data-f="done">Done</button>
   </div>
+  <div class="fpills foldall">
+    <button type="button" class="fapill" data-foldall="fold" title="Fold every project to its title line">&#9650; Fold all</button>
+    <button type="button" class="fapill" data-foldall="open" title="Open every box and project">&#9660; Open all</button>
+  </div>
 </div>
 
 <div class="grid board" style="grid-template-columns:repeat({{ tracks or 6 }}, minmax(0,1fr))">
@@ -112,11 +116,12 @@
   {% set pitems = items | selectattr('project_id', 'equalto', p.id) | list %}
   {% set pdone = pitems | selectattr('status', 'equalto', 'done') | list %}
   {% set pactive = pitems | rejectattr('status', 'equalto', 'done') | list %}
-  <div class="project{% if p.id in (pcollapsed or []) %} pfolded{% endif %}">
+  <div class="project pk-{{ p.kind or 'tasks' }}{% if p.id in (pcollapsed or []) %} pfolded{% endif %}">
     <div class="proj-head">
       <button type="button" class="foldbtn pfoldbtn" data-pfold="{{ p.id }}"
               title="Collapse or open this project">{{ '&#9656;'|safe if p.id in (pcollapsed or []) else '&#9662;'|safe }}</button>
       <h3 dir="auto">{{ p.title }}</h3>
+      {% if p.kind and p.kind != 'tasks' %}<span class="pkbadge">{{ {'codes':'&#128273; codes','phones':'&#9742; phones','notes':'&#9998; notes'}[p.kind]|safe }}</span>{% endif %}
       {% set ptag = (ptags or {}).get(p.id) %}
       {% if ptag %}<span class="lwith" title="This whole project is on the list with">&#8646; {% for u in ptag|sort %}{{ people.get(u, '?') }}{% if not loop.last %} + {% endif %}{% endfor %}</span>{% endif %}
       <span class="pcount" title="{{ pdone | length }} done of {{ pitems | length }} tasks">{{ pdone | length }}/{{ pitems | length }}</span>
