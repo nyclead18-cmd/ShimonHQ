@@ -1051,9 +1051,13 @@ footer a{color:var(--muted);}
 .seccols .project{margin-bottom:2px;}
 .seccols ul.items:empty{min-height:0;}
 section.card.folded .seccols{display:none;}
-@media (max-width:1199.9px){
+@media (max-width:839.9px){
   .grid.board{grid-template-columns:repeat(auto-fit, minmax(19rem, 1fr)) !important;}
   .grid.board section.card{grid-column:auto !important;}
+}
+/* a sideways phone or iPad gets the proportional board, a touch tighter */
+@media (min-width:840px) and (max-width:1199.9px){
+  .seccols{column-width:11.5rem; column-gap:12px;}
 }
 
 /* smaller still: the whole board, one notch down */

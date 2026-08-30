@@ -1003,3 +1003,15 @@ document.addEventListener('click', function (ev) {
   decorate();
   window.decorateKinds = decorate;
 })();
+
+/* rotating the phone re-fits whatever is open */
+window.addEventListener('resize', function () {
+  var li = document.querySelector('.grid.board li.item.expanded');
+  if (!li) { return; }
+  var w = Math.min(540, window.innerWidth * 0.94);
+  li.style.left = Math.min(Math.max(8, parseFloat(li.style.left) || 8),
+    window.innerWidth - w - 8) + 'px';
+  var h = Math.min(li.offsetHeight || 200, window.innerHeight * 0.84);
+  li.style.top = Math.min(Math.max(8, parseFloat(li.style.top) || 8),
+    window.innerHeight - h - 12) + 'px';
+});
