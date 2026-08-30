@@ -2106,7 +2106,9 @@ def _unhandled(e):
     tb = traceback.format_exc()
     print("HQ-ERROR %s %s\n%s" % (request.method, request.path, tb), flush=True)
     try:
-        con = sqlite3.connect(DB_PATH, timeout=10)
+        # short fuse: when the database is the thing that broke, the crash
+        # logger must not pile more waiting on top of it
+        con = sqlite3.connect(DB_PATH, timeout=3)
         entry = "%s · %s %s\n%s" % (datetime.now().isoformat(timespec="seconds"),
                                     request.method, request.path, tb)
         con.execute(
@@ -4377,6 +4379,9 @@ def _claim(con, ref):
     """
     cur = con.execute("INSERT OR IGNORE INTO reminders_sent(ref, sent_at) VALUES(?,?)",
                       (ref, datetime.now().isoformat(timespec="seconds")))
+    # commit at once: the claim must not hold the write lock hostage while the
+    # slow network work (push sends, drive times) happens afterwards
+    commit_retry(con)
     if not cur.rowcount:
         return False
     commit_retry(con)
@@ -4395,8 +4400,9 @@ def _mark_sent(con, ref):
 
 def reminder_tick():
     """One pass: task reminders due, meetings starting soon, the morning digest."""
-    con = sqlite3.connect(DB_PATH)
+    con = sqlite3.connect(DB_PATH, timeout=15)
     con.row_factory = sqlite3.Row
+    con.execute("PRAGMA busy_timeout = 15000")
     now = _now_local()
     now_s = now.strftime("%Y-%m-%dT%H:%M")
     today = now.strftime("%Y-%m-%d")
