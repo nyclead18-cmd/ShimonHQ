@@ -1303,6 +1303,13 @@ def today_view():
     for r in con.execute("SELECT item_id, user_id FROM list_tags"):
         ltags.setdefault(r["item_id"], []).append(r["user_id"])
     ltags = {k: ",".join(str(u) for u in sorted(v)) for k, v in ltags.items()}
+    # what the morning sweep pulled out of the inbox lands on Today too
+    try:
+        inbox_flags = con.execute(
+            "SELECT * FROM brief_items WHERE day=? AND owner_id=? AND kind='email'"
+            " ORDER BY id", (iso, me())).fetchall()
+    except sqlite3.Error:
+        inbox_flags = []
     tkeep = {r["id"] for r in rows} | {r["id"] for r in timed}
     checks_by_item = {}
     for c in con.execute("SELECT * FROM checks ORDER BY pos, id"):
@@ -1310,7 +1317,7 @@ def today_view():
             checks_by_item.setdefault(c["item_id"], []).append(c)
     return render_template("today.html", rows=rows, on_me=on_me, waiting=waiting,
                            overdue=overdue, due_now=due_now, chosen=chosen,
-                           done_today=done_today,
+                           done_today=done_today, inbox_flags=inbox_flags,
                            evs=evs, timed=timed, ltags=ltags,
                            checks_by_item=checks_by_item,
                            people={r["id"]: r["display_name"] for r in people_list(con)},

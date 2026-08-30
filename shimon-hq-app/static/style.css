@@ -1207,3 +1207,8 @@ li.item.expanded .stamps{display:block;}
 .renamer{font:inherit; font-family:'Playfair Display','Frank Ruhl Libre',Georgia,serif;
   font-size:inherit; width:100%; border:0; border-bottom:2px solid var(--gold,#C9A961);
   background:transparent; color:inherit; padding:0; outline:none;}
+
+/* inbox flags on Today */
+.inboxflag .ptitle{display:block;}
+.inboxflag .pdetail{display:block; color:var(--muted); font-size:12px; font-weight:400;}
+.tdash .caveat{padding:6px 14px 12px; color:var(--muted); font-size:12px;}

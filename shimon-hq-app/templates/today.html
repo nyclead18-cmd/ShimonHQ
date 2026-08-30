@@ -31,6 +31,7 @@
   <div class="stat"><div class="num">{{ chosen|length }}</div><div class="lbl">picked for today</div></div>
   <div class="stat"><div class="num">{{ waiting|length }}</div><div class="lbl">waiting on others</div></div>
   <div class="stat"><div class="num">{{ done_today }}</div><div class="lbl">finished today</div></div>
+  {% if inbox_flags %}<div class="stat"><div class="num">{{ inbox_flags|length }}</div><div class="lbl">from your inbox</div></div>{% endif %}
 </div>
 
 {% if not rows and not evs and not timed %}
@@ -77,6 +78,21 @@ lands here &mdash; it stays where it lives, so there is only ever one copy of it
 </section>
 {% endif %}
 
+{% if inbox_flags %}
+<section class="card" style="--sa:#B8892E">
+  <div class="sec-head"><h2><span class="dot"></span>From your inbox</h2>
+    <span class="counts">{{ inbox_flags|length }} need{{ '' if inbox_flags|length != 1 else 's' }} you</span></div>
+  <ul class="prows">
+    {% for m in inbox_flags %}
+    <li class="prow rhythm inboxflag">
+      <span class="ptitle" dir="auto">{% if m.link %}<a class="plain" href="{{ m.link }}" target="_blank" rel="noopener">{{ m.text }}</a>{% else %}{{ m.text }}{% endif %}
+        {% if m.detail %}<span class="pdetail" dir="auto">{{ m.detail }}</span>{% endif %}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="caveat">Pulled from your email by the morning sweep &mdash; the full set is on the Brief tab.</p>
+</section>
+{% endif %}
 {% if overdue %}{{ lane('Overdue', overdue, '#A33B2E', '') }}{% endif %}
 {% if due_now %}{{ lane('Due today', due_now, '#C24E2A', '') }}{% endif %}
 {{ lane('Picked for today', chosen, '#3A6B3E', 'Star a task on the board and it lands here.') }}
