@@ -1336,19 +1336,26 @@ def today_view():
                            if os.name != "nt" else _now_local().strftime("%A, %B %d"))
 
 
-_DAYSTRIP = {"at": 0.0, "data": {}}
+_DAYSTRIP = {"at": 0.0, "data": {}, "busy": False}
 
 
 def _daystrip():
     """Weather, the Hebrew date, and the day's zmanim for the Today header.
 
-    Brooklyn (11206) for both boards; everything cached half an hour and every
-    fetch is allowed to fail quietly - Today must never break on the weather."""
+    The page NEVER waits for the internet: whatever is cached is served
+    instantly, and a background thread quietly refreshes it when stale."""
+    import time as _time
+    now = _time.time()
+    if now - _DAYSTRIP["at"] >= 1800 and not _DAYSTRIP["busy"]:
+        _DAYSTRIP["busy"] = True
+        threading.Thread(target=_daystrip_refresh, daemon=True).start()
+    return _DAYSTRIP["data"]
+
+
+def _daystrip_refresh():
     import time as _time
     import urllib.request as _rq
     now = _time.time()
-    if now - _DAYSTRIP["at"] < 1800 and _DAYSTRIP["data"]:
-        return _DAYSTRIP["data"]
     iso = _now_local().date().isoformat()
     lat, lng = "40.7048", "-73.9422"
 
@@ -1409,7 +1416,9 @@ def _daystrip():
     except Exception:
         pass
     if out:
-        _DAYSTRIP["at"], _DAYSTRIP["data"] = now, out
+        _DAYSTRIP["data"] = out
+    _DAYSTRIP["at"] = now          # even a failed round waits before retrying
+    _DAYSTRIP["busy"] = False
     return out
 
 
@@ -2095,10 +2104,16 @@ def _unhandled(e):
     print("HQ-ERROR %s %s\n%s" % (request.method, request.path, tb), flush=True)
     try:
         con = sqlite3.connect(DB_PATH, timeout=10)
+        entry = "%s · %s %s\n%s" % (datetime.now().isoformat(timespec="seconds"),
+                                    request.method, request.path, tb)
         con.execute(
-            "INSERT OR REPLACE INTO settings(k, v) VALUES('last_error', ?)",
-            ("%s · %s %s\n%s" % (datetime.now().isoformat(timespec="seconds"),
-                                 request.method, request.path, tb),))
+            "INSERT OR REPLACE INTO settings(k, v) VALUES('last_error', ?)", (entry,))
+        # a rolling log of the last eight, so one crash cannot hide another
+        row = con.execute("SELECT v FROM settings WHERE k='error_log'").fetchone()
+        log = (row[0] if row else "").split("\n===\n")
+        log = [x for x in log if x.strip()][-7:] + [entry]
+        con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES('error_log', ?)",
+                    ("\n===\n".join(log),))
         con.commit()
         con.close()
     except Exception:
@@ -3111,6 +3126,18 @@ def api_token_for(con, uid=None):
         uset_put(con, "api_token", tok, uid)
         commit_retry(con)
     return tok
+
+
+@app.route("/api/oops")
+def api_oops():
+    """The rolling crash log, for whoever is debugging this from outside."""
+    if not _api_auth():
+        abort(401)
+    con = db()
+    row = con.execute("SELECT v FROM settings WHERE k='error_log'").fetchone()
+    one = con.execute("SELECT v FROM settings WHERE k='last_error'").fetchone()
+    body = (row[0] if row else "") or (one[0] if one else "") or "no errors recorded"
+    return body, 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
 @app.route("/api/titles")
