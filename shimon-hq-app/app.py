@@ -156,9 +156,12 @@ STATUSES = ("open", "waiting", "done")
 
 def db():
     if "db" not in g:
-        g.db = sqlite3.connect(DB_PATH)
+        # 15s of patience on a lock: a page that waits out a long write beats
+        # a page that dies with "database is locked"
+        g.db = sqlite3.connect(DB_PATH, timeout=15)
         g.db.row_factory = sqlite3.Row
         g.db.execute("PRAGMA foreign_keys = ON")
+        g.db.execute("PRAGMA busy_timeout = 15000")
     return g.db
 
 
@@ -4514,7 +4517,26 @@ def start_reminders():
     t.start()
 
 
-init_db()
+# Two gunicorn workers import this file at the same moment; both used to run
+# every migration at once and race each other into "database is locked" crash
+# loops right after a deploy. One file lock: the first worker migrates, the
+# second waits at the door and walks into a finished database.
+def _init_db_once():
+    lockpath = (DB_PATH + ".initlock") if os.path.dirname(DB_PATH) \
+        else os.path.join(BASE, "hq.initlock")
+    try:
+        import fcntl
+        with open(lockpath, "w") as lf:
+            fcntl.flock(lf, fcntl.LOCK_EX)
+            try:
+                init_db()
+            finally:
+                fcntl.flock(lf, fcntl.LOCK_UN)
+    except (ImportError, OSError):
+        init_db()
+
+
+_init_db_once()
 ensure_vapid()
 start_reminders()
 
