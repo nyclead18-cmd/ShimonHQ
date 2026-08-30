@@ -1188,3 +1188,13 @@ li.item.expanded .stamps{display:block;}
     top:5svh !important; width:auto !important; max-height:88svh;
     padding:16px 16px 24px 22px;}
 }
+
+/* on a phone, popover menus become a centered panel instead of an
+   off-screen flap that blocks the headers under it */
+@media (max-width:700px){
+  .sharemenu{position:fixed !important; left:50% !important; right:auto !important;
+    top:20vh !important; transform:translateX(-50%); width:min(330px, 92vw);
+    max-height:62vh; overflow:auto; z-index:95;
+    box-shadow:0 20px 60px rgba(20,17,12,.4);}
+  .foldbtn, .pfoldbtn{padding:6px 10px;}
+}
