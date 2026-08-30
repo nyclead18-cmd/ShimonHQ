@@ -696,23 +696,88 @@ document.addEventListener('click', function (ev) {
    Dropping tells the server which section, which project, and which task it
    now sits above - the server renumbers and both ends are permission-checked. */
 (function () {
-  var li = null;
+  var li = null, ghost = null, raf = 0, lastXY = null;
   function clear() {
     document.querySelectorAll('.dropline').forEach(function (x) { x.classList.remove('dropline'); });
     document.querySelectorAll('section.card.dropwait, .project.dropwait')
       .forEach(function (x) { x.classList.remove('dropwait'); });
+  }
+  // the row itself stays put as a faint slot; a lifted copy rides the finger,
+  // and the rows it passes slide out of the way - the Keep feel
+  function makeGhost(row, x, y) {
+    var r = row.getBoundingClientRect();
+    var wrap = document.createElement('div');
+    wrap.className = 'grid board ghostwrap';
+    var ul = document.createElement('ul');
+    ul.className = 'items';
+    var copy = row.cloneNode(true);
+    copy.classList.remove('dragging', 'expanded');
+    ul.appendChild(copy);
+    wrap.appendChild(ul);
+    wrap.style.width = r.width + 'px';
+    wrap.style.left = r.left + 'px';
+    wrap.style.top = r.top + 'px';
+    wrap._dx = x - r.left;
+    wrap._dy = y - r.top;
+    document.body.appendChild(wrap);
+    return wrap;
+  }
+  function flip(mutate) {
+    var lists = [];
+    if (li && li.parentNode) { lists.push(li.parentNode); }
+    var before = new Map();
+    lists.forEach(function (ul) {
+      Array.prototype.forEach.call(ul.children, function (row) {
+        var r = row.getBoundingClientRect();
+        if (r.bottom > -50 && r.top < window.innerHeight + 50) {
+          before.set(row, r.top);
+        }
+      });
+    });
+    mutate();
+    if (li && li.parentNode && lists.indexOf(li.parentNode) < 0) {
+      Array.prototype.forEach.call(li.parentNode.children, function (row) {
+        if (!before.has(row)) {
+          var r = row.getBoundingClientRect();
+          before.set(row, r.top - 0.01);   // new list: nudge so it still animates
+        }
+      });
+    }
+    before.forEach(function (oldTop, row) {
+      if (row === li) { return; }
+      var now = row.getBoundingClientRect().top;
+      var dy = oldTop - now;
+      if (Math.abs(dy) < 2) { return; }
+      row.style.transition = 'none';
+      row.style.transform = 'translateY(' + dy + 'px)';
+      void row.offsetWidth;
+      row.style.transition = 'transform .15s ease';
+      row.style.transform = '';
+      setTimeout(function () { row.style.transition = ''; }, 180);
+    });
   }
   document.addEventListener('pointerdown', function (ev) {
     var h = ev.target.closest && ev.target.closest('.idrag');
     if (!h) { return; }
     ev.preventDefault();
     li = h.closest('li.item');
+    ghost = makeGhost(li, ev.clientX, ev.clientY);
     li.classList.add('dragging');
     try { h.setPointerCapture(ev.pointerId); } catch (e) {}
   });
   document.addEventListener('pointermove', function (ev) {
     if (!li) { return; }
     ev.preventDefault();
+    lastXY = ev;
+    if (raf) { return; }
+    raf = requestAnimationFrame(function () { raf = 0; track(lastXY); });
+  }, {passive: false});
+  function track(ev) {
+    if (!li) { return; }
+    if (ghost) {
+      ghost.style.left = (ev.clientX - ghost._dx) + 'px';
+      ghost.style.top = (ev.clientY - ghost._dy) + 'px';
+    }
     clear();
     // near an edge, the page walks along so far-away boxes can be reached
     if (ev.clientY < 90) { window.scrollBy(0, -14); }
@@ -722,7 +787,10 @@ document.addEventListener('click', function (ev) {
       .filter(function (x) { return x && x !== li; })[0];
     if (row) {
       var r = row.getBoundingClientRect();
-      row.parentNode.insertBefore(li, ev.clientY < r.top + r.height / 2 ? row : row.nextSibling);
+      var ref = ev.clientY < r.top + r.height / 2 ? row : row.nextSibling;
+      if (ref !== li && ref !== li.nextSibling) {
+        flip(function () { row.parentNode.insertBefore(li, ref); });
+      }
       return;
     }
     // anywhere on a project - its header, its + task row, the blank space
@@ -731,15 +799,17 @@ document.addEventListener('click', function (ev) {
       .filter(Boolean)[0];
     if (proj) {
       var pul = proj.querySelector('ul.items');
-      if (pul && li.parentNode !== pul) { pul.appendChild(li); proj.classList.add('dropwait'); }
-      else if (pul) { proj.classList.add('dropwait'); }
+      if (pul && li.parentNode !== pul) {
+        flip(function () { pul.appendChild(li); });
+        proj.classList.add('dropwait');
+      } else if (pul) { proj.classList.add('dropwait'); }
       return;
     }
     // an empty patch of list (the loose tasks area) takes the row directly
     var bare = els.map(function (el) { return el.closest && el.closest('.grid.board ul.items'); })
       .filter(Boolean)[0];
     if (bare) {
-      if (li.parentNode !== bare) { bare.appendChild(li); }
+      if (li.parentNode !== bare) { flip(function () { bare.appendChild(li); }); }
       return;
     }
     var card = els.map(function (el) { return el.closest && el.closest('.grid.board section.card'); })
@@ -747,14 +817,26 @@ document.addEventListener('click', function (ev) {
     if (card && !card.contains(li)) {
       // an empty stretch of another box - land at the end of its loose list
       var ul = card.querySelector('ul.items.loose') || card.querySelector('ul.items');
-      if (ul) { ul.appendChild(li); card.classList.add('dropwait'); }
+      if (ul) { flip(function () { ul.appendChild(li); }); card.classList.add('dropwait'); }
     }
-  }, {passive: false});
+  }
   document.addEventListener('pointerup', function () {
     if (!li) { return; }
     var moved = li;
-    li.classList.remove('dragging');
     li = null;
+    if (raf) { cancelAnimationFrame(raf); raf = 0; }
+    // the lifted card settles into its slot
+    if (ghost) {
+      var g = ghost; ghost = null;
+      var end = moved.getBoundingClientRect();
+      g.style.transition = 'left .16s ease, top .16s ease, opacity .16s ease';
+      g.style.left = end.left + 'px';
+      g.style.top = end.top + 'px';
+      g.style.opacity = '0.4';
+      setTimeout(function () { g.remove(); moved.classList.remove('dragging'); }, 170);
+    } else {
+      moved.classList.remove('dragging');
+    }
     clear();
     var ul = moved.closest('ul.items');
     var card = moved.closest('section.card');

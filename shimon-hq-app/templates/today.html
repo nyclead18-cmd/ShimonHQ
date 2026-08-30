@@ -25,6 +25,17 @@
   </div>
 </header>
 
+{% if daystrip %}
+<div class="daystrip noprint">
+  {% if daystrip.wx %}<span class="ds dswx">{{ daystrip.wx.icon }} <b>{{ daystrip.wx.now }}&deg;</b>
+    <span class="dsm">H {{ daystrip.wx.hi }}&deg; &middot; L {{ daystrip.wx.lo }}&deg;{% if daystrip.wx.rain and daystrip.wx.rain > 25 %} &middot; &#9748; {{ daystrip.wx.rain }}%{% endif %}</span></span>{% endif %}
+  {% if daystrip.hebdate %}<span class="ds dsheb" dir="rtl">{{ daystrip.hebdate }}</span>{% endif %}
+  {% if daystrip.parsha %}<span class="ds dsheb" dir="rtl">{{ daystrip.parsha }}</span>{% endif %}
+  {% for z in daystrip.zmanim or [] %}<span class="ds dszman"><b>{{ z[0] }}</b> {{ z[1] }}</span>{% endfor %}
+  {% if daystrip.candles %}<span class="ds dszman"><b>&#128367;</b> {{ daystrip.candles }}</span>{% endif %}
+</div>
+{% endif %}
+
 <div class="stats">
   <div class="stat{% if overdue %} alarm{% endif %}"><div class="num">{{ overdue|length }}</div><div class="lbl">overdue</div></div>
   <div class="stat"><div class="num">{{ due_now|length }}</div><div class="lbl">due today</div></div>

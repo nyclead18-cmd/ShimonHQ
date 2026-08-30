@@ -141,6 +141,11 @@ def drive_seconds(origin, dest, depart_utc=None, timeout=8):
             _cache_put(ck, 0)
             return None
         secs = int(str(routes[0].get("duration", "0s")).rstrip("s") or 0)
+        # a six-hour-plus "drive" across town means the address geocoded to the
+        # wrong place entirely - better to say nothing than "17h from the office"
+        if secs > 6 * 3600:
+            _cache_put(ck, 0)
+            return None
         _cache_put(ck, secs)
         return secs or None
     except Exception:

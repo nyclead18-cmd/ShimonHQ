@@ -1212,3 +1212,27 @@ li.item.expanded .stamps{display:block;}
 .inboxflag .ptitle{display:block;}
 .inboxflag .pdetail{display:block; color:var(--muted); font-size:12px; font-weight:400;}
 .tdash .caveat{padding:6px 14px 12px; color:var(--muted); font-size:12px;}
+
+/* ---------- the day strip: weather, Hebrew date, zmanim ---------- */
+.daystrip{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:14px 0 2px;}
+.ds{background:var(--card); border:1px solid var(--border); border-radius:999px;
+  padding:5px 14px; font-size:13px; white-space:nowrap;}
+.ds b{color:var(--navy,#1F3A5F); font-weight:800;}
+.dswx b{font-size:14.5px;}
+.dsm{color:var(--muted); font-size:12px;}
+.dsheb{font-family:'Frank Ruhl Libre','Playfair Display',Georgia,serif; font-weight:600;}
+.dszman b{font-size:10.5px; letter-spacing:.05em; text-transform:uppercase; color:var(--muted);}
+
+/* inbox flags are plain rows, not schedule columns */
+li.prow.inboxflag{display:block; padding:9px 14px;}
+li.prow.inboxflag .ptitle{font-weight:600; font-size:13.5px;}
+li.prow.inboxflag .pdetail{margin-top:1px;}
+
+/* ---------- the Keep drag: a lifted card, a quiet slot ---------- */
+.ghostwrap{position:fixed; z-index:99; pointer-events:none; margin:0;}
+.ghostwrap ul.items{list-style:none; margin:0; padding:0;}
+.ghostwrap li.item{background:var(--card); border:1px solid var(--border);
+  border-radius:10px; box-shadow:0 16px 44px rgba(20,17,12,.35);
+  transform:rotate(1.2deg) scale(1.02);}
+.grid.board li.item.dragging{opacity:.32; outline:none; background:var(--row);
+  border-radius:8px;}

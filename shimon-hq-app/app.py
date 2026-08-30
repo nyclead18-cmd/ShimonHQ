@@ -1310,6 +1310,10 @@ def today_view():
             " ORDER BY id", (iso, me())).fetchall()
     except sqlite3.Error:
         inbox_flags = []
+    try:
+        daystrip = _daystrip()
+    except Exception:
+        daystrip = {}
     tkeep = {r["id"] for r in rows} | {r["id"] for r in timed}
     checks_by_item = {}
     for c in con.execute("SELECT * FROM checks ORDER BY pos, id"):
@@ -1318,6 +1322,7 @@ def today_view():
     return render_template("today.html", rows=rows, on_me=on_me, waiting=waiting,
                            overdue=overdue, due_now=due_now, chosen=chosen,
                            done_today=done_today, inbox_flags=inbox_flags,
+                           daystrip=daystrip,
                            evs=evs, timed=timed, ltags=ltags,
                            checks_by_item=checks_by_item,
                            people={r["id"]: r["display_name"] for r in people_list(con)},
@@ -1329,6 +1334,83 @@ def today_view():
                            today_iso=iso, soon_iso=iso,
                            pretty=_now_local().strftime("%A, %B %-d")
                            if os.name != "nt" else _now_local().strftime("%A, %B %d"))
+
+
+_DAYSTRIP = {"at": 0.0, "data": {}}
+
+
+def _daystrip():
+    """Weather, the Hebrew date, and the day's zmanim for the Today header.
+
+    Brooklyn (11206) for both boards; everything cached half an hour and every
+    fetch is allowed to fail quietly - Today must never break on the weather."""
+    import time as _time
+    import urllib.request as _rq
+    now = _time.time()
+    if now - _DAYSTRIP["at"] < 1800 and _DAYSTRIP["data"]:
+        return _DAYSTRIP["data"]
+    iso = _now_local().date().isoformat()
+    lat, lng = "40.7048", "-73.9422"
+
+    def get(url):
+        with _rq.urlopen(url, timeout=5) as r:
+            return json.loads(r.read().decode("utf-8"))
+
+    out = {}
+    try:
+        z = get("https://www.hebcal.com/zmanim?cfg=json&latitude=%s&longitude=%s"
+                "&tzid=America/New_York&date=%s" % (lat, lng, iso))
+        t = z.get("times", {})
+
+        def hhmm(k):
+            v = t.get(k) or ""
+            return fmt12(v[11:16]) if len(v) >= 16 else ""
+        out["zmanim"] = [x for x in [
+            ("Netz", hhmm("sunrise")),
+            ("Shema", hhmm("sofZmanShma")),
+            ("Mincha", hhmm("minchaGedola")),
+            ("Shkia", hhmm("sunset")),
+            ("Tzeis", hhmm("tzeit72min") or hhmm("tzeit85deg") or hhmm("tzeit7083deg")),
+        ] if x[1]]
+    except Exception:
+        pass
+    try:
+        h = get("https://www.hebcal.com/converter?cfg=json&date=%s&g2h=1" % iso)
+        out["hebdate"] = h.get("hebrew", "")
+    except Exception:
+        pass
+    try:
+        s = get("https://www.hebcal.com/shabbat?cfg=json&latitude=%s&longitude=%s"
+                "&tzid=America/New_York" % (lat, lng))
+        for it in s.get("items", []):
+            if it.get("category") == "parashat" and "parsha" not in out:
+                out["parsha"] = it.get("hebrew") or it.get("title", "")
+            if it.get("category") == "candles" and "candles" not in out:
+                out["candles"] = fmt12((it.get("date", ""))[11:16])
+    except Exception:
+        pass
+    try:
+        w = get("https://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s"
+                "&current=temperature_2m,weather_code"
+                "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max"
+                "&temperature_unit=fahrenheit&timezone=America%%2FNew_York&forecast_days=1"
+                % (lat, lng))
+        cur, d = w.get("current", {}), w.get("daily", {})
+        icons = {0: "☀️", 1: "\U0001F324", 2: "⛅", 3: "☁️",
+                 45: "\U0001F32B", 48: "\U0001F32B", 51: "\U0001F326", 53: "\U0001F326",
+                 55: "\U0001F326", 61: "\U0001F327", 63: "\U0001F327", 65: "\U0001F327",
+                 71: "\U0001F328", 73: "\U0001F328", 75: "❄️", 80: "\U0001F326",
+                 81: "\U0001F327", 82: "⛈", 95: "⛈", 96: "⛈", 99: "⛈"}
+        out["wx"] = {"now": round(cur.get("temperature_2m") or 0),
+                     "hi": round((d.get("temperature_2m_max") or [0])[0] or 0),
+                     "lo": round((d.get("temperature_2m_min") or [0])[0] or 0),
+                     "rain": (d.get("precipitation_probability_max") or [0])[0] or 0,
+                     "icon": icons.get(cur.get("weather_code"), "\U0001F324")}
+    except Exception:
+        pass
+    if out:
+        _DAYSTRIP["at"], _DAYSTRIP["data"] = now, out
+    return out
 
 
 def known_names(con):
