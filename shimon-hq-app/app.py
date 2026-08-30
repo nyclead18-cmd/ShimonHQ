@@ -978,9 +978,21 @@ def login():
                 "today_view" if display_mode(con, row["id"]) == "simple" else "board"))
         # one message for both cases - never reveal which usernames exist
         error = "Wrong username or password."
+    # The sign-in card is named for whoever owns the instance: HQ_LOGIN_TITLE
+    # wins outright, else the first name from HQ_NAME ("Joel Landau" signs in
+    # at "Joel's HQ"), else the house default.
+    lt = (os.environ.get("HQ_LOGIN_TITLE") or "").strip()
+    if not lt:
+        nm = (os.environ.get("HQ_NAME") or "").strip()
+        if nm:
+            first = nm.split()[0]
+            lt = ("%s' HQ" % first) if first.endswith("s") else ("%s's HQ" % first)
+        else:
+            lt = "Pinta HQ"
+    sub = os.environ.get("HQ_TAGLINE") or \
+        ("Pinta · Ohr Chaim · Personal" if lt == "Pinta HQ" else "")
     return render_template("login.html", error=error,
-                           login_sub=os.environ.get("HQ_TAGLINE",
-                                                    "Pinta · Ohr Chaim · Personal"))
+                           login_title=lt, login_sub=sub)
 
 
 @app.route("/logout")

@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Sign in · Pinta HQ{% endblock %}
+{% block title %}Sign in · {{ login_title|default('Pinta HQ') }}{% endblock %}
 {% block body %}
 <div class="login-wrap">
   <form class="login-card" method="post" autocomplete="on">
     {% if has_logo %}<img class="loginlogo" src="{{ url_for('static', filename='logo.png') }}" alt="">{% endif %}
-    <h1>Pinta HQ</h1>
-    <div class="sub">{{ login_sub }}</div>
+    <h1>{{ login_title|default('Pinta HQ') }}</h1>
+    {% if login_sub %}<div class="sub">{{ login_sub }}</div>{% endif %}
     {% if error %}<div class="error">{{ error }}</div>{% endif %}
     <input name="username" placeholder="Username" autocapitalize="none" required>
     <input name="password" type="password" placeholder="Password" required>
