@@ -3,6 +3,7 @@
 {% block body %}
 <div class="login-wrap">
   <form class="login-card" method="post" autocomplete="on">
+    {% if has_logo %}<img class="loginlogo" src="{{ url_for('static', filename='logo.png') }}" alt="">{% endif %}
     <h1>Pinta HQ</h1>
     <div class="sub">{{ login_sub }}</div>
     {% if error %}<div class="error">{{ error }}</div>{% endif %}

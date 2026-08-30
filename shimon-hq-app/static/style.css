@@ -1236,3 +1236,10 @@ li.prow.inboxflag .pdetail{margin-top:1px;}
   transform:rotate(1.2deg) scale(1.02);}
 .grid.board li.item.dragging{opacity:.32; outline:none; background:var(--row);
   border-radius:8px;}
+
+/* ---------- the owner's mark ---------- */
+.brandside{display:flex; align-items:center; gap:16px; min-width:0;}
+.hqlogo{height:52px; width:auto; flex:0 0 auto;}
+@media (prefers-color-scheme: dark){ .hqlogo, .loginlogo{filter:invert(0.92);} }
+.loginlogo{height:74px; width:auto; display:block; margin:0 auto 14px;}
+@media (max-width:700px){ .hqlogo{height:40px;} }

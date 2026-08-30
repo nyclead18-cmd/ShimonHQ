@@ -2085,6 +2085,13 @@ def inject_identity():
 
 
 @app.context_processor
+def inject_logo():
+    """A board wears its owner's mark when one is installed beside the code -
+    Joel's carries the L311; a board without a logo file simply goes without."""
+    return {"has_logo": os.path.exists(os.path.join(BASE, "static", "logo.png"))}
+
+
+@app.context_processor
 def inject_unread():
     try:
         return {"brief_unread": _unread_count(db())}

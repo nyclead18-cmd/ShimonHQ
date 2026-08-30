@@ -3,9 +3,12 @@
 {% block body %}
 <div class="wrap wide">
 <header class="top">
-  <div>
-    <div class="eyebrow">{{ pretty }}</div>
-    <h1>Today</h1>
+  <div class="brandside">
+    {% if has_logo %}<img class="hqlogo" src="{{ url_for('static', filename='logo.png') }}?v={{ css_v }}" alt="">{% endif %}
+    <div>
+      <div class="eyebrow">{{ pretty }}</div>
+      <h1>Today</h1>
+    </div>
   </div>
   <div class="right">
     <nav class="tabs">
