@@ -919,6 +919,37 @@ document.addEventListener('change', function (ev) {
                 .then(function (r) { if (r.ok) { location.reload(); } });
             }));
           });
+        // rename, right where the name is
+        menu.appendChild(act('Rename this project', function () {
+          var h3 = proj.querySelector('.proj-head h3');
+          if (!h3) { return; }
+          var inp = document.createElement('input');
+          inp.type = 'text';
+          inp.value = h3.textContent.trim();
+          inp.className = 'renamer';
+          inp.dir = 'auto';
+          h3.textContent = '';
+          h3.appendChild(inp);
+          inp.focus();
+          inp.select();
+          var done = false;
+          function save() {
+            if (done) { return; }
+            done = true;
+            var t = inp.value.trim();
+            if (!t) { location.reload(); return; }
+            var fd = new FormData();
+            fd.append('title', t);
+            fetch('/projects/' + pid + '/rename', {method: 'POST', body: fd})
+              .then(function (r) { return r.ok ? r.json() : null; })
+              .then(function (j) { h3.textContent = j ? j.title : t; });
+          }
+          inp.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); save(); }
+            if (e.key === 'Escape') { done = true; location.reload(); }
+          });
+          inp.addEventListener('blur', save);
+        }));
         // what kind of box is this - tasks, codes, phones, or notes
         var curKind = (proj.className.match(/pk-(\w+)/) || [0, 'tasks'])[1];
         [['tasks', 'a task list'], ['codes', 'a codes box (doors, combos, passwords)'],

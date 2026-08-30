@@ -1202,3 +1202,8 @@ li.item.expanded .stamps{display:block;}
     box-shadow:0 20px 60px rgba(20,17,12,.4);}
   .foldbtn, .pfoldbtn{padding:6px 10px;}
 }
+
+/* renaming happens in the title itself */
+.renamer{font:inherit; font-family:'Playfair Display','Frank Ruhl Libre',Georgia,serif;
+  font-size:inherit; width:100%; border:0; border-bottom:2px solid var(--gold,#C9A961);
+  background:transparent; color:inherit; padding:0; outline:none;}

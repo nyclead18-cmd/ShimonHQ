@@ -4026,6 +4026,22 @@ def fold_all():
     return jsonify(ok=True)
 
 
+@app.route("/projects/<int:proj_id>/rename", methods=["POST"])
+@login_required
+def rename_project(proj_id):
+    con = db()
+    row = con.execute("SELECT section_id FROM projects WHERE id=?", (proj_id,)).fetchone()
+    if not row:
+        abort(404)
+    require_section(con, row["section_id"])
+    title = (request.form.get("title") or "").strip()[:80]
+    if not title:
+        return jsonify(error="empty"), 400
+    con.execute("UPDATE projects SET title=? WHERE id=?", (title, proj_id))
+    commit_retry(con)
+    return jsonify(title=title)
+
+
 @app.route("/projects/<int:proj_id>/kind", methods=["POST"])
 @login_required
 def project_kind(proj_id):
