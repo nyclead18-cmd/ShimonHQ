@@ -1341,8 +1341,9 @@ def today_view():
         "SELECT COUNT(*) FROM items" + where3 +
         " AND status='done' AND substr(COALESCE(updated_at,''),1,10) = ?",
         args3 + [iso]).fetchone()[0]
-    evs = con.execute("SELECT * FROM events WHERE day=? AND owner_id=?"
-                      " ORDER BY COALESCE(start_time,'99:99'), id", (iso, me())).fetchall()
+    evs = dedupe_events(con.execute(
+        "SELECT * FROM events WHERE day=? AND owner_id=?"
+        " ORDER BY COALESCE(start_time,'99:99'), id", (iso, me())).fetchall())
     where2, args2 = sec_clause(con, "section_id")
     timed = con.execute(
         "SELECT * FROM items WHERE status != 'done' AND archived=0"
@@ -2081,6 +2082,10 @@ def calendar_view():
     from datetime import date, timedelta
     m = request.args.get("m", "")
     today = date.today()
+    if not m:
+        # the calendar opens on today, in full detail - the month grid is one
+        # tap away ("month view") and keeps its own links
+        return redirect(url_for("day_view", day=_now_local().strftime("%Y-%m-%d")))
     try:
         y, mo = int(m[:4]), int(m[5:7])
     except (ValueError, IndexError):
@@ -2105,8 +2110,9 @@ def calendar_view():
                 overdue.append(r)
             elif r["due_date"] <= horizon:
                 upcoming.append(r)
-    evs = con.execute("SELECT * FROM events WHERE owner_id=?"
-                      " ORDER BY day, COALESCE(start_time,'')", (me(),)).fetchall()
+    evs = dedupe_events(con.execute(
+        "SELECT * FROM events WHERE owner_id=?"
+        " ORDER BY day, COALESCE(start_time,'')", (me(),)).fetchall())
     ev_by_day = {}
     for e in evs:
         ev_by_day.setdefault(e["day"], []).append(e)
@@ -2566,6 +2572,29 @@ def maps_check():
     return jsonify(st)
 
 
+def dedupe_events(evs):
+    """Two calendars often carry the same meeting under different keys, so the
+    sync's per-key guard cannot catch it. One line per real thing: same day,
+    same start, same words = one event. A hand-kept (manual) copy outranks a
+    synced one, then whichever knows more (a location, a note)."""
+    def norm(s):
+        return " ".join((s or "").lower().split())
+    def score(x):
+        return (2 * ((x["source"] or "") == "manual")
+                + bool((x["location"] or "").strip())
+                + bool((x["note"] or "").strip()))
+    best, order = {}, []
+    for e in evs:
+        k = (e["day"], e["start_time"] or "", norm(e["subject"]))
+        cur = best.get(k)
+        if cur is None:
+            best[k] = e
+            order.append(k)
+        elif score(e) > score(cur):
+            best[k] = e
+    return [best[k] for k in order]
+
+
 # ---------- day view: open and edit a single day ----------
 
 @app.route("/day/<day>")
@@ -2577,9 +2606,9 @@ def day_view(day):
     except ValueError:
         return redirect(url_for("calendar_view"))
     con = db()
-    evs = con.execute(
+    evs = dedupe_events(con.execute(
         "SELECT * FROM events WHERE day=? AND owner_id=?"
-        " ORDER BY COALESCE(start_time,'99:99'), id", (day, me())).fetchall()
+        " ORDER BY COALESCE(start_time,'99:99'), id", (day, me())).fetchall())
     where, args = sec_clause(con, "items.section_id")
     tasks = con.execute(
         "SELECT items.*, sections.title AS sec_title FROM items"
