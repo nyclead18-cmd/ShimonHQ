@@ -586,6 +586,7 @@ document.addEventListener('click', function (ev) {
     document.querySelectorAll('li.item.expanded').forEach(function (x) {
       x.classList.remove('expanded');
       x.style.left = x.style.top = '';
+      x.style.transform = '';
     });
     var sc = document.querySelector('.expscrim');
     if (sc) { sc.remove(); }
@@ -637,6 +638,57 @@ document.addEventListener('click', function (ev) {
       li.classList.toggle('expanded');
     }
   }, false);
+})();
+
+/* ---------- a soft press moves the open card (v100) ----------
+   Grab the popped-out card by its title, meta line, stamps or any bare spot
+   and slide it wherever it is comfortable. Buttons, links and the text boxes
+   keep doing their jobs, and a tap that never moved still folds the card. */
+(function () {
+  var drag = null;
+  document.addEventListener('pointerdown', function (ev) {
+    var li = ev.target.closest && ev.target.closest('.grid.board li.item.expanded');
+    if (!li) { return; }
+    if (ev.target.closest('button, a, input, select, textarea, label, summary,'
+        + ' form, .checklist, .notes, .photostrip, .files')) { return; }
+    var m = /translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)/.exec(li.style.transform || '');
+    var r = li.getBoundingClientRect();
+    drag = {li: li, x: ev.clientX, y: ev.clientY,
+            dx: m ? parseFloat(m[1]) : 0, dy: m ? parseFloat(m[2]) : 0,
+            w: r.width, h: r.height,
+            baseL: r.left - (m ? parseFloat(m[1]) : 0),
+            baseT: r.top - (m ? parseFloat(m[2]) : 0),
+            moved: false};
+  }, true);
+  document.addEventListener('pointermove', function (ev) {
+    if (!drag) { return; }
+    var nx = drag.dx + ev.clientX - drag.x;
+    var ny = drag.dy + ev.clientY - drag.y;
+    if (!drag.moved) {
+      if (Math.abs(nx - drag.dx) + Math.abs(ny - drag.dy) < 7) { return; }
+      drag.moved = true;
+      drag.li.style.userSelect = 'none';
+    }
+    // keep a good handful of the card on screen
+    nx = Math.max(56 - drag.w - drag.baseL,
+         Math.min(nx, window.innerWidth - drag.baseL - 56));
+    ny = Math.max(8 - drag.baseT,
+         Math.min(ny, window.innerHeight - drag.baseT - 64));
+    drag.li.style.transform = 'translate(' + nx + 'px,' + ny + 'px)';
+    if (ev.cancelable) { ev.preventDefault(); }
+  }, {passive: false});
+  function endDrag() {
+    if (drag && drag.moved) {
+      drag.li.style.userSelect = '';
+      // the lift-off at the end of a slide must not also fold the card
+      var stop = function (e) { e.stopPropagation(); e.preventDefault(); };
+      document.addEventListener('click', stop, true);
+      setTimeout(function () { document.removeEventListener('click', stop, true); }, 120);
+    }
+    drag = null;
+  }
+  document.addEventListener('pointerup', endDrag);
+  document.addEventListener('pointercancel', endDrag);
 })();
 
 /* ---------- tap the dot, get the next color ---------- */

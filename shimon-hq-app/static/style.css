@@ -1259,3 +1259,9 @@ li.item{padding-right:34px;}
 .grid.board .cptag{top:20px; font-size:9px; padding:3px 5px;}
 .grid.board li.item.expanded .cptag{top:12px; right:12px; font-size:11px; padding:5px 8px;}
 @media print{ .cptag{display:none;} }
+
+/* the open card can be picked up by its title, meta line or stamps and
+   slid around - these strips hand their touches to the mover (v100) */
+.grid.board li.item.expanded .t,
+.grid.board li.item.expanded .metaline,
+.grid.board li.item.expanded .stamps{touch-action:none; cursor:grab;}
