@@ -1938,9 +1938,13 @@ def agenda_view(who):
 # ---------- the list: two people, one page ----------
 
 def _tagged_between(con, a, b):
-    """Items owned by a (their bucket) that sit on a list with b."""
+    """Items owned by a (their bucket) that sit on a list with b. `direct` marks
+    the ones tagged by hand (the initials button or the share menu) as opposed
+    to riding in with a whole tagged project - print keeps only the direct ones."""
     return con.execute(
-        "SELECT items.*, COALESCE(p.title, '') AS proj_title FROM items"
+        "SELECT items.*, COALESCE(p.title, '') AS proj_title,"
+        " (items.id IN (SELECT item_id FROM list_tags WHERE user_id=?)) AS direct"
+        " FROM items"
         " JOIN sections s ON s.id = items.section_id"
         " LEFT JOIN projects p ON p.id = items.project_id"
         " WHERE s.owner_id=? AND items.archived=0 AND items.id IN ("
@@ -1948,7 +1952,7 @@ def _tagged_between(con, a, b):
         "   UNION SELECT i2.id FROM items i2"
         "     JOIN project_tags pt ON pt.project_id = i2.project_id WHERE pt.user_id=?)"
         " ORDER BY items.status='done', items.due_date IS NULL, items.due_date,"
-        " items.pos, items.id", (a, b, b)).fetchall()
+        " items.pos, items.id", (b, a, b, b)).fetchall()
 
 
 @app.route("/list")

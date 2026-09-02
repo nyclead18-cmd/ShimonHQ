@@ -33,7 +33,7 @@
 board &mdash; open a task's edit and pick a name under &ldquo;On the list with&rdquo;,
 or use the &#8646; button on a project's header.</p>
 {% else %}
-<div class="agsheet">
+<div class="agsheet revsheet">
   <div class="sheet-top">
     <div>
       <div class="sheet-kicker">Pinta HQ &middot; shared list</div>
@@ -43,11 +43,13 @@ or use the &#8646; button on a project's header.</p>
   </div>
 
   {% for lane, rows in [('Yours', mine), (folk[other].display_name ~ "'s", theirs)] %}
-  <div class="lane-kicker">{{ lane }} &middot; {{ rows|rejectattr('status','equalto','done')|list|length }} open</div>
+  {% set opens = rows|rejectattr('status','equalto','done')|list %}
+  <div class="lane-kicker">{{ lane }} &middot;
+    <span class="cnt-screen">{{ opens|length }} open</span><span class="cnt-print">{{ opens|selectattr('direct')|list|length }} tagged</span></div>
   {% if rows %}
   <ol class="sheet-items">
     {% for it in rows if it.status != 'done' %}
-    <li id="item-{{ it.id }}">
+    <li id="item-{{ it.id }}"{% if not it.direct %} class="viaproj"{% endif %}>
       <div class="si-head">
         <span class="si-title" dir="auto">{{ it.title }}</span>
         {% if it.status == 'waiting' %}<span class="si-due">waiting{% if it.waiting_on %} on {{ it.waiting_on }}{% endif %}</span>{% endif %}

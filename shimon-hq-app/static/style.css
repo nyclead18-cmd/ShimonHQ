@@ -1272,3 +1272,33 @@ li.item{padding-right:34px;}
 .cpgroup:first-child .cpg-sec{margin-top:2px;}
 .cpg-proj{font-size:12.5px; font-weight:700; color:var(--ink); margin:8px 0 2px;}
 .cpgroup{break-inside:avoid;}
+
+/* ---------- v102: tiles are doors, the list prints navy-and-gold ---------- */
+/* a stat tile taps through to its lane */
+a.stat{text-decoration:none; color:inherit; display:block; cursor:pointer;}
+a.stat:hover{border-color:var(--ink);}
+.grid.board.tdash section.card, .tdash section.card{scroll-margin-top:76px;}
+
+/* the shared-list sheet wears the review's navy-and-gold */
+.agsheet.revsheet .sheet-top{border-bottom:2px solid #1F3A5F;}
+.agsheet.revsheet .sheet-name{color:#1F3A5F;}
+.agsheet.revsheet .sheet-kicker{color:#B8892E;}
+.agsheet.revsheet .sheet-items > li::before{border-color:#B8892E; color:#1F3A5F;}
+.agsheet.revsheet .si-sec{color:#B8892E;}
+@media (prefers-color-scheme: dark){
+  .agsheet.revsheet .sheet-name{color:#8FB0DC;}
+  .agsheet.revsheet .sheet-items > li::before{color:#EDE8DF;}
+}
+
+/* printing keeps only what was tagged by hand - the JL button or the share
+   menu - and lets whole-project riders stay on screen only */
+.cnt-print{display:none;}
+@media print{
+  .cnt-screen{display:none;}
+  .cnt-print{display:inline;}
+  ol.sheet-items > li.viaproj{display:none;}
+  .agsheet.revsheet .sheet-name{color:#1F3A5F !important;}
+  .agsheet.revsheet .sheet-kicker{color:#B8892E !important;}
+  .agsheet.revsheet .sheet-top{border-bottom-color:#1F3A5F !important;}
+  .agsheet.revsheet .sheet-items > li::before{border-color:#B8892E !important; color:#1F3A5F !important;}
+}

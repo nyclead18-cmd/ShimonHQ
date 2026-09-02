@@ -40,13 +40,13 @@
 {% endif %}
 
 <div class="stats">
-  <div class="stat{% if overdue %} alarm{% endif %}"><div class="num">{{ overdue|length }}</div><div class="lbl">overdue</div></div>
-  <div class="stat"><div class="num">{{ due_now|length }}</div><div class="lbl">due today</div></div>
-  <div class="stat"><div class="num">{{ chosen|length }}</div><div class="lbl">picked for today</div></div>
-  <div class="stat"><div class="num">{{ waiting|length }}</div><div class="lbl">waiting on others</div></div>
-  <div class="stat"><div class="num">{{ done_today }}</div><div class="lbl">finished today</div></div>
-  {% if inbox_flags %}<div class="stat"><div class="num">{{ inbox_flags|length }}</div><div class="lbl">from your inbox</div></div>{% endif %}
-  {% if cp and with_cp %}<div class="stat"><div class="num">{{ with_cp|length }}</div><div class="lbl">with {{ cp.first }}</div></div>{% endif %}
+  <a class="stat{% if overdue %} alarm{% endif %}" href="#lane-overdue"><div class="num">{{ overdue|length }}</div><div class="lbl">overdue</div></a>
+  <a class="stat" href="#lane-due"><div class="num">{{ due_now|length }}</div><div class="lbl">due today</div></a>
+  <a class="stat" href="#lane-picked"><div class="num">{{ chosen|length }}</div><div class="lbl">picked for today</div></a>
+  <a class="stat" href="#lane-waiting"><div class="num">{{ waiting|length }}</div><div class="lbl">waiting on others</div></a>
+  <a class="stat" href="{{ url_for('pulse_view') }}"><div class="num">{{ done_today }}</div><div class="lbl">finished today</div></a>
+  {% if inbox_flags %}<a class="stat" href="#lane-inbox"><div class="num">{{ inbox_flags|length }}</div><div class="lbl">from your inbox</div></a>{% endif %}
+  {% if cp and with_cp %}<a class="stat" href="#lane-cp"><div class="num">{{ with_cp|length }}</div><div class="lbl">with {{ cp.first }}</div></a>{% endif %}
 </div>
 
 {% if not rows and not evs and not timed %}
@@ -55,8 +55,8 @@ lands here &mdash; it stays where it lives, so there is only ever one copy of it
 {% endif %}
 
 {% set show_where = true %}
-{% macro lane(title, items, color, empty_note) %}
-<section class="card" style="--sa: {{ color }}">
+{% macro lane(title, items, color, empty_note, lid='') %}
+<section class="card"{% if lid %} id="{{ lid }}"{% endif %} style="--sa: {{ color }}">
   <div class="sec-head"><h2><span class="dot"></span>{{ title }}</h2>
     <span class="counts">{{ items|length }} task{{ '' if items|length == 1 else 's' }}</span></div>
   {% if items %}
@@ -94,7 +94,7 @@ lands here &mdash; it stays where it lives, so there is only ever one copy of it
 {% endif %}
 
 {% if inbox_flags %}
-<section class="card" style="--sa:#B8892E">
+<section class="card" id="lane-inbox" style="--sa:#B8892E">
   <div class="sec-head"><h2><span class="dot"></span>From your inbox</h2>
     <span class="counts">{{ inbox_flags|length }} need{{ '' if inbox_flags|length != 1 else 's' }} you</span></div>
   <ul class="prows">
@@ -109,7 +109,7 @@ lands here &mdash; it stays where it lives, so there is only ever one copy of it
 </section>
 {% endif %}
 {% if cp and with_cp %}
-<section class="card" style="--sa:#6B4A8A">
+<section class="card" id="lane-cp" style="--sa:#6B4A8A">
   <div class="sec-head"><h2><span class="dot"></span>With {{ cp.first }}</h2>
     <span class="counts">{{ with_cp|length }} task{{ '' if with_cp|length == 1 else 's' }}</span></div>
   <div class="seccols">
@@ -127,10 +127,10 @@ lands here &mdash; it stays where it lives, so there is only ever one copy of it
   </div>
 </section>
 {% endif %}
-{% if overdue %}{{ lane('Overdue', overdue, '#A33B2E', '') }}{% endif %}
-{% if due_now %}{{ lane('Due today', due_now, '#C24E2A', '') }}{% endif %}
-{{ lane('Picked for today', chosen, '#3A6B3E', 'Star a task on the board and it lands here.') }}
-{% if waiting %}{{ lane('Waiting on someone', waiting, '#8A671D', '') }}{% endif %}
+{% if overdue %}{{ lane('Overdue', overdue, '#A33B2E', '', 'lane-overdue') }}{% endif %}
+{% if due_now %}{{ lane('Due today', due_now, '#C24E2A', '', 'lane-due') }}{% endif %}
+{{ lane('Picked for today', chosen, '#3A6B3E', 'Star a task on the board and it lands here.', 'lane-picked') }}
+{% if waiting %}{{ lane('Waiting on someone', waiting, '#8A671D', '', 'lane-waiting') }}{% endif %}
 </div>
 
 <p class="meta noprint tdhint">Numbers up top are live counts &mdash; tap any row to open it,
