@@ -31,7 +31,9 @@
       {% if it.waiting_on %}<span class="w">waiting on <b dir="auto">{{ it.waiting_on }}</b></span>{% endif %}
       {% if it.today and it.today_at %}{% set d = days_since(it.today_at) %}{% if d and d >= 1 %}
       <span class="staleday{% if d >= 5 %} hot{% endif %}">{{ d }}d on today</span>{% endif %}{% endif %}
-      {% if ltags and ltags.get(it.id) %}<span class="lwith" title="On the list with">&#8646; {% for u in ltags[it.id].split(',') %}{{ (people or {}).get(u|int, '?') }}{% if not loop.last %} + {% endif %}{% endfor %}</span>{% endif %}
+      {# the lit initials button already says it is with the counterpart -
+         the arrow chip only names anyone ELSE the task is shared with #}
+      {% if ltags and ltags.get(it.id) %}{% set lnames = [] %}{% for u in ltags[it.id].split(',') if not (cp and u == cp.id_s) %}{% if lnames.append((people or {}).get(u|int, '?')) %}{% endif %}{% endfor %}{% if lnames %}<span class="lwith" title="On the list with">&#8646; {{ lnames|join(' + ') }}</span>{% endif %}{% endif %}
       {% set icks = (checks_by_item or {}).get(it.id, []) %}
       {% if icks %}<span class="ckchip" title="Checklist: done / steps">&#9745; {{ icks|selectattr('done')|list|length }}/{{ icks|length }}</span>{% endif %}
       {% if show_where %}<span class="whence" dir="auto">{{ it.proj_title or '' }}{% if it.proj_title and it.sec_title %} &middot; {% endif %}{{ it.sec_title or '' }}</span>{% endif %}

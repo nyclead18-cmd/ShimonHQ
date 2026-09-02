@@ -1302,3 +1302,8 @@ a.stat:hover{border-color:var(--ink);}
   .agsheet.revsheet .sheet-top{border-bottom-color:#1F3A5F !important;}
   .agsheet.revsheet .sheet-items > li::before{border-color:#B8892E !important; color:#1F3A5F !important;}
 }
+
+/* v104: inside the With-<him> box everything is his - repeating the lit
+   initials, the arrow chip and the bucket label on every row said the same
+   thing three more times. The rows go quiet; the board is where tags flip. */
+#lane-cp .cptag, #lane-cp .lwith, #lane-cp .whence{display:none;}

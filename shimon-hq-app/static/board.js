@@ -512,35 +512,13 @@ document.addEventListener('click', function (ev) {
                    : 'Put this on the list with ' + d.who;
     var li = b.closest('li.item');
     if (li) {
-      // keep the row's tag record straight, or the share menu would undo this
+      // keep the row's tag record straight, or the share menu would undo this;
+      // the lit button itself is the only marker - no extra chip
       var now = (li.dataset.ltags || '').split(',').filter(Boolean);
       var at = now.indexOf(String(d.uid));
       if (d.on && at === -1) { now.push(String(d.uid)); }
       if (!d.on && at !== -1) { now.splice(at, 1); }
       li.dataset.ltags = now.join(',');
-      // and the little arrow chip in the meta line
-      var chip = li.querySelector('.metaline .lwith');
-      if (d.on) {
-        if (!chip) {
-          chip = document.createElement('span');
-          chip.className = 'lwith';
-          chip.title = 'On the list with';
-          chip.innerHTML = '⇆ ';
-          var ml = li.querySelector('.metaline');
-          if (ml) { ml.appendChild(chip); }
-        }
-        if (chip.textContent.indexOf(d.who) === -1) {
-          chip.textContent = '⇆ ' + chip.textContent.replace('⇆', '')
-            .split('+').map(function (s) { return s.trim(); })
-            .filter(Boolean).concat([d.who]).join(' + ');
-        }
-      } else if (chip) {
-        var left = chip.textContent.replace('⇆', '').split('+')
-          .map(function (s) { return s.trim(); })
-          .filter(function (s) { return s && s !== d.who; });
-        if (left.length) { chip.textContent = '⇆ ' + left.join(' + '); }
-        else { chip.remove(); }
-      }
     }
     delete b.dataset.busy;
   }).catch(function () {
