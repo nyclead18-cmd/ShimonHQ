@@ -568,3 +568,36 @@
     openSheet(li, ev.clientX, ev.clientY);
   });
 })();
+
+/* ---------- the page keeps its place (v99) ----------
+   Saving a change posts a form and the fresh page opened at the top - the
+   board "flew away" from the row being worked on. Remember how far down the
+   page was on the way out, and when the same page comes straight back
+   (a save, a reload, a quick hop between tabs) walk back down to the spot.
+   A real anchor in the address (#item-12) still wins, and a stale memory -
+   older than a minute - is ignored so tomorrow starts at the top. */
+(function () {
+  var key = 'hq-scroll:' + location.pathname;
+  function save() {
+    try {
+      sessionStorage.setItem(key, (window.scrollY || window.pageYOffset || 0)
+        + ':' + Date.now());
+    } catch (e) {}
+  }
+  window.addEventListener('pagehide', save);
+  document.addEventListener('submit', save, true);
+  if (!location.hash) {
+    var v = null;
+    try { v = sessionStorage.getItem(key); } catch (e) {}
+    if (v) {
+      var bits = v.split(':');
+      var y = parseInt(bits[0], 10) || 0;
+      var at = parseInt(bits[1], 10) || 0;
+      if (y > 0 && Date.now() - at < 60000) {
+        window.scrollTo(0, y);
+        // fonts and images can still shift the page; settle once more
+        window.addEventListener('load', function () { window.scrollTo(0, y); });
+      }
+    }
+  }
+})();
