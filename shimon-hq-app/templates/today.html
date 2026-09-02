@@ -46,6 +46,7 @@
   <div class="stat"><div class="num">{{ waiting|length }}</div><div class="lbl">waiting on others</div></div>
   <div class="stat"><div class="num">{{ done_today }}</div><div class="lbl">finished today</div></div>
   {% if inbox_flags %}<div class="stat"><div class="num">{{ inbox_flags|length }}</div><div class="lbl">from your inbox</div></div>{% endif %}
+  {% if cp and with_cp %}<div class="stat"><div class="num">{{ with_cp|length }}</div><div class="lbl">with {{ cp.first }}</div></div>{% endif %}
 </div>
 
 {% if not rows and not evs and not timed %}
@@ -107,6 +108,7 @@ lands here &mdash; it stays where it lives, so there is only ever one copy of it
   <p class="caveat">Pulled from your email by the morning sweep &mdash; the full set is on the Brief tab.</p>
 </section>
 {% endif %}
+{% if cp and with_cp %}{{ lane('With ' ~ cp.first, with_cp, '#6B4A8A', '') }}{% endif %}
 {% if overdue %}{{ lane('Overdue', overdue, '#A33B2E', '') }}{% endif %}
 {% if due_now %}{{ lane('Due today', due_now, '#C24E2A', '') }}{% endif %}
 {{ lane('Picked for today', chosen, '#3A6B3E', 'Star a task on the board and it lands here.') }}

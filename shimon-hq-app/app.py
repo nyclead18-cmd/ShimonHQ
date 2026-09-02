@@ -836,6 +836,37 @@ def people_list(con):
                        " ORDER BY id").fetchall()
 
 
+def counterpart(con, uid=None):
+    """The person across the table - whoever the little initials button on a
+    task row aims at. A stored choice wins; failing that, the first other
+    account on the board: Joel on Shimon's board, Shimon on Joel's."""
+    uid = uid if uid is not None else me()
+    folk = people_list(con)
+    pick = None
+    want = uset(con, "counterpart", uid)
+    if want.isdigit():
+        for r in folk:
+            if r["id"] == int(want) and r["id"] != uid:
+                pick = r
+                break
+    if pick is None:
+        for r in folk:
+            if r["id"] != uid:
+                pick = r
+                break
+    if pick is None:
+        return None
+    name = (pick["display_name"] or pick["username"] or "").strip()
+    words = name.split()
+    if len(words) >= 2:
+        ini = (words[0][0] + words[1][0]).upper()
+    else:
+        ini = (pick["username"] or name)[:2].upper()
+    return {"id": pick["id"], "id_s": str(pick["id"]),
+            "first": (words[0] if words else name) or "them",
+            "initials": ini}
+
+
 VISIBLE_SQL = ("owner_id=? OR visibility='shared'"
                " OR id IN (SELECT section_id FROM section_shares WHERE user_id=?)")
 
@@ -1088,6 +1119,9 @@ def board():
         while sum(spans.values()) < tracks:
             spans[heavy] += 1
     return render_template("board.html", sections=sections, by_sec=by_sec,
+                           cp=counterpart(con),
+                           my_secs={s["id"] for s in sections
+                                    if s["owner_id"] == me()},
                            spans=spans, tracks=tracks,
                            cur_board=cur_board, shares=shares, collapsed=collapsed,
                            pcollapsed=pcollapsed,
@@ -1318,6 +1352,21 @@ def today_view():
     for r in con.execute("SELECT item_id, user_id FROM list_tags"):
         ltags.setdefault(r["item_id"], []).append(r["user_id"])
     ltags = {k: ",".join(str(u) for u in sorted(v)) for k, v in ltags.items()}
+    # the meeting box: everything of mine on the list with the person across
+    # the table, ready before I see him
+    cp = counterpart(con)
+    with_cp = con.execute(
+        "SELECT items.*, sections.title AS sec_title,"
+        " COALESCE(p.title,'') AS proj_title FROM items"
+        " JOIN sections ON items.section_id = sections.id"
+        " LEFT JOIN projects p ON p.id = items.project_id"
+        " WHERE items.status != 'done' AND items.archived=0"
+        " AND sections.owner_id=? AND items.id IN ("
+        "   SELECT item_id FROM list_tags WHERE user_id=?"
+        "   UNION SELECT i2.id FROM items i2 JOIN project_tags pt"
+        "     ON pt.project_id = i2.project_id WHERE pt.user_id=?)"
+        " ORDER BY items.due_date IS NULL, items.due_date, items.pos, items.id",
+        (me(), cp["id"], cp["id"])).fetchall() if cp else []
     # what the morning sweep pulled out of the inbox lands on Today too
     try:
         inbox_flags = con.execute(
@@ -1329,7 +1378,8 @@ def today_view():
         daystrip = _daystrip()
     except Exception:
         daystrip = {}
-    tkeep = {r["id"] for r in rows} | {r["id"] for r in timed}
+    tkeep = ({r["id"] for r in rows} | {r["id"] for r in timed}
+             | {r["id"] for r in with_cp})
     checks_by_item = {}
     for c in con.execute("SELECT * FROM checks ORDER BY pos, id"):
         if c["item_id"] in tkeep:
@@ -1339,6 +1389,9 @@ def today_view():
                            done_today=done_today, inbox_flags=inbox_flags,
                            daystrip=daystrip,
                            evs=evs, timed=timed, ltags=ltags,
+                           cp=cp, with_cp=with_cp,
+                           my_secs={s["id"] for s in sections
+                                    if s["owner_id"] == me()},
                            checks_by_item=checks_by_item,
                            people={r["id"]: r["display_name"] for r in people_list(con)},
                            sections=sections, projects_by_sec=projects_by_sec,
@@ -1946,6 +1999,33 @@ def set_item_tags(item_id):
                     (item_id, u))
     commit_retry(con)
     return jsonify(ok=True)
+
+
+@app.route("/items/<int:item_id>/quicktag", methods=["POST"])
+@login_required
+def quicktag_item(item_id):
+    """One tap on the little initials button: onto the list with the person
+    across the table, or off it again. The long way round - the share menu -
+    still exists for anything fancier."""
+    con = db()
+    row = con.execute(
+        "SELECT s.owner_id FROM items i JOIN sections s ON s.id=i.section_id"
+        " WHERE i.id=?", (item_id,)).fetchone()
+    if not row or row["owner_id"] != me():
+        abort(404)
+    cp = counterpart(con)
+    if not cp:
+        abort(404)
+    cur = con.execute("SELECT 1 FROM list_tags WHERE item_id=? AND user_id=?",
+                      (item_id, cp["id"])).fetchone()
+    if cur:
+        con.execute("DELETE FROM list_tags WHERE item_id=? AND user_id=?",
+                    (item_id, cp["id"]))
+    else:
+        con.execute("INSERT OR IGNORE INTO list_tags(item_id, user_id)"
+                    " VALUES(?,?)", (item_id, cp["id"]))
+    commit_retry(con)
+    return jsonify(on=not cur, who=cp["first"], uid=cp["id"])
 
 
 @app.route("/projects/<int:proj_id>/tags", methods=["POST"])
@@ -3150,6 +3230,18 @@ def api_token_for(con, uid=None):
         uset_put(con, "api_token", tok, uid)
         commit_retry(con)
     return tok
+
+
+@app.route("/api/people")
+def api_people():
+    """Who has an account here - so a tool with the board key can see whom
+    the quick-tag button will aim at."""
+    if not _api_auth():
+        abort(401)
+    con = db()
+    return jsonify(people=[{"id": r["id"], "username": r["username"],
+                            "display_name": r["display_name"]}
+                           for r in people_list(con)])
 
 
 @app.route("/api/oops")

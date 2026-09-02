@@ -1243,3 +1243,19 @@ li.prow.inboxflag .pdetail{margin-top:1px;}
 @media (prefers-color-scheme: dark){ .hqlogo, .loginlogo{filter:invert(0.92);} }
 .loginlogo{height:74px; width:auto; display:block; margin:0 auto 14px;}
 @media (max-width:700px){ .hqlogo{height:40px;} }
+
+/* ---------- the initials button (v98) ----------
+   One tap puts a task on the list with the person across the table - the
+   button reads JL on Shimon's board and lights up when the task is with him,
+   so whose plate a line sits on is visible at arm's length. It stacks under
+   the drag handle so the text keeps its width. */
+li.item{padding-right:34px;}
+.cptag{position:absolute; right:3px; top:24px; z-index:3;
+  border:1px solid var(--border); background:var(--card); color:var(--muted);
+  font-size:10px; font-weight:700; letter-spacing:.05em; line-height:1;
+  border-radius:999px; padding:4px 6px; cursor:pointer;}
+.cptag:hover{border-color:#6B4A8A; color:#6B4A8A;}
+.cptag.on{background:#6B4A8A; border-color:#6B4A8A; color:#FFFEFB;}
+.grid.board .cptag{top:20px; font-size:9px; padding:3px 5px;}
+.grid.board li.item.expanded .cptag{top:12px; right:12px; font-size:11px; padding:5px 8px;}
+@media print{ .cptag{display:none;} }

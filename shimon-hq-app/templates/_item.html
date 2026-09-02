@@ -15,6 +15,12 @@
   <button type="button" class="star{% if it.today %} on{% endif %}" data-star="{{ it.id }}"
           title="{% if it.today %}On today{% else %}Put on today{% endif %}"
           aria-label="Today">{% if it.today %}&#9733;{% else %}&#9734;{% endif %}</button>
+  {% if cp and (my_secs is not defined or it.section_id in my_secs) %}
+  {% set cpon = cp.id_s in ((ltags or {}).get(it.id, '')).split(',') %}
+  <button type="button" class="cptag{% if cpon %} on{% endif %}" data-cptag="{{ it.id }}"
+          title="{% if cpon %}On the list with {{ cp.first }} &mdash; tap to take it off{% else %}Put this on the list with {{ cp.first }}{% endif %}"
+          aria-label="On the list with {{ cp.first }}">{{ cp.initials }}</button>
+  {% endif %}
   <div class="body">
     <div class="t" dir="auto">{% if it.pinned %}<span class="pinmark" title="Pinned to the top">&#128204;</span>{% endif %}<span class="tt">{{ it.title }}</span>{% if it.note %} <span class="n" dir="auto">&mdash; {{ it.note }}</span>{% endif %}</div>
     <div class="metaline">
