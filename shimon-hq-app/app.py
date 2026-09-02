@@ -1365,8 +1365,22 @@ def today_view():
         "   SELECT item_id FROM list_tags WHERE user_id=?"
         "   UNION SELECT i2.id FROM items i2 JOIN project_tags pt"
         "     ON pt.project_id = i2.project_id WHERE pt.user_id=?)"
-        " ORDER BY items.due_date IS NULL, items.due_date, items.pos, items.id",
+        " ORDER BY sections.pos, sections.id, COALESCE(p.pos, 1000000), p.id,"
+        "          items.pos, items.id",
         (me(), cp["id"], cp["id"])).fetchall() if cp else []
+    # grouped the way the board is: bucket, then project, then its tasks
+    cp_groups, _by = [], {}
+    for r in with_cp:
+        sk = r["sec_title"] or ""
+        if sk not in _by:
+            _by[sk] = {"sec": sk, "chunks": [], "seen": {}}
+            cp_groups.append(_by[sk])
+        g = _by[sk]
+        pk = r["proj_title"] or ""
+        if pk not in g["seen"]:
+            g["seen"][pk] = {"proj": pk, "rows": []}
+            g["chunks"].append(g["seen"][pk])
+        g["seen"][pk]["rows"].append(r)
     # what the morning sweep pulled out of the inbox lands on Today too
     try:
         inbox_flags = con.execute(
@@ -1389,7 +1403,7 @@ def today_view():
                            done_today=done_today, inbox_flags=inbox_flags,
                            daystrip=daystrip,
                            evs=evs, timed=timed, ltags=ltags,
-                           cp=cp, with_cp=with_cp,
+                           cp=cp, with_cp=with_cp, cp_groups=cp_groups,
                            my_secs={s["id"] for s in sections
                                     if s["owner_id"] == me()},
                            checks_by_item=checks_by_item,

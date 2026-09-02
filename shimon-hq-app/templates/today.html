@@ -108,7 +108,25 @@ lands here &mdash; it stays where it lives, so there is only ever one copy of it
   <p class="caveat">Pulled from your email by the morning sweep &mdash; the full set is on the Brief tab.</p>
 </section>
 {% endif %}
-{% if cp and with_cp %}{{ lane('With ' ~ cp.first, with_cp, '#6B4A8A', '') }}{% endif %}
+{% if cp and with_cp %}
+<section class="card" style="--sa:#6B4A8A">
+  <div class="sec-head"><h2><span class="dot"></span>With {{ cp.first }}</h2>
+    <span class="counts">{{ with_cp|length }} task{{ '' if with_cp|length == 1 else 's' }}</span></div>
+  <div class="seccols">
+  {% for g in cp_groups %}
+  <div class="cpgroup">
+    <div class="cpg-sec">{{ g['sec'] }}</div>
+    {% for ch in g['chunks'] %}
+      {% if ch['proj'] %}<div class="cpg-proj">{{ ch['proj'] }}</div>{% endif %}
+      <ul class="items">
+        {% for it in ch['rows'] %}{% include "_item.html" %}{% endfor %}
+      </ul>
+    {% endfor %}
+  </div>
+  {% endfor %}
+  </div>
+</section>
+{% endif %}
 {% if overdue %}{{ lane('Overdue', overdue, '#A33B2E', '') }}{% endif %}
 {% if due_now %}{{ lane('Due today', due_now, '#C24E2A', '') }}{% endif %}
 {{ lane('Picked for today', chosen, '#3A6B3E', 'Star a task on the board and it lands here.') }}
