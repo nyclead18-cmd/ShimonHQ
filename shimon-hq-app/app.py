@@ -1879,6 +1879,13 @@ def joel_view():
         "SELECT * FROM items WHERE section_id IN (%s) AND archived=0"
         " ORDER BY status='done', pinned DESC, pos, id" % q,
         sec_ids).fetchall() if sec_ids else []
+    # the review is the sit-down sheet: only what was tagged by hand for the
+    # person across the table. No counterpart on the board - the whole board.
+    cp = counterpart(con)
+    if cp:
+        tagged = {r["item_id"] for r in con.execute(
+            "SELECT item_id FROM list_tags WHERE user_id=?", (cp["id"],))}
+        items = [it for it in items if it["id"] in tagged]
     keep = {it["id"] for it in items}
     latest, done_count = {}, sum(1 for it in items if it["status"] == "done")
     for n in con.execute("SELECT item_id, body, created_at FROM item_notes ORDER BY id"):
@@ -1892,7 +1899,7 @@ def joel_view():
         if c["item_id"] in keep:
             checks_by_item.setdefault(c["item_id"], []).append(c)
     return render_template("joel.html", sections=sections, by_sec=by_sec,
-                           checks_by_item=checks_by_item,
+                           cp=cp, checks_by_item=checks_by_item,
                            projects_by_sec=projects_by_sec, latest=latest,
                            done_count=done_count,
                            today=_now_local().strftime("%B %-d, %Y")
