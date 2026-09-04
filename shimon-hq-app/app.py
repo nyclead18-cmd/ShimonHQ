@@ -1118,6 +1118,12 @@ def board():
             spans[big] -= 1
         while sum(spans.values()) < tracks:
             spans[heavy] += 1
+    # weighted single-row widths only work while every box still gets a
+    # readable share. Past four boxes a light one was squeezed to a sliver of
+    # one letter per line - so with many boxes the grid falls back to equal
+    # readable columns that wrap onto more rows.
+    if len(sections) > 4:
+        spans, tracks = {}, 0
     return render_template("board.html", sections=sections, by_sec=by_sec,
                            cp=counterpart(con),
                            my_secs={s["id"] for s in sections
@@ -3550,10 +3556,19 @@ def api_quickadd():
         sec = con.execute("SELECT id FROM sections WHERE title LIKE ?" + where
                           + " ORDER BY id LIMIT 1",
                           ["%" + sec_title + "%"] + args).fetchone()
-    sid = sec["id"] if sec else con.execute(
-        "INSERT INTO sections(title, pos, owner_id, visibility, board)"
-        " VALUES(?,99,?,'private',?)",
-        (sec_title, me(), canonical_board(request.args.get("board")))).lastrowid
+    if sec:
+        sid = sec["id"]
+    else:
+        # an unknown name becomes a project inside Pinta, never a new bucket -
+        # a stray sweep name was quietly growing whole new columns on the board
+        sid = ensure_buckets(con, me())["Pinta"]
+        ppos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM projects"
+                           " WHERE section_id=?", (sid,)).fetchone()[0]
+        preset_pid = con.execute(
+            "INSERT INTO projects(section_id, title, pos, created_at)"
+            " VALUES(?,?,?,?)",
+            (sid, sec_title, ppos,
+             datetime.now().isoformat(timespec="seconds"))).lastrowid
     where, args = sec_clause(con, "section_id")
     dup = con.execute("SELECT 1 FROM items WHERE lower(title)=lower(?)" + where,
                       [title] + args).fetchone()
