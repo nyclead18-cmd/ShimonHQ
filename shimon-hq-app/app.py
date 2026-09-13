@@ -738,7 +738,10 @@ def init_db():
                       ("delegate_to", "TEXT DEFAULT ''"),
                       # v110: a task born from an email or chat keeps a link back
                       # to the original, so the source is one tap away
-                      ("source_link", "TEXT DEFAULT ''")):
+                      ("source_link", "TEXT DEFAULT ''"),
+                      # v111: when the person a task waits on writes back, the task
+                      # knows - it stops being a chase and becomes today's work
+                      ("answered_at", "TEXT")):
         if col not in cols:
             con.execute("ALTER TABLE items ADD COLUMN %s %s" % (col, decl))
     # Shimon OS rule: nothing waits without a chase date. Tasks that were already
@@ -3792,6 +3795,16 @@ def api_note():
     lk = _safe_link(request.args.get("link"))
     if lk and not (it["source_link"] if "source_link" in it.keys() else ""):
         con.execute("UPDATE items SET source_link=? WHERE id=?", (lk, it["id"]))
+    # when the writer is the one the task waits on, the wait is over: no more
+    # chasing - the task surfaces in TODAY as "answered", to be acted on
+    ans = (request.args.get("answered") or "").strip() in ("1", "yes")
+    w = (it["waiting_on"] or "").strip().lower()
+    wl = who.strip().lower()
+    if not ans and w and wl:
+        ans = wl in w or w in wl
+    if ans and (it["waiting_on"] or "").strip():
+        con.execute("UPDATE items SET answered_at=? WHERE id=?",
+                    (_now_local().isoformat(timespec="seconds"), it["id"]))
     commit_retry(con)
     # a sweep filing onto shared work should nudge the other person too - that is
     # the case where somebody genuinely wants to know without opening the app
@@ -4864,6 +4877,8 @@ def os_bucket(r, today_iso):
     waiting = bool((r["waiting_on"] or "").strip()) or r["status"] == "waiting"
     upd = (r["updated_at"] or r["created_at"] or "")[:10]
     stale = bool(upd) and upd < (date.fromisoformat(today_iso) - timedelta(days=21)).isoformat()
+    if waiting and (r["answered_at"] or ""):
+        return "TODAY"          # they wrote back - act on the answer, don't chase
     if (due and due < today_iso) or (r["follow_up_count"] or 0) >= 2 or stale:
         return "PROBLEMS"
     if dfor == "me" and not decided:
@@ -4933,7 +4948,8 @@ def api_followup():
         return "ERROR: no task matches", 404, _TXT
     at = _iso_or_blank(request.args.get("at")) or business_days_out(3)
     who = _clean(request.args.get("who") or it["waiting_on"], 60)
-    con.execute("UPDATE items SET waiting_on=?, follow_up_at=?, status=CASE WHEN status='open'"
+    con.execute("UPDATE items SET waiting_on=?, follow_up_at=?, answered_at=NULL,"
+                " status=CASE WHEN status='open'"
                 " THEN 'waiting' ELSE status END, updated_at=? WHERE id=?",
                 (who, at, datetime.now().isoformat(timespec="seconds"), it["id"]))
     commit_retry(con)
@@ -4952,7 +4968,7 @@ def api_chased():
         return "ERROR: no task matches", 404, _TXT
     nxt = business_days_out(3)
     con.execute("UPDATE items SET follow_up_count=COALESCE(follow_up_count,0)+1,"
-                " follow_up_at=?, updated_at=? WHERE id=?",
+                " follow_up_at=?, answered_at=NULL, updated_at=? WHERE id=?",
                 (nxt, datetime.now().isoformat(timespec="seconds"), it["id"]))
     con.execute("INSERT INTO item_notes(item_id, body, source, created_at) VALUES(?,?,?,?)",
                 (it["id"], "Chased %s" % (it["waiting_on"] or "-"), "os",
@@ -4960,6 +4976,32 @@ def api_chased():
     commit_retry(con)
     n = (it["follow_up_count"] or 0) + 1
     return "SAVED: chase %d, next %s%s" % (n, nxt, " - STUCK" if n >= 2 else ""), 200, _TXT
+
+
+@app.route("/api/chase_queue")
+def api_chase_queue():
+    """Every chase due now, for the sweep to draft follow-up emails from:
+    ID <tab> TITLE <tab> WHO <tab> CHASE <tab> COUNT <tab> DUE <tab> SUBJECT <tab> LINK <tab> NOTE
+    Draft (never send) a reply on the SUBJECT/LINK thread when present, else a
+    fresh email to WHO; then call /api/chased?find=ID to schedule the next one.
+    Tasks already answered are not chased."""
+    if not _api_auth():
+        abort(401)
+    con = db()
+    today = _now_local().date().isoformat()
+    out = []
+    for r in _os_rows(con):
+        if not (r["waiting_on"] or "").strip() or (r["answered_at"] or ""):
+            continue
+        fu = r["follow_up_at"] or ""
+        if not fu or fu > today:
+            continue
+        out.append("\t".join([str(r["id"]), _clean(r["title"], 80),
+                              _clean(r["waiting_on"], 40), fu,
+                              str(r["follow_up_count"] or 0), r["due_date"] or "",
+                              _clean(r["thread_key"] or "", 100),
+                              r["source_link"] or "", _clean(r["note"], 120)]))
+    return ("\n".join(out) or "NONE"), 200, _TXT
 
 
 @app.route("/api/decision")

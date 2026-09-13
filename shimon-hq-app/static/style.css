@@ -520,6 +520,10 @@ li.noterow .t{flex:1; min-width:0;}
   border:1px solid rgba(31,58,95,.35); border-radius:999px; padding:1px 8px;
   white-space:nowrap;}
 .srclink:hover{background:rgba(31,58,95,.08);}
+/* the person we were waiting on wrote back */
+.ansflag{font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+  color:#2E7D57; border:1px solid rgba(46,125,87,.45); border-radius:999px;
+  padding:1px 7px; white-space:nowrap;}
 @media (prefers-color-scheme: dark){ .srclink{color:#9FB6D4; border-color:rgba(159,182,212,.4);}
   .srclink:hover{background:rgba(159,182,212,.12);} }
 /* a send that is in flight must look busy, not dead */

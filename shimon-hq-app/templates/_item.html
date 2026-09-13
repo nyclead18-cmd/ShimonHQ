@@ -29,6 +29,7 @@
       {% endif %}
       {% if it.remind_at %}<span class="rem" title="Reminder set">&#9200; {{ it.remind_at[5:7]|int }}/{{ it.remind_at[8:10]|int }} {{ it.remind_at[11:16] }}</span>{% endif %}
       {% if it.waiting_on %}<span class="w">waiting on <b dir="auto">{{ it.waiting_on }}</b></span>{% endif %}
+      {% if it.answered_at %}<span class="ansflag" title="They wrote back - act on the answer">answered</span>{% endif %}
       {% if it.source_link %}<a class="srclink" href="{{ it.source_link }}" target="_blank" rel="noopener" title="Open the original message">{% if 'whatsapp' in it.source_link %}&#128172; chat{% else %}&#9993; email{% endif %}</a>{% endif %}
       {% if it.today and it.today_at %}{% set d = days_since(it.today_at) %}{% if d and d >= 1 %}
       <span class="staleday{% if d >= 5 %} hot{% endif %}">{{ d }}d on today</span>{% endif %}{% endif %}
