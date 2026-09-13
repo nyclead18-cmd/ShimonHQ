@@ -26,8 +26,13 @@
 </header>
 
 <style>
-  .oswrap{display:grid;grid-template-columns:repeat(7,minmax(230px,1fr));gap:12px;overflow-x:auto;padding-bottom:8px;scroll-snap-type:x proximity}
-  .oslane{scroll-snap-align:start;min-width:230px}
+  /* Each lane is viewport-tall and scrolls inside itself: up/down stays in one
+     column, and the other six never drift out of reach. */
+  .oswrap{display:grid;grid-template-columns:repeat(7,minmax(230px,1fr));gap:12px;overflow-x:auto;padding-bottom:8px;scroll-snap-type:x proximity;align-items:start}
+  .oslane{scroll-snap-align:start;min-width:230px;display:flex;flex-direction:column;
+          max-height:calc(100vh - 240px);max-height:calc(100dvh - 240px);min-height:180px}
+  .oslane .sec-head{flex:none}
+  .lanebody{flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
   .oslane .sec-head h2{font-size:1rem}
   .osrow{padding:8px 10px;border-top:1px solid rgba(0,0,0,.06);line-height:1.3}
   .osrow:first-child{border-top:0}
@@ -35,7 +40,6 @@
   .osrow .m{font-size:.82rem;opacity:.75;margin-top:2px}
   .osrow .m b{font-weight:600;opacity:1}
   .osrow.over .m .d{color:#A33B2E;font-weight:700}
-  .osmore{font-size:.82rem;opacity:.7;padding:6px 10px}
   .dec{background:rgba(107,74,138,.06);border-radius:8px;margin:6px;padding:8px 10px}
   .dec .q{font-weight:600}
   .dec .kv{font-size:.82rem;margin-top:3px}
@@ -49,7 +53,8 @@
   .osstats .num{font-size:1.4rem;font-weight:700;line-height:1}
   .osstats .lbl{font-size:.75rem;opacity:.7;text-transform:uppercase;letter-spacing:.04em}
   .osstats a.alarm{background:rgba(163,59,46,.12)}
-  @media (max-width:700px){.oswrap{grid-template-columns:repeat(7,84vw)}.oslane{min-width:84vw}}
+  @media (max-width:700px){.oswrap{grid-template-columns:repeat(7,84vw)}
+    .oslane{min-width:84vw;max-height:calc(100vh - 220px);max-height:calc(100dvh - 220px)}}
 </style>
 
 <div class="osstats">
@@ -64,11 +69,12 @@
 <section class="card oslane" id="os-{{ b }}" style="--sa: {{ colors[b] }}">
   <div class="sec-head"><h2><span class="dot"></span>{{ labels[b] }}</h2>
     <span class="counts">{{ lanes[b]|length }}</span></div>
+  <div class="lanebody">
   {% set rows = lanes[b] %}
   {% if not rows %}
     <p class="caveat">{% if b == 'PROBLEMS' %}Nothing stuck.{% elif b == 'DECIDE' %}Nothing waiting on you.{% elif b == 'JOEL' %}Nothing for Joel.{% else %}&mdash;{% endif %}</p>
   {% endif %}
-  {% for it in rows[:12] %}
+  {% for it in rows %}
     {% set dfor = decfor(it.decision_for, it.title) %}
     {% if b in ('DECIDE', 'JOEL') %}
     <div class="dec">
@@ -99,7 +105,7 @@
     </div>
     {% endif %}
   {% endfor %}
-  {% if rows|length > 12 %}<div class="osmore">+{{ rows|length - 12 }} more on the <a href="{{ url_for('board') }}">board</a></div>{% endif %}
+  </div>
 </section>
 {% endfor %}
 </div>

@@ -5,7 +5,20 @@ function jumpToLinkedItem() {
   var el = document.getElementById('item-' + m[1]);
   if (!el) return;
   var sec = el.closest('section.card');
-  if (sec) { sec.classList.add('show-done'); }   // reveal it if it is a done row
+  if (sec) {
+    sec.classList.add('show-done');              // reveal it if it is a done row
+    if (sec.classList.contains('folded')) {      // a folded box hides the task -
+      sec.classList.remove('folded');            // the jump lands on nothing
+      var fb = sec.querySelector('[data-fold]');
+      if (fb) fb.innerHTML = '▾';
+    }
+  }
+  var proj = el.closest('.project.pfolded');
+  if (proj) {
+    proj.classList.remove('pfolded');
+    var pb = proj.querySelector('[data-pfold]');
+    if (pb) pb.innerHTML = '▾';
+  }
   el.classList.remove('flash');
   var land = function () {
     el.scrollIntoView({block: 'center', behavior: 'auto'});
