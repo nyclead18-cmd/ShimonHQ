@@ -63,7 +63,7 @@
   </div>
 </div>
 
-<div class="grid board"{% if tracks %} style="grid-template-columns:repeat({{ tracks }}, minmax(0,1fr))"{% endif %}>
+<div class="grid board{% if not tracks %} masonry{% endif %}"{% if tracks %} style="grid-template-columns:repeat({{ tracks }}, minmax(0,1fr))"{% endif %}>
 {% for sec in sections %}
 {% set items = by_sec.get(sec.id, []) %}
 {% set sec_projects = projects_by_sec.get(sec.id, []) %}

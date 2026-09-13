@@ -1048,9 +1048,9 @@ def login():
             first = nm.split()[0]
             lt = ("%s' HQ" % first) if first.endswith("s") else ("%s's HQ" % first)
         else:
-            lt = "Pinta HQ"
+            lt = "Shimon's HQ"
     sub = os.environ.get("HQ_TAGLINE") or \
-        ("Pinta · Ohr Chaim · Personal" if lt == "Pinta HQ" else "")
+        ("Pinta · Ohr Chaim · Personal" if lt == "Shimon's HQ" else "")
     return render_template("login.html", error=error,
                            login_title=lt, login_sub=sub)
 
@@ -2204,7 +2204,7 @@ def inject_identity():
     """The board is named for the person looking at it, not for the person who
     happens to have built it - and dressed for them too: a tab with nothing
     behind it is furniture, so it is not shown."""
-    blank = {"board_name": "Pinta HQ", "tagline": "", "display_mode": "full",
+    blank = {"board_name": "Shimon's HQ", "tagline": "", "display_mode": "full",
              "has_brief": False, "has_cal": False, "has_pipe": False,
              "boards": [], "team": []}
     try:
@@ -3474,7 +3474,7 @@ def api_notify():
     """Send a push to Shimon's devices (used when email capture lands something new)."""
     if not _api_auth():
         abort(401)
-    title = (request.args.get("title") or "Pinta HQ").strip()
+    title = (request.args.get("title") or "Shimon's HQ").strip()
     body = (request.args.get("body") or "").strip()
     if not body:
         return "ERROR: body required", 400, {"Content-Type": "text/plain; charset=utf-8"}

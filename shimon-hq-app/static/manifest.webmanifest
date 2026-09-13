@@ -1,6 +1,6 @@
 {
-  "name": "Pinta HQ",
-  "short_name": "Pinta HQ",
+  "name": "Shimon's HQ",
+  "short_name": "Shimon HQ",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#F6F4EF",
@@ -19,7 +19,7 @@
       "purpose": "any"
     },
     {
-      "src": "/static/icon-512.png",
+      "src": "/static/icon-maskable-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"

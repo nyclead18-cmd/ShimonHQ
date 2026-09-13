@@ -953,6 +953,12 @@ form.listrespond button{font:inherit; font-size:13px; border:1px solid var(--bor
 .grid.board{display:grid; columns:auto; grid-template-columns:repeat(auto-fit, minmax(19rem, 1fr));
   gap:14px; align-items:start;}
 .grid.board section.card{margin-bottom:0;}
+/* Many boxes fall back to equal grid columns - but grid rows reserve the
+   height of the tallest box, so a short box left a void the size of its
+   tall neighbor. With more than four boxes the board packs like a
+   newspaper instead: every column tight, no voids. */
+.grid.board.masonry{display:block; columns:19rem; column-gap:14px;}
+.grid.board.masonry section.card{break-inside:avoid; margin-bottom:14px;}
 @media (min-width:1500px){ .wrap.wide{max-width:1500px; margin:0 auto;} }
 
 /* projects fold like boxes do */
@@ -1240,7 +1246,7 @@ li.prow.inboxflag .pdetail{margin-top:1px;}
 /* ---------- the owner's mark ---------- */
 .brandside{display:flex; align-items:center; gap:16px; min-width:0;}
 .hqlogo{height:52px; width:auto; flex:0 0 auto;}
-@media (prefers-color-scheme: dark){ .hqlogo, .loginlogo{filter:invert(0.92);} }
+/* the mark is navy-and-gold on both themes - no dark-mode inversion */
 .loginlogo{height:74px; width:auto; display:block; margin:0 auto 14px;}
 @media (max-width:700px){ .hqlogo{height:40px;} }
 
