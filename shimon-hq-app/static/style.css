@@ -964,12 +964,12 @@ form.listrespond button{font:inherit; font-size:13px; border:1px solid var(--bor
 .grid.board{display:grid; columns:auto; grid-template-columns:repeat(auto-fit, minmax(19rem, 1fr));
   gap:14px; align-items:start;}
 .grid.board section.card{margin-bottom:0;}
-/* Many boxes fall back to equal grid columns - but grid rows reserve the
-   height of the tallest box, so a short box left a void the size of its
-   tall neighbor. With more than four boxes the board packs like a
-   newspaper instead: every column tight, no voids. */
-.grid.board.masonry{display:block; columns:19rem; column-gap:14px;}
-.grid.board.masonry section.card{break-inside:avoid; margin-bottom:14px;}
+/* Proportional board: each box's flex-grow is its share of the work (the
+   inline flex on the card), with a readable minimum, wrapping onto more
+   rows when the screen runs out. A heavy box widens and its projects flow
+   into inner newspaper columns, so row heights level out. */
+.grid.board.flexw{display:flex; flex-wrap:wrap; gap:14px; align-items:stretch;}
+.grid.board.flexw section.card{margin-bottom:0; min-width:15rem;}
 @media (min-width:1500px){ .wrap.wide{max-width:1500px; margin:0 auto;} }
 
 /* projects fold like boxes do */
@@ -1071,6 +1071,8 @@ section.card.folded .seccols{display:none;}
 @media (max-width:839.9px){
   .grid.board{grid-template-columns:repeat(auto-fit, minmax(19rem, 1fr)) !important;}
   .grid.board section.card{grid-column:auto !important;}
+  /* a phone stacks the boxes full width, in order */
+  .grid.board.flexw section.card{flex:1 1 100% !important;}
 }
 /* a sideways phone or iPad gets the proportional board, a touch tighter */
 @media (min-width:840px) and (max-width:1199.9px){

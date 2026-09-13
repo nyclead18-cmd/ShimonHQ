@@ -1137,33 +1137,22 @@ def board():
     ptags = {}
     for r in con.execute("SELECT project_id, user_id FROM project_tags"):
         ptags.setdefault(r["project_id"], set()).add(r["user_id"])
-    # A bucket's share of the screen follows its share of the work: an empty
-    # box narrows to a sliver, a heavy one widens and flows into inner columns.
-    weights, spans, tracks = {}, {}, max(2, 2 * len(sections))
+    # Proportional board: a box is sized by how many inner newspaper columns
+    # its work needs - one column per ~10 open tasks, at most three - so width
+    # AND height follow the workload together. Rows wrap when the screen runs
+    # out; a light box stays one readable column, a heavy one spreads.
+    weights, basisw = {}, {}
     for sec in sections:
         w = sum(1 for it in by_sec.get(sec["id"], []) if it["status"] != "done")
         w += len(projects_by_sec.get(sec["id"], []))
-        weights[sec["id"]] = 1 if sec["id"] in collapsed else max(1, w)
-    if sections:
-        total = sum(weights.values()) or 1
-        spans = {sid: max(1, round(tracks * w / total)) for sid, w in weights.items()}
-        heavy = max(weights, key=lambda k: weights[k])
-        while sum(spans.values()) > tracks and any(v > 1 for v in spans.values()):
-            big = max(spans, key=lambda k: spans[k])
-            spans[big] -= 1
-        while sum(spans.values()) < tracks:
-            spans[heavy] += 1
-    # weighted single-row widths only work while every box still gets a
-    # readable share. Past four boxes a light one was squeezed to a sliver of
-    # one letter per line - so with many boxes the grid falls back to equal
-    # readable columns that wrap onto more rows.
-    if len(sections) > 4:
-        spans, tracks = {}, 0
+        cols = 1 if sec["id"] in collapsed else max(1, min(3, -(-w // 10)))
+        weights[sec["id"]] = cols
+        basisw[sec["id"]] = 15 * cols
     return render_template("board.html", sections=sections, by_sec=by_sec,
                            cp=counterpart(con),
                            my_secs={s["id"] for s in sections
                                     if s["owner_id"] == me()},
-                           spans=spans, tracks=tracks,
+                           flexw=weights, basisw=basisw,
                            cur_board=cur_board, shares=shares, collapsed=collapsed,
                            pcollapsed=pcollapsed,
                            projects_by_sec=projects_by_sec, ltags=ltags, ptags=ptags,
