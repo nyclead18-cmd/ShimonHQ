@@ -722,9 +722,38 @@ def init_db():
                       ("units", "INTEGER"), ("tenure", "TEXT"), ("stage", "TEXT"),
                       ("pinned", "INTEGER NOT NULL DEFAULT 0"),
                       ("archived", "INTEGER NOT NULL DEFAULT 0"),
-                      ("done_at", "TEXT")):
+                      ("done_at", "TEXT"),
+                      # Shimon OS, Build 1 (v107): a waiting-on item knows when to be
+                      # chased and how often it has been; a decision knows who owes
+                      # it and what it costs; a delegated task knows who took it.
+                      ("follow_up_at", "TEXT"),
+                      ("follow_up_count", "INTEGER NOT NULL DEFAULT 0"),
+                      ("decision_for", "TEXT DEFAULT ''"),
+                      ("decision_q", "TEXT DEFAULT ''"),
+                      ("decision_rec", "TEXT DEFAULT ''"),
+                      ("decision_cost", "TEXT DEFAULT ''"),
+                      ("decision_nothing", "TEXT DEFAULT ''"),
+                      ("decided_at", "TEXT"),
+                      ("decision_result", "TEXT DEFAULT ''"),
+                      ("delegate_to", "TEXT DEFAULT ''")):
         if col not in cols:
             con.execute("ALTER TABLE items ADD COLUMN %s %s" % (col, decl))
+    # Shimon OS rule: nothing waits without a chase date. Tasks that were already
+    # waiting when the rule arrived get one, spread across the coming week so the
+    # first Monday is not thirty chases at once.
+    if not con.execute("SELECT 1 FROM settings WHERE k='mig:os1'").fetchone():
+        rows = con.execute("SELECT id FROM items WHERE status != 'done'"
+                           " AND (status='waiting' OR COALESCE(waiting_on,'') != '')"
+                           " AND COALESCE(follow_up_at,'') = '' ORDER BY id").fetchall()
+        d = date.today()
+        for i, r in enumerate(rows):
+            n, dd = 1 + (i % 5), d
+            while n > 0:
+                dd = dd + timedelta(days=1)
+                if dd.weekday() < 5:
+                    n -= 1
+            con.execute("UPDATE items SET follow_up_at=? WHERE id=?", (dd.isoformat(), r[0]))
+        con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES('mig:os1','1')")
     # quiet history: every task knows when it was born and when it was finished
     if not con.execute("SELECT 1 FROM settings WHERE k='mig:stamps1'").fetchone():
         con.execute("UPDATE items SET created_at = updated_at"
@@ -3611,6 +3640,23 @@ def api_quickadd():
     chat = (request.args.get("wachat") or "").strip()
     if chat:
         con.execute("UPDATE items SET wa_chat_id=? WHERE id=?", (chat, new_id))
+    # Shimon OS: a task that waits on someone always carries a chase date - the
+    # one the sweep passed, or three business days out. Nothing waits undated.
+    fu = _iso_or_blank(request.args.get("follow_up"))
+    if not fu and (request.args.get("waiting_on") or "").strip():
+        fu = business_days_out(3)
+    if fu:
+        con.execute("UPDATE items SET follow_up_at=?, status=CASE WHEN status='open'"
+                    " AND COALESCE(waiting_on,'')!='' THEN 'waiting' ELSE status END"
+                    " WHERE id=?", (fu, new_id))
+    dfor = _decision_for(request.args.get("decision_for"), title)
+    if dfor:
+        con.execute("UPDATE items SET decision_for=?, decision_q=? WHERE id=?",
+                    (dfor, (request.args.get("q") or request.args.get("note") or "")[:200],
+                     new_id))
+    dto = (request.args.get("delegate_to") or "").strip()
+    if dto:
+        con.execute("UPDATE items SET delegate_to=? WHERE id=?", (dto[:60], new_id))
     commit_retry(con)
     return "ADDED: " + title + (" [%s]" % proj if proj else ""), 200, \
         {"Content-Type": "text/plain; charset=utf-8"}
@@ -4720,6 +4766,303 @@ def _init_db_once():
                 fcntl.flock(lf, fcntl.LOCK_UN)
     except (ImportError, OSError):
         init_db()
+
+
+# =====================================================================
+# Shimon OS - Build 1 (v107): Waiting-On + Decision Queue
+#
+# The board already knows what is open, who it waits on and when it is due.
+# What it did not know: when to CHASE, who owes a DECISION, and who a task was
+# handed to. Those three facts are what turn a task list into the seven columns
+# Shimon actually wants to look at:
+#     TODAY | WAITING ON | NEEDS ME | NEEDS JOEL | DELEGATE | PROBLEMS | UPCOMING
+# Everything below is computed from the items table - no second copy anywhere.
+# =====================================================================
+
+OS_BUCKETS = ("TODAY", "WAITING", "DECIDE", "JOEL", "DELEGATE", "PROBLEMS", "UPCOMING")
+_DECIDERS = ("me", "joel", "yechiel", "other")
+_TXT = {"Content-Type": "text/plain; charset=utf-8"}
+
+
+def _iso_or_blank(s):
+    s = (s or "").strip()
+    if len(s) == 10 and s[4] == "-" and s[7] == "-":
+        try:
+            date.fromisoformat(s)
+            return s
+        except ValueError:
+            pass
+    return ""
+
+
+def business_days_out(n, start=None):
+    """n business days after start (default today, New York). Friday counts as a
+    business day but nothing lands on Saturday or Sunday."""
+    d = start or _now_local().date()
+    left = n
+    while left > 0:
+        d = d + timedelta(days=1)
+        if d.weekday() < 5:
+            left -= 1
+    return d.isoformat()
+
+
+def _decision_for(explicit, title=""):
+    """Who owes the decision: the explicit param, else the title convention the
+    sweeps already use (DECIDE: / JOEL: / YECHIEL:), else nobody."""
+    e = (explicit or "").strip().lower()
+    if e in _DECIDERS:
+        return e
+    t = (title or "").strip().upper()
+    if t.startswith("DECIDE:"):
+        return "me"
+    if t.startswith("JOEL:"):
+        return "joel"
+    if t.startswith("YECHIEL:"):
+        return "yechiel"
+    return ""
+
+
+def os_bucket(r, today_iso):
+    """First match wins. A row lands in exactly one column.
+
+    PROBLEMS  overdue, chased twice already, or untouched 21+ days
+    DECIDE    blocked on Shimon's own call
+    JOEL      blocked on Joel / Yechiel / someone else's call
+    DELEGATE  handed to a named person and not yet moving
+    TODAY     starred, due today, or its chase date has arrived
+    WAITING   someone else owes it, chase date still ahead
+    UPCOMING  due inside two weeks
+    ''        backlog - lives on the board, not on the OS screen
+    """
+    if r["status"] == "done" or (r["archived"] or 0):
+        return ""
+    due = r["due_date"] or ""
+    fu = r["follow_up_at"] or ""
+    dfor = _decision_for(r["decision_for"], r["title"])
+    decided = bool(r["decided_at"])
+    waiting = bool((r["waiting_on"] or "").strip()) or r["status"] == "waiting"
+    upd = (r["updated_at"] or r["created_at"] or "")[:10]
+    stale = bool(upd) and upd < (date.fromisoformat(today_iso) - timedelta(days=21)).isoformat()
+    if (due and due < today_iso) or (r["follow_up_count"] or 0) >= 2 or stale:
+        return "PROBLEMS"
+    if dfor == "me" and not decided:
+        return "DECIDE"
+    if dfor and not decided:
+        return "JOEL"
+    if (r["delegate_to"] or "").strip():
+        return "DELEGATE"
+    if waiting and fu and fu <= today_iso:
+        return "TODAY"          # the chase is due - that is today's work
+    if waiting:
+        return "WAITING"
+    if (r["today"] or 0) or due == today_iso:
+        return "TODAY"
+    if due and due <= (date.fromisoformat(today_iso) + timedelta(days=14)).isoformat():
+        return "UPCOMING"
+    return ""
+
+
+def _os_rows(con, uid=None):
+    where, args = sec_clause(con, "items.section_id", uid)
+    return con.execute(
+        "SELECT items.*, sections.title AS sec_title,"
+        " COALESCE(p.title,'') AS proj_title FROM items"
+        " JOIN sections ON items.section_id = sections.id"
+        " LEFT JOIN projects p ON p.id = items.project_id"
+        " WHERE items.status != 'done' AND items.archived=0" + where +
+        " ORDER BY items.due_date IS NULL, items.due_date, items.follow_up_at IS NULL,"
+        "          items.follow_up_at, items.id", args).fetchall()
+
+
+def _clean(s, n=70):
+    return re.sub(r"[\t\r\n]+", " ", (s or "")).strip()[:n]
+
+
+@app.route("/api/triage")
+def api_triage():
+    """One line per task the OS screen would show:
+    BUCKET <tab> ID <tab> TITLE <tab> WAITING_ON <tab> FOLLOW_UP_AT <tab> DUE <tab> DECISION_FOR
+    Read once per sweep; this is the chief-of-staff cut."""
+    if not _api_auth():
+        abort(401)
+    con = db()
+    today = _now_local().date().isoformat()
+    out = []
+    for r in _os_rows(con):
+        b = os_bucket(r, today)
+        if not b:
+            continue
+        out.append("\t".join([b, str(r["id"]), _clean(r["title"], 80),
+                              _clean(r["waiting_on"] or r["delegate_to"], 40),
+                              r["follow_up_at"] or "", r["due_date"] or "",
+                              _decision_for(r["decision_for"], r["title"])]))
+    order = {b: i for i, b in enumerate(OS_BUCKETS)}
+    out.sort(key=lambda ln: order.get(ln.split("\t")[0], 99))
+    return ("\n".join(out) or "EMPTY"), 200, _TXT
+
+
+@app.route("/api/followup")
+def api_followup():
+    """Set who a task waits on and when to chase: find, at=YYYY-MM-DD (default +3 business days), who."""
+    if not _api_auth():
+        abort(401)
+    con = db()
+    it = _find_item(con, request.args.get("find"))
+    if not it:
+        return "ERROR: no task matches", 404, _TXT
+    at = _iso_or_blank(request.args.get("at")) or business_days_out(3)
+    who = _clean(request.args.get("who") or it["waiting_on"], 60)
+    con.execute("UPDATE items SET waiting_on=?, follow_up_at=?, status=CASE WHEN status='open'"
+                " THEN 'waiting' ELSE status END, updated_at=? WHERE id=?",
+                (who, at, datetime.now().isoformat(timespec="seconds"), it["id"]))
+    commit_retry(con)
+    return "SAVED: %s waits on %s, chase %s" % (it["title"], who or "-", at), 200, _TXT
+
+
+@app.route("/api/chased")
+def api_chased():
+    """Record one chase: count goes up, next chase lands three business days out.
+    Two chases and the task shows in PROBLEMS by itself."""
+    if not _api_auth():
+        abort(401)
+    con = db()
+    it = _find_item(con, request.args.get("find"))
+    if not it:
+        return "ERROR: no task matches", 404, _TXT
+    nxt = business_days_out(3)
+    con.execute("UPDATE items SET follow_up_count=COALESCE(follow_up_count,0)+1,"
+                " follow_up_at=?, updated_at=? WHERE id=?",
+                (nxt, datetime.now().isoformat(timespec="seconds"), it["id"]))
+    con.execute("INSERT INTO item_notes(item_id, body, source, created_at) VALUES(?,?,?,?)",
+                (it["id"], "Chased %s" % (it["waiting_on"] or "-"), "os",
+                 datetime.now().isoformat(timespec="seconds")))
+    commit_retry(con)
+    n = (it["follow_up_count"] or 0) + 1
+    return "SAVED: chase %d, next %s%s" % (n, nxt, " - STUCK" if n >= 2 else ""), 200, _TXT
+
+
+@app.route("/api/decision")
+def api_decision():
+    """Mark a task as blocked on a decision: find, for=me|joel|yechiel|other, q, rec, cost, nothing."""
+    if not _api_auth():
+        abort(401)
+    con = db()
+    it = _find_item(con, request.args.get("find"))
+    if not it:
+        return "ERROR: no task matches", 404, _TXT
+    dfor = _decision_for(request.args.get("for"), it["title"])
+    if not dfor:
+        return "ERROR: for must be me, joel, yechiel or other", 400, _TXT
+    con.execute("UPDATE items SET decision_for=?, decision_q=?, decision_rec=?, decision_cost=?,"
+                " decision_nothing=?, decided_at=NULL, decision_result='', updated_at=?"
+                " WHERE id=?",
+                (dfor, _clean(request.args.get("q"), 200), _clean(request.args.get("rec"), 200),
+                 _clean(request.args.get("cost"), 60), _clean(request.args.get("nothing"), 200),
+                 datetime.now().isoformat(timespec="seconds"), it["id"]))
+    commit_retry(con)
+    return "SAVED: decision for %s on %s" % (dfor, it["title"]), 200, _TXT
+
+
+def _decide(con, it, result, who="OS"):
+    con.execute("UPDATE items SET decided_at=?, decision_result=?, updated_at=? WHERE id=?",
+                (datetime.now().isoformat(timespec="seconds"), _clean(result, 200),
+                 datetime.now().isoformat(timespec="seconds"), it["id"]))
+    con.execute("INSERT INTO item_notes(item_id, body, source, created_at) VALUES(?,?,?,?)",
+                (it["id"], "Decided (%s): %s" % (who, _clean(result, 200) or "approved"),
+                 "os", datetime.now().isoformat(timespec="seconds")))
+
+
+@app.route("/api/decided")
+def api_decided():
+    """Close a decision: find, result. The answer is filed as a note; the task carries on as work."""
+    if not _api_auth():
+        abort(401)
+    con = db()
+    it = _find_item(con, request.args.get("find"))
+    if not it:
+        return "ERROR: no task matches", 404, _TXT
+    _decide(con, it, request.args.get("result") or "approved")
+    commit_retry(con)
+    return "SAVED: decided %s" % it["title"], 200, _TXT
+
+
+@app.route("/items/<int:item_id>/decide", methods=["POST"])
+@login_required
+def item_decide(item_id):
+    """The two buttons on a decision card: Approve, or Other with a line of text."""
+    con = db()
+    it = _find_item(con, str(item_id))
+    if not it:
+        abort(404)
+    _decide(con, it, request.form.get("result") or "approved",
+            who=session.get("name") or "you")
+    commit_retry(con)
+    return redirect(request.form.get("back") or url_for("os_view"))
+
+
+@app.route("/api/delegate")
+def api_delegate():
+    """Hand a task to someone: find, to. It shows in DELEGATE until it moves."""
+    if not _api_auth():
+        abort(401)
+    con = db()
+    it = _find_item(con, request.args.get("find"))
+    if not it:
+        return "ERROR: no task matches", 404, _TXT
+    to = _clean(request.args.get("to"), 60)
+    con.execute("UPDATE items SET delegate_to=?, updated_at=? WHERE id=?",
+                (to, datetime.now().isoformat(timespec="seconds"), it["id"]))
+    commit_retry(con)
+    return "SAVED: %s -> %s" % (it["title"], to or "(cleared)"), 200, _TXT
+
+
+@app.route("/api/decisions")
+def api_decisions():
+    """Open decisions for the Sunday sheet: for=joel|yechiel|me|other|all.
+    FOR <tab> ID <tab> TITLE <tab> QUESTION <tab> RECOMMENDATION <tab> COST <tab> DUE <tab> IF_NOTHING"""
+    if not _api_auth():
+        abort(401)
+    con = db()
+    want = (request.args.get("for") or "all").strip().lower()
+    out = []
+    for r in _os_rows(con):
+        dfor = _decision_for(r["decision_for"], r["title"])
+        if not dfor or r["decided_at"]:
+            continue
+        if want != "all" and dfor != want:
+            continue
+        title = re.sub(r"^(DECIDE|JOEL|YECHIEL):\s*", "", r["title"], flags=re.I)
+        out.append("\t".join([dfor, str(r["id"]), _clean(title, 80),
+                              _clean(r["decision_q"] or r["note"], 200),
+                              _clean(r["decision_rec"], 200), _clean(r["decision_cost"], 60),
+                              r["due_date"] or "", _clean(r["decision_nothing"], 200)]))
+    return ("\n".join(out) or "NONE"), 200, _TXT
+
+
+@app.route("/os")
+@login_required
+def os_view():
+    """The seven columns. Everything else on the board still exists - this is the
+    view that decides what deserves attention, in the order it deserves it."""
+    con = db()
+    today = _now_local().date().isoformat()
+    lanes = {b: [] for b in OS_BUCKETS}
+    for r in _os_rows(con):
+        b = os_bucket(r, today)
+        if b:
+            lanes[b].append(r)
+    labels = {"TODAY": "Today", "WAITING": "Waiting on", "DECIDE": "Needs me",
+              "JOEL": "Needs Joel", "DELEGATE": "Delegate", "PROBLEMS": "Problems",
+              "UPCOMING": "Upcoming"}
+    colors = {"TODAY": "#1F3A5F", "WAITING": "#8A671D", "DECIDE": "#6B4A8A",
+              "JOEL": "#B8892E", "DELEGATE": "#3A6B3E", "PROBLEMS": "#A33B2E",
+              "UPCOMING": "#5B6770"}
+    return render_template("os.html", lanes=lanes, order=OS_BUCKETS, labels=labels,
+                           colors=colors, today_iso=today,
+                           soon_iso=(date.fromisoformat(today) + timedelta(days=3)).isoformat(),
+                           pretty=_now_local().strftime("%A, %B %-d"),
+                           decfor=_decision_for)
 
 
 _init_db_once()
