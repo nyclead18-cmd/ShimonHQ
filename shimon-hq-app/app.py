@@ -735,7 +735,10 @@ def init_db():
                       ("decision_nothing", "TEXT DEFAULT ''"),
                       ("decided_at", "TEXT"),
                       ("decision_result", "TEXT DEFAULT ''"),
-                      ("delegate_to", "TEXT DEFAULT ''")):
+                      ("delegate_to", "TEXT DEFAULT ''"),
+                      # v110: a task born from an email or chat keeps a link back
+                      # to the original, so the source is one tap away
+                      ("source_link", "TEXT DEFAULT ''")):
         if col not in cols:
             con.execute("ALTER TABLE items ADD COLUMN %s %s" % (col, decl))
     # Shimon OS rule: nothing waits without a chase date. Tasks that were already
@@ -3640,6 +3643,9 @@ def api_quickadd():
     chat = (request.args.get("wachat") or "").strip()
     if chat:
         con.execute("UPDATE items SET wa_chat_id=? WHERE id=?", (chat, new_id))
+    lk = _safe_link(request.args.get("link"))
+    if lk:
+        con.execute("UPDATE items SET source_link=? WHERE id=?", (lk, new_id))
     # Shimon OS: a task that waits on someone always carries a chase date - the
     # one the sweep passed, or three business days out. Nothing waits undated.
     fu = _iso_or_blank(request.args.get("follow_up"))
@@ -3736,8 +3742,12 @@ def api_link():
     it = _find_item(con, request.args.get("find") or request.args.get("id"))
     if not it:
         return "ERROR: no such task", 404, {"Content-Type": "text/plain; charset=utf-8"}
+    lk = _safe_link(request.args.get("link"))
+    if lk:
+        con.execute("UPDATE items SET source_link=? WHERE id=?", (lk, it["id"]))
     key = thread_key(request.args.get("subject"))
     if not key:
+        commit_retry(con)
         return "SKIPPED (subject too generic): " + it["title"], 200, \
             {"Content-Type": "text/plain; charset=utf-8"}
     con.execute("UPDATE items SET thread_key=? WHERE id=?", (key, it["id"]))
@@ -3778,6 +3788,10 @@ def api_note():
     chat = (request.args.get("wachat") or "").strip()
     if chat and not it["wa_chat_id"]:
         con.execute("UPDATE items SET wa_chat_id=? WHERE id=?", (chat, it["id"]))
+    # the first filed message becomes the task's way back to the source
+    lk = _safe_link(request.args.get("link"))
+    if lk and not (it["source_link"] if "source_link" in it.keys() else ""):
+        con.execute("UPDATE items SET source_link=? WHERE id=?", (lk, it["id"]))
     commit_retry(con)
     # a sweep filing onto shared work should nudge the other person too - that is
     # the case where somebody genuinely wants to know without opening the app
@@ -4782,6 +4796,12 @@ def _init_db_once():
 OS_BUCKETS = ("TODAY", "WAITING", "DECIDE", "JOEL", "DELEGATE", "PROBLEMS", "UPCOMING")
 _DECIDERS = ("me", "joel", "yechiel", "other")
 _TXT = {"Content-Type": "text/plain; charset=utf-8"}
+
+
+def _safe_link(s):
+    """Only a plain http(s) URL may ride on a task as its source link."""
+    s = (s or "").strip()
+    return s[:500] if s.startswith(("https://", "http://")) else ""
 
 
 def _iso_or_blank(s):

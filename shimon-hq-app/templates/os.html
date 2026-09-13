@@ -84,7 +84,7 @@
       {% if it.decision_cost %}<div class="kv"><b>Cost</b> {{ it.decision_cost }}</div>{% endif %}
       {% if it.due_date %}<div class="kv"><b>Deadline</b> {{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}</div>{% endif %}
       {% if it.decision_nothing %}<div class="kv"><b>If nothing</b> {{ it.decision_nothing }}</div>{% endif %}
-      <div class="kv"><b>Decider</b> {{ {'me':'Shimon','joel':'Joel','yechiel':'Yechiel','other':'Other'}.get(dfor, dfor) }}{% if it.proj_title %} &middot; {{ it.proj_title }}{% endif %}</div>
+      <div class="kv"><b>Decider</b> {{ {'me':'Shimon','joel':'Joel','yechiel':'Yechiel','other':'Other'}.get(dfor, dfor) }}{% if it.proj_title %} &middot; {{ it.proj_title }}{% endif %}{% if it.source_link %} &middot; <a class="srclink" href="{{ it.source_link }}" target="_blank" rel="noopener">{% if 'whatsapp' in it.source_link %}&#128172; chat{% else %}&#9993; email{% endif %}</a>{% endif %}</div>
       <form method="post" action="{{ url_for('item_decide', item_id=it.id) }}">
         <input type="hidden" name="back" value="{{ url_for('os_view') }}">
         <button type="submit" name="result" value="approved">Approve</button>
@@ -101,6 +101,7 @@
         {% if it.follow_up_at and b in ('WAITING','TODAY','PROBLEMS') %} &middot; chase <span class="d">{{ it.follow_up_at[5:7]|int }}/{{ it.follow_up_at[8:10]|int }}</span>{% if it.follow_up_count %} (x{{ it.follow_up_count }}){% endif %}{% endif %}
         {% if it.due_date %} &middot; due <span class="d">{{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}</span>{% endif %}
         {% if it.proj_title %} &middot; {{ it.proj_title }}{% elif it.sec_title %} &middot; {{ it.sec_title }}{% endif %}
+        {% if it.source_link %} &middot; <a class="srclink" href="{{ it.source_link }}" target="_blank" rel="noopener" title="Open the original message">{% if 'whatsapp' in it.source_link %}&#128172; chat{% else %}&#9993; email{% endif %}</a>{% endif %}
       </div>
     </div>
     {% endif %}

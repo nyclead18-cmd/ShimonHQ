@@ -515,6 +515,13 @@ li.noterow .t{flex:1; min-width:0;}
   ul.notes li > .t{line-height:1.45;}
 }
 .srcchip.wa{color:#2E7D57; border-color:#2E7D57;}
+/* the way back to the source email or chat a task came from */
+.srclink{font-size:11px; font-weight:600; color:#1F3A5F; text-decoration:none;
+  border:1px solid rgba(31,58,95,.35); border-radius:999px; padding:1px 8px;
+  white-space:nowrap;}
+.srclink:hover{background:rgba(31,58,95,.08);}
+@media (prefers-color-scheme: dark){ .srclink{color:#9FB6D4; border-color:rgba(159,182,212,.4);}
+  .srclink:hover{background:rgba(159,182,212,.12);} }
 /* a send that is in flight must look busy, not dead */
 .respond button[disabled]{opacity:.4; cursor:default;}
 
