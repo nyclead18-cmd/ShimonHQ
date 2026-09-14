@@ -51,7 +51,7 @@ or use the &#8646; button on a project's header.</p>
     {% for it in rows if it.status != 'done' %}
     <li id="item-{{ it.id }}"{% if not it.direct %} class="viaproj"{% endif %}>
       <div class="si-head">
-        <span class="si-title" dir="auto">{{ it.title }}</span>
+        <span class="si-title" dir="auto"><a class="plain" href="{{ url_for('task_view', item_id=it.id) }}">{{ it.title }}</a></span>
         {% if it.status == 'waiting' %}<span class="si-due">waiting{% if it.waiting_on %} on {{ it.waiting_on }}{% endif %}</span>{% endif %}
         {% if it.due_date %}<span class="si-due">due {{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}</span>{% endif %}
         {% if it.proj_title %}<span class="si-sec">{{ it.proj_title }}</span>{% endif %}

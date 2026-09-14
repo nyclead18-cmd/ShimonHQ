@@ -86,7 +86,7 @@ lands here &mdash; it stays where it lives, so there is only ever one copy of it
     {% for it in timed %}
     <li class="prow rhythm">
       <span class="pwho">&#9200; {{ it.remind_at[11:16]|fmt12 }}</span>
-      <span class="ptitle"><a class="plain" href="{{ url_for('board', _anchor='item-%d' % it.id) }}">{{ it.title }}</a></span>
+      <span class="ptitle"><a class="plain" href="{{ url_for('task_view', item_id=it.id) }}">{{ it.title }}</a></span>
       <span class="psec">reminder</span>
     </li>
     {% endfor %}

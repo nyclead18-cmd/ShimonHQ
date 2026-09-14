@@ -45,7 +45,7 @@
     {% for it in pitems %}
     <li>
       <div class="si-head">
-        <span class="si-title" dir="auto">{{ it.title }}</span>
+        <span class="si-title" dir="auto"><a class="plain" href="{{ url_for('task_view', item_id=it.id) }}">{{ it.title }}</a></span>
         {% if it.status == 'waiting' %}<span class="si-due">waiting{% if it.waiting_on %} on {{ it.waiting_on }}{% endif %}</span>{% endif %}
         {% if it.due_date and (it.due_date|string)|length >= 10 %}<span class="si-due">due {{ (it.due_date|string)[5:7]|int }}/{{ (it.due_date|string)[8:10]|int }}</span>{% endif %}
       </div>
@@ -66,7 +66,7 @@
     {% for it in loose %}
     <li>
       <div class="si-head">
-        <span class="si-title" dir="auto">{{ it.title }}</span>
+        <span class="si-title" dir="auto"><a class="plain" href="{{ url_for('task_view', item_id=it.id) }}">{{ it.title }}</a></span>
         {% if it.status == 'waiting' %}<span class="si-due">waiting{% if it.waiting_on %} on {{ it.waiting_on }}{% endif %}</span>{% endif %}
         {% if it.due_date and (it.due_date|string)|length >= 10 %}<span class="si-due">due {{ (it.due_date|string)[5:7]|int }}/{{ (it.due_date|string)[8:10]|int }}</span>{% endif %}
       </div>
