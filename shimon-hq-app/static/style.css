@@ -515,6 +515,10 @@ li.noterow .t{flex:1; min-width:0;}
   ul.notes li > .t{line-height:1.45;}
 }
 .srcchip.wa{color:#2E7D57; border-color:#2E7D57;}
+/* gold mark: this task has a briefing waiting on its page */
+.bchip{font-size:10px; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+  color:#8A671D; text-decoration:none; white-space:nowrap;}
+.bchip:hover{text-decoration:underline;}
 /* every task row can open its full page */
 .openfull{font-size:11px; opacity:.55; color:inherit; text-decoration:none; white-space:nowrap;}
 .openfull:hover{opacity:1; text-decoration:underline;}

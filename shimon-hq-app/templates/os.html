@@ -43,6 +43,7 @@
   .osrow .m{font-size:.82rem;opacity:.75;margin-top:2px;display:block}
   .osrow .m b{font-weight:600;opacity:1}
   .osrow.over .m .d{color:#A33B2E;font-weight:700}
+  .bchip{color:#B8892E;font-size:.8em;text-decoration:none}
   /* a row opens in place - the task never leaves the column */
   .osd{padding:2px 10px 10px;font-size:.84rem}
   .prep{background:rgba(184,137,46,.09);border-left:3px solid #B8892E;border-radius:0 8px 8px 0;
@@ -119,7 +120,7 @@
     {% else %}
     <details class="osrow{% if it.due_date and it.due_date < today_iso %} over{% endif %}">
       <summary>
-        <span class="t">{{ it.title }}</span>
+        <span class="t">{{ it.title }}{% if it.dossier %} <span class="bchip" title="Full briefing ready">&#128203;</span>{% elif it.brief %} <span class="bchip" title="Prep ready">&#9670;</span>{% endif %}</span>
         <span class="m">
         {% if b == 'DELEGATE' %}<b>&rarr; {{ it.delegate_to }}</b>
         {% elif it.waiting_on %}<b>{{ it.waiting_on }}</b>{% endif %}
