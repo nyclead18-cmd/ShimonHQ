@@ -5265,6 +5265,25 @@ def api_meeting_prep():
     return "PREPPED: sit-down %s (%d chars)" % (w, len(text)), 200, _TXT
 
 
+@app.route("/api/agenda")
+def api_agenda():
+    """Every task parked on a sit-down agenda, for the prep run:
+    SLUG <tab> ID <tab> TITLE <tab> WAITING_ON <tab> NEXT_DATE. who=<slug> filters."""
+    if not _api_auth():
+        abort(401)
+    con = db()
+    want = (request.args.get("who") or "").strip().lower()
+    out = []
+    for r in _os_rows(con):
+        s = (r["meeting_slug"] or "").strip().lower()
+        if not s or (want and s != want):
+            continue
+        out.append("\t".join([s, str(r["id"]), _clean(r["title"], 80),
+                              _clean(r["waiting_on"], 40),
+                              uset(con, "meet:" + s + ":next") or "-"]))
+    return ("\n".join(out) or "NONE"), 200, _TXT
+
+
 @app.route("/api/meetings")
 def api_meetings():
     """Every sit-down with anything on it, for the sweeps and the morning brief:
