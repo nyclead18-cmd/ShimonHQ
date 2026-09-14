@@ -741,7 +741,10 @@ def init_db():
                       ("source_link", "TEXT DEFAULT ''"),
                       # v111: when the person a task waits on writes back, the task
                       # knows - it stops being a chase and becomes today's work
-                      ("answered_at", "TEXT")):
+                      ("answered_at", "TEXT"),
+                      # v116: a task parked for a sit-down carries the meeting's
+                      # slug - it stops being chased and rides the agenda instead
+                      ("meeting_slug", "TEXT DEFAULT ''")):
         if col not in cols:
             con.execute("ALTER TABLE items ADD COLUMN %s %s" % (col, decl))
     # Shimon OS rule: nothing waits without a chase date. Tasks that were already
@@ -4985,6 +4988,8 @@ def api_chase_queue():
     for r in _os_rows(con):
         if not (r["waiting_on"] or "").strip() or (r["answered_at"] or ""):
             continue
+        if (r["meeting_slug"] or "").strip():
+            continue        # riding a sit-down agenda - covered in person, not chased
         fu = r["follow_up_at"] or ""
         if not fu or fu > today:
             continue
@@ -5053,6 +5058,48 @@ def item_decide(item_id):
             who=session.get("name") or "you")
     commit_retry(con)
     return redirect(request.form.get("back") or url_for("os_view"))
+
+
+@app.route("/api/park")
+def api_park():
+    """Park a task on a sit-down agenda from a sweep: find, who, at=YYYY-MM-DD
+    (optional - sets/updates the meeting date too)."""
+    if not _api_auth():
+        abort(401)
+    con = db()
+    it = _find_item(con, request.args.get("find"))
+    if not it:
+        return "ERROR: no task matches", 404, _TXT
+    w = (request.args.get("who") or "").strip().lower()[:40]
+    if not w:
+        return "ERROR: who required", 400, _TXT
+    at = _iso_or_blank(request.args.get("at"))
+    if at:
+        uset_put(con, "meet:" + w + ":next", at)
+    at = at or uset(con, "meet:" + w + ":next") or ""
+    con.execute("UPDATE items SET meeting_slug=?, answered_at=NULL,"
+                " follow_up_at=COALESCE(NULLIF(?,''), follow_up_at), updated_at=?"
+                " WHERE id=?",
+                (w, at, datetime.now().isoformat(timespec="seconds"), it["id"]))
+    commit_retry(con)
+    return "PARKED: %s -> sit-down %s%s" % (it["title"], w, " " + at if at else ""), 200, _TXT
+
+
+@app.route("/api/meetings")
+def api_meetings():
+    """Every sit-down with anything on it, for the sweeps and the morning brief:
+    SLUG <tab> NEXT_DATE <tab> AGENDA_COUNT"""
+    if not _api_auth():
+        abort(401)
+    con = db()
+    counts = {}
+    for r in _os_rows(con):
+        s = (r["meeting_slug"] or "").strip().lower()
+        if s:
+            counts[s] = counts.get(s, 0) + 1
+    out = ["%s\t%s\t%d" % (s, uset(con, "meet:" + s + ":next") or "-", n)
+           for s, n in sorted(counts.items())]
+    return ("\n".join(out) or "NONE"), 200, _TXT
 
 
 def _back_to(default="os_view"):
@@ -5195,24 +5242,79 @@ def meeting_view(who):
         abort(404)
     dfor = _MEET_DECIDER.get(w, "")
     last = uset(con, "meet:" + w) or ""
-    decisions, waiting = [], []
+    nxt = uset(con, "meet:" + w + ":next") or ""
+    agenda, decisions, waiting = [], [], []
     for r in _os_rows(con):
         d = _decision_for(r["decision_for"], r["title"])
-        blob = ((r["waiting_on"] or "") + " " + (r["delegate_to"] or "")).lower()
-        if dfor and d == dfor and not r["decided_at"]:
+        # a meeting can be a person or a project - the slug matches either
+        blob = " ".join((r["waiting_on"] or "", r["delegate_to"] or "",
+                         r["proj_title"] or "", r["sec_title"] or "")).lower()
+        if (r["meeting_slug"] or "").strip().lower() == w:
+            agenda.append(r)
+        elif dfor and d == dfor and not r["decided_at"]:
             decisions.append(r)
         elif w in blob:
             waiting.append(r)
-    ids = {r["id"] for r in decisions} | {r["id"] for r in waiting}
+    ids = {r["id"] for r in agenda} | {r["id"] for r in decisions} | {r["id"] for r in waiting}
     latest = {}
     for n in con.execute("SELECT item_id, body, created_at FROM item_notes ORDER BY id"):
         if n["item_id"] in ids:
             latest[n["item_id"]] = n
     return render_template("meeting.html", who=w, label=w.title(), decisions=decisions,
-                           waiting=waiting, latest=latest, last=last,
-                           today_iso=_now_local().date().isoformat(),
+                           waiting=waiting, agenda=agenda, latest=latest, last=last,
+                           nxt=nxt, today_iso=_now_local().date().isoformat(),
                            pretty=_now_local().strftime("%A, %B %-d"),
                            decfor=_decision_for)
+
+
+@app.route("/meeting/<who>/next", methods=["POST"])
+@login_required
+def meeting_next(who):
+    """Set the next sit-down date. Everything already parked for this meeting
+    moves its follow-up to that day - covered in person beats chased by email."""
+    con = db()
+    w = (who or "").strip().lower()[:40]
+    at = _iso_or_blank(request.form.get("at"))
+    uset_put(con, "meet:" + w + ":next", at)
+    if at:
+        con.execute("UPDATE items SET follow_up_at=? WHERE lower(meeting_slug)=?"
+                    " AND status != 'done'", (at, w))
+    commit_retry(con)
+    return redirect(url_for("meeting_view", who=w))
+
+
+@app.route("/items/<int:item_id>/park", methods=["POST"])
+@login_required
+def item_park(item_id):
+    """Park a task for a sit-down: it leaves the chase loop and rides that
+    meeting's agenda, follow-up moved to the meeting date when one is set."""
+    con = db()
+    require_item(con, item_id)
+    w = (request.form.get("who") or "").strip().lower()[:40]
+    if not w:
+        return _back_to()
+    at = uset(con, "meet:" + w + ":next") or ""
+    con.execute("UPDATE items SET meeting_slug=?, answered_at=NULL,"
+                " follow_up_at=COALESCE(NULLIF(?,''), follow_up_at), updated_at=?"
+                " WHERE id=?",
+                (w, at, datetime.now().isoformat(timespec="seconds"), item_id))
+    commit_retry(con)
+    return _back_to()
+
+
+@app.route("/items/<int:item_id>/unpark", methods=["POST"])
+@login_required
+def item_unpark(item_id):
+    """Take a task off a meeting agenda; it goes back to normal chasing tomorrow."""
+    con = db()
+    require_item(con, item_id)
+    con.execute("UPDATE items SET meeting_slug='', follow_up_at=CASE WHEN"
+                " COALESCE(waiting_on,'') != '' THEN ? ELSE follow_up_at END,"
+                " updated_at=? WHERE id=?",
+                (business_days_out(1), datetime.now().isoformat(timespec="seconds"),
+                 item_id))
+    commit_retry(con)
+    return _back_to()
 
 
 @app.route("/meeting/<who>/debrief", methods=["POST"])
@@ -5248,6 +5350,13 @@ def meeting_debrief(who):
         if d:
             con.execute("UPDATE items SET decision_for=? WHERE id=?",
                         (d, con.execute("SELECT last_insert_rowid()").fetchone()[0]))
+    # the meeting is over: whatever was parked and not finished goes back to
+    # normal chasing tomorrow, and the date clears for the next sit-down
+    con.execute("UPDATE items SET meeting_slug='', follow_up_at=CASE WHEN"
+                " COALESCE(waiting_on,'') != '' THEN ? ELSE follow_up_at END"
+                " WHERE lower(meeting_slug)=? AND status != 'done'",
+                (business_days_out(1), w))
+    uset_put(con, "meet:" + w + ":next", "")
     uset_put(con, "meet:" + w, now)
     commit_retry(con)
     return redirect(url_for("meeting_view", who=w))

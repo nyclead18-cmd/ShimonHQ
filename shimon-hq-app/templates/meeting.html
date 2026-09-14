@@ -34,6 +34,13 @@
   .dec input[type=text]{flex:1; min-width:140px; padding:6px 9px; border:1px solid rgba(0,0,0,.15); border-radius:6px;}
   .dec button{padding:6px 12px; border-radius:6px; border:0; background:#1F3A5F; color:#fff; cursor:pointer;}
   .dec button.alt{background:#8A671D;}
+  .nextrow{display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:14px 0 4px;
+    background:var(--card); border:1px solid var(--border); border-radius:10px; padding:10px 14px;}
+  .nextrow input[type=date]{padding:5px 8px; border:1px solid rgba(0,0,0,.15); border-radius:6px;}
+  .nextrow button{padding:6px 12px; border-radius:6px; border:0; background:#1F3A5F; color:#fff; cursor:pointer;}
+  .nextrow .hint{font-size:.78rem; opacity:.6;}
+  .unpark button{margin-top:4px; padding:2px 9px; border-radius:999px; border:1px solid rgba(0,0,0,.2);
+    background:transparent; color:inherit; cursor:pointer; font-size:.74rem; opacity:.7;}
   .mrow{padding:9px 2px; border-top:1px solid rgba(0,0,0,.07); line-height:1.35;}
   .mrow:first-of-type{border-top:0;}
   .mrow .t{font-weight:600;}
@@ -54,6 +61,36 @@
 </style>
 
 <div class="meetwrap">
+
+<form class="nextrow noprint" method="post" action="{{ url_for('meeting_next', who=who) }}">
+  <label>Next sit-down <input type="date" name="at" value="{{ nxt }}"></label>
+  <button type="submit">Set</button>
+  <span class="hint">Parked tasks wait for this day instead of being chased.</span>
+</form>
+
+{% if agenda %}
+<h2>On the agenda <span class="cnt">{{ agenda|length }}</span></h2>
+{% for it in agenda %}
+<div class="mrow">
+  <div class="t"><a href="{{ url_for('board') }}#item-{{ it.id }}">{{ it.title }}</a>
+    {% if it.answered_at %}<span class="ansflag">answered</span>{% endif %}
+    {% if last and (it.updated_at or '') > last %}<span class="newb">new</span>{% endif %}</div>
+  <div class="m">
+    {% if it.waiting_on %}<b>{{ it.waiting_on }}</b> &middot; {% endif %}
+    {% if it.note %}{{ it.note }} &middot; {% endif %}
+    {% if it.due_date %}due {{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }} &middot; {% endif %}
+    {{ it.proj_title or it.sec_title }}
+    {% if it.source_link %} &middot; <a class="srclink" href="{{ it.source_link }}" target="_blank" rel="noopener">{% if 'whatsapp' in it.source_link %}&#128172; chat{% else %}&#9993; email{% endif %}</a>{% endif %}
+    {% set lw = latest.get(it.id) %}
+    {% if lw %}<span class="lastword">&ldquo;{{ lw.body[:140] }}&rdquo; &middot; {{ lw.created_at|stamp }}</span>{% endif %}
+  </div>
+  <form class="unpark noprint" method="post" action="{{ url_for('item_unpark', item_id=it.id) }}">
+    <input type="hidden" name="next" value="{{ url_for('meeting_view', who=who) }}">
+    <button type="submit" title="Off the agenda - back to normal chasing">&#x2715; off agenda</button>
+  </form>
+</div>
+{% endfor %}
+{% endif %}
 
 <h2>Decisions {{ label }} owes <span class="cnt">{{ decisions|length }}</span></h2>
 {% if not decisions %}<p class="caveat">Nothing waiting on a decision.</p>{% endif %}

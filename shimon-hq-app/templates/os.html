@@ -55,6 +55,7 @@
   .osd-actions form{display:flex;gap:4px;align-items:center;margin:0}
   .osd-actions button{padding:4px 9px;border-radius:999px;border:1px solid rgba(31,58,95,.35);background:transparent;color:inherit;cursor:pointer;font-size:.8rem}
   .osd-actions input[type=date]{padding:3px 5px;border:1px solid rgba(0,0,0,.15);border-radius:6px;font-size:.8rem}
+  .parkform input[name=who]{padding:3px 6px;border:1px solid rgba(0,0,0,.15);border-radius:6px;font-size:.8rem;width:5.5em}
   .osd-board{font-size:.8rem;opacity:.7;text-decoration:none;margin-left:auto}
   .dec{background:rgba(107,74,138,.06);border-radius:8px;margin:6px;padding:8px 10px}
   .dec .q{font-weight:600}
@@ -120,7 +121,7 @@
         <span class="m">
         {% if b == 'DELEGATE' %}<b>&rarr; {{ it.delegate_to }}</b>
         {% elif it.waiting_on %}<b>{{ it.waiting_on }}</b>{% endif %}
-        {% if it.answered_at %} &middot; <span class="ansflag">answered</span>{% elif it.follow_up_at and b in ('WAITING','TODAY','PROBLEMS') %} &middot; chase <span class="d">{{ it.follow_up_at[5:7]|int }}/{{ it.follow_up_at[8:10]|int }}</span>{% if it.follow_up_count %} (x{{ it.follow_up_count }}){% endif %}{% endif %}
+        {% if it.answered_at %} &middot; <span class="ansflag">answered</span>{% elif it.meeting_slug %} &middot; sit-down {{ it.meeting_slug|title }}{% if it.follow_up_at %} <span class="d">{{ it.follow_up_at[5:7]|int }}/{{ it.follow_up_at[8:10]|int }}</span>{% endif %}{% elif it.follow_up_at and b in ('WAITING','TODAY','PROBLEMS') %} &middot; chase <span class="d">{{ it.follow_up_at[5:7]|int }}/{{ it.follow_up_at[8:10]|int }}</span>{% if it.follow_up_count %} (x{{ it.follow_up_count }}){% endif %}{% endif %}
         {% if it.due_date %} &middot; due <span class="d">{{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}</span>{% endif %}
         {% if it.proj_title %} &middot; {{ it.proj_title }}{% elif it.sec_title %} &middot; {{ it.sec_title }}{% endif %}
         </span>
@@ -151,6 +152,18 @@
             <input type="date" name="at" value="{{ it.follow_up_at or soon_iso }}">
             <button type="submit">Chase then</button>
           </form>
+          {% if it.meeting_slug %}
+          <form method="post" action="{{ url_for('item_unpark', item_id=it.id) }}">
+            <input type="hidden" name="next" value="{{ url_for('os_view') }}">
+            <button type="submit">&#x2715; off agenda</button>
+          </form>
+          {% else %}
+          <form method="post" action="{{ url_for('item_park', item_id=it.id) }}" class="parkform">
+            <input type="hidden" name="next" value="{{ url_for('os_view') }}">
+            <input name="who" value="{{ ((it.waiting_on or it.delegate_to or '').split('/')[0].split(',')[0].split(' - ')[0]).strip() }}" placeholder="who" size="7">
+            <button type="submit">&rarr; sit-down</button>
+          </form>
+          {% endif %}
           {% if it.source_link %}<a class="srclink" href="{{ it.source_link }}" target="_blank" rel="noopener">{% if 'whatsapp' in it.source_link %}&#128172; chat{% else %}&#9993; email{% endif %}</a>{% endif %}
           <a class="osd-board" href="{{ url_for('board') }}#item-{{ it.id }}">full card &#8599;</a>
         </div>
