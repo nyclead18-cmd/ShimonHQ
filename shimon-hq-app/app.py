@@ -5191,6 +5191,61 @@ def task_view(item_id):
                            decfor=_decision_for)
 
 
+@app.route("/items/<int:item_id>/debrief", methods=["POST"])
+@login_required
+def item_debrief(item_id):
+    """The debrief button on any task: dump what happened, one line per
+    outcome, and each line files itself. 'done' closes the task;
+    'w Name: thing' starts a wait with a chase date; DECIDE:/JOEL:/YECHIEL:
+    lines become decisions; '+ thing' becomes a task in the same project;
+    anything else lands as a response on this task."""
+    con = db()
+    require_item(con, item_id)
+    it = con.execute("SELECT * FROM items WHERE id=?", (item_id,)).fetchone()
+    now = datetime.now().isoformat(timespec="seconds")
+    stamp = _now_local().strftime("%-m/%-d")
+    src = "From %s debrief %s" % (_short(it["title"], 40), stamp)
+
+    def new_task(title, waiting_on="", fu=None, dfor=""):
+        pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM items WHERE section_id=?",
+                          (it["section_id"],)).fetchone()[0]
+        con.execute(
+            "INSERT INTO items(section_id, project_id, title, waiting_on, status,"
+            " follow_up_at, pos, note, updated_at, created_at)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (it["section_id"], it["project_id"], title[:300], waiting_on,
+             "waiting" if waiting_on else "open", fu, pos, src, now, now))
+        nid = con.execute("SELECT last_insert_rowid()").fetchone()[0]
+        if dfor:
+            con.execute("UPDATE items SET decision_for=? WHERE id=?", (dfor, nid))
+
+    for line in (request.form.get("notes") or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.lower() in ("done", "v", "x") or line == "✓":
+            con.execute("UPDATE items SET status='done', done_at=?, updated_at=?"
+                        " WHERE id=?", (now, now, item_id))
+            continue
+        m = re.match(r"^w(?:aiting)?\s+([^:]{1,40}):\s*(.+)$", line, re.I)
+        if m:
+            new_task(m.group(2).strip(), waiting_on=m.group(1).strip(),
+                     fu=business_days_out(3))
+            continue
+        d = _decision_for("", line)
+        if d:
+            new_task(line, dfor=d)
+            continue
+        if line.startswith("+"):
+            new_task(line[1:].strip())
+            continue
+        con.execute("INSERT INTO item_notes(item_id, body, source, created_at)"
+                    " VALUES(?,?,?,?)", (item_id, line, "os", now))
+    con.execute("UPDATE items SET updated_at=? WHERE id=?", (now, item_id))
+    commit_retry(con)
+    return _back_to()
+
+
 @app.route("/api/meeting_prep", methods=["GET", "POST"])
 def api_meeting_prep():
     """Write the picture for a sit-down: who, text (the situation across emails,

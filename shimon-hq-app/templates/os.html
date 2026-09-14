@@ -168,6 +168,7 @@
           </form>
           {% endif %}
           {% if it.source_link %}<a class="srclink" href="{{ it.source_link }}" target="_blank" rel="noopener">{% if 'whatsapp' in it.source_link %}&#128172; chat{% else %}&#9993; email{% endif %}</a>{% endif %}
+          <a class="osd-board" href="{{ url_for('task_view', item_id=it.id) }}#debrief">debrief</a>
           <a class="osd-board" href="{{ url_for('task_view', item_id=it.id) }}">{% if it.dossier %}&#128203; briefing{% else %}open{% endif %} &#8599;</a>
         </div>
       </div>

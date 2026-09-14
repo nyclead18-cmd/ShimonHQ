@@ -51,6 +51,17 @@
   .opactions input[type=date]{padding:5px 7px; border:1px solid rgba(0,0,0,.15); border-radius:6px;}
   .opactions input[name=who]{padding:5px 8px; border:1px solid rgba(0,0,0,.15); border-radius:6px; width:6em;}
   .fchip2{font-size:.85rem;}
+  .opdebrief{margin:4px 0 22px; background:var(--card); border:1px solid var(--border);
+    border-radius:12px; padding:10px 14px;}
+  .opdebrief summary{cursor:pointer; font-weight:600; list-style:none;}
+  .opdebrief summary::-webkit-details-marker{display:none;}
+  .opdebrief summary::before{content:"\25B8  "; color:#B8892E;}
+  .opdebrief[open] summary::before{content:"\25BE  ";}
+  .opdebrief textarea{width:100%; box-sizing:border-box; min-height:100px; padding:10px;
+    margin-top:10px; border:1px solid rgba(0,0,0,.15); border-radius:8px; font:inherit; font-size:16px;}
+  .opdebrief .hint{font-size:.78rem; opacity:.65; margin:6px 0 10px;}
+  .opdebrief button{padding:7px 15px; border-radius:8px; border:0; background:#1F3A5F;
+    color:#fff; cursor:pointer; font-weight:600;}
 </style>
 
 <div class="opwrap">
@@ -107,6 +118,16 @@ operation-sized tasks, or ask Claude for a workup on this task by name.</p>
   </form>
   {% endif %}
 </div>
+
+<details class="opdebrief noprint" id="debrief">
+  <summary>Debrief &mdash; what happened</summary>
+  <form method="post" action="{{ url_for('item_debrief', item_id=it.id) }}">
+    <input type="hidden" name="next" value="{{ url_for('task_view', item_id=it.id) }}">
+    <textarea name="notes" placeholder="One line per outcome&hellip;" dir="auto"></textarea>
+    <div class="hint"><b>done</b> closes this task &middot; <b>w Name: thing</b> starts a wait with a chase date &middot; <b>JOEL:</b>/<b>YECHIEL:</b>/<b>DECIDE:</b> files a decision &middot; <b>+ thing</b> makes a task in this project &middot; anything else lands as a response here.</div>
+    <button type="submit">File it</button>
+  </form>
+</details>
 
 {% if files %}
 <h2>Files</h2>
