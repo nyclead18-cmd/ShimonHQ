@@ -5099,10 +5099,20 @@ def os_view():
     con = db()
     today = _now_local().date().isoformat()
     lanes = {b: [] for b in OS_BUCKETS}
+    meetnames = {}
     for r in _os_rows(con):
         b = os_bucket(r, today)
         if b:
             lanes[b].append(r)
+        # the people worth a sit-down: whoever the most open work waits on
+        for nm in re.split(r"[,/+]| - ", r["waiting_on"] or ""):
+            nm = nm.strip()
+            if nm:
+                meetnames[nm] = meetnames.get(nm, 0) + 1
+        d = _decision_for(r["decision_for"], r["title"])
+        if d in ("joel", "yechiel") and not r["decided_at"]:
+            meetnames[d.title()] = meetnames.get(d.title(), 0) + 1
+    meet = [n for n, _ in sorted(meetnames.items(), key=lambda kv: -kv[1])[:4]]
     labels = {"TODAY": "Today", "WAITING": "Waiting on", "DECIDE": "Needs me",
               "JOEL": "Needs Joel", "DELEGATE": "Delegate", "PROBLEMS": "Problems",
               "UPCOMING": "Upcoming"}
@@ -5110,10 +5120,87 @@ def os_view():
               "JOEL": "#B8892E", "DELEGATE": "#3A6B3E", "PROBLEMS": "#A33B2E",
               "UPCOMING": "#5B6770"}
     return render_template("os.html", lanes=lanes, order=OS_BUCKETS, labels=labels,
-                           colors=colors, today_iso=today,
+                           colors=colors, today_iso=today, meet=meet,
                            soon_iso=(date.fromisoformat(today) + timedelta(days=3)).isoformat(),
                            pretty=_now_local().strftime("%A, %B %-d"),
                            decfor=_decision_for)
+
+
+# ---------- Shimon OS Build 2: the sit-down (v113) ----------
+
+_MEET_DECIDER = {"joel": "joel", "yechiel": "yechiel", "me": "me", "shimon": "me"}
+
+
+@app.route("/meeting/<who>")
+@login_required
+def meeting_view(who):
+    """The sit-down brief: everything to cover with one person, computed live
+    from the board - decisions they owe (cleared with one tap, right here),
+    tasks waiting on them, and what moved since the last sit-down. The debrief
+    box at the bottom files each line back onto the board and closes the
+    meeting, so the next brief counts change from today."""
+    con = db()
+    w = (who or "").strip().lower()[:40]
+    if not w:
+        abort(404)
+    dfor = _MEET_DECIDER.get(w, "")
+    last = uset(con, "meet:" + w) or ""
+    decisions, waiting = [], []
+    for r in _os_rows(con):
+        d = _decision_for(r["decision_for"], r["title"])
+        blob = ((r["waiting_on"] or "") + " " + (r["delegate_to"] or "")).lower()
+        if dfor and d == dfor and not r["decided_at"]:
+            decisions.append(r)
+        elif w in blob:
+            waiting.append(r)
+    ids = {r["id"] for r in decisions} | {r["id"] for r in waiting}
+    latest = {}
+    for n in con.execute("SELECT item_id, body, created_at FROM item_notes ORDER BY id"):
+        if n["item_id"] in ids:
+            latest[n["item_id"]] = n
+    return render_template("meeting.html", who=w, label=w.title(), decisions=decisions,
+                           waiting=waiting, latest=latest, last=last,
+                           today_iso=_now_local().date().isoformat(),
+                           pretty=_now_local().strftime("%A, %B %-d"),
+                           decfor=_decision_for)
+
+
+@app.route("/meeting/<who>/debrief", methods=["POST"])
+@login_required
+def meeting_debrief(who):
+    """Each debrief line files itself onto the board: DECIDE:/JOEL:/YECHIEL:
+    marks who owes the decision, 'w Name: task' starts a wait with a chase
+    date three business days out, anything else lands as an open task in the
+    Inbox. Saving - with notes or without - closes the meeting."""
+    con = db()
+    w = (who or "").strip().lower()[:40]
+    now = datetime.now().isoformat(timespec="seconds")
+    stamp = _now_local().strftime("%-m/%-d")
+    sid, pid = my_inbox(con)
+    for line in (request.form.get("notes") or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        title, waiting_on, fu = line, "", None
+        m = re.match(r"^w(?:aiting)?\s+([^:]{1,40}):\s*(.+)$", line, re.I)
+        if m:
+            waiting_on, title = m.group(1).strip(), m.group(2).strip()
+            fu = business_days_out(3)
+        pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM items WHERE section_id=?",
+                          (sid,)).fetchone()[0]
+        con.execute(
+            "INSERT INTO items(section_id, project_id, title, waiting_on, status,"
+            " follow_up_at, pos, note, updated_at, created_at)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (sid, pid, title[:300], waiting_on, "waiting" if waiting_on else "open",
+             fu, pos, "From %s sit-down %s" % (w.title(), stamp), now, now))
+        d = _decision_for("", title)
+        if d:
+            con.execute("UPDATE items SET decision_for=? WHERE id=?",
+                        (d, con.execute("SELECT last_insert_rowid()").fetchone()[0]))
+    uset_put(con, "meet:" + w, now)
+    commit_retry(con)
+    return redirect(url_for("meeting_view", who=w))
 
 
 _init_db_once()

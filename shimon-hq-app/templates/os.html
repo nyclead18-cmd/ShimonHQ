@@ -64,6 +64,11 @@
   {% endfor %}
 </div>
 
+{% if meet %}
+<p class="meta noprint" style="margin:-6px 0 12px">Sit-down briefs:
+  {% for n in meet %}<a href="{{ url_for('meeting_view', who=n|lower) }}">{{ n }}</a>{% if not loop.last %} &middot; {% endif %}{% endfor %}</p>
+{% endif %}
+
 <div class="oswrap">
 {% for b in order %}
 <section class="card oslane" id="os-{{ b }}" style="--sa: {{ colors[b] }}">

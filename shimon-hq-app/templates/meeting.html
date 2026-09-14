@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Sit-down · {{ label }} · HQ{% endblock %}
+{% block body %}
+<div class="wrap">
+<header class="top">
+  <div class="brandside">
+    {% if has_logo %}<img class="hqlogo" src="{{ url_for('static', filename='logo.png') }}?v={{ css_v }}" alt="">{% endif %}
+    <div>
+      <div class="eyebrow">{{ pretty }}{% if last %} &middot; last sit-down {{ last|stamp }}{% endif %}</div>
+      <h1>Sit-down &middot; {{ label }}</h1>
+    </div>
+  </div>
+  <div class="right">
+    <nav class="tabs">
+      <a class="tab" href="{{ url_for('os_view') }}">OS</a>
+      <a class="tab" href="{{ url_for('today_view') }}">Today</a>
+      <a class="tab" href="{{ url_for('board') }}">Board</a>
+      <a class="tab" href="{{ url_for('joel_view') }}">Review</a>
+    </nav>
+    <a class="logout" href="{{ url_for('account_view') }}">{{ session.get('name') or 'Account' }}</a>
+    <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
+  </div>
+</header>
+
+<style>
+  .meetwrap{max-width:860px; margin:0 auto;}
+  .meetwrap h2{font-size:1.05rem; margin:22px 0 8px;}
+  .meetwrap h2 .cnt{opacity:.55; font-weight:600; font-size:.9rem;}
+  .dec{background:rgba(107,74,138,.06); border-radius:10px; margin:8px 0; padding:12px 14px;}
+  .dec .q{font-weight:600; font-size:1rem;}
+  .dec .kv{font-size:.86rem; margin-top:4px;}
+  .dec .kv b{display:inline-block; min-width:88px; opacity:.7; font-weight:600;}
+  .dec form{display:flex; gap:6px; margin-top:10px; flex-wrap:wrap;}
+  .dec input[type=text]{flex:1; min-width:140px; padding:6px 9px; border:1px solid rgba(0,0,0,.15); border-radius:6px;}
+  .dec button{padding:6px 12px; border-radius:6px; border:0; background:#1F3A5F; color:#fff; cursor:pointer;}
+  .dec button.alt{background:#8A671D;}
+  .mrow{padding:9px 2px; border-top:1px solid rgba(0,0,0,.07); line-height:1.35;}
+  .mrow:first-of-type{border-top:0;}
+  .mrow .t{font-weight:600;}
+  .mrow .m{font-size:.84rem; opacity:.75; margin-top:2px;}
+  .mrow .m .lastword{display:block; opacity:.9; margin-top:2px; font-style:italic;}
+  .newb{font-size:9px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+        color:#fff; background:#B8892E; border-radius:999px; padding:2px 7px;
+        vertical-align:2px; margin-left:6px;}
+  .debrief{margin:30px 0 10px; background:var(--card); border:1px solid var(--border);
+           border-radius:12px; padding:14px 16px;}
+  .debrief textarea{width:100%; box-sizing:border-box; min-height:120px; padding:10px;
+    border:1px solid rgba(0,0,0,.15); border-radius:8px; font:inherit; font-size:16px;}
+  .debrief .hint{font-size:.8rem; opacity:.65; margin:6px 0 10px;}
+  .debrief .btns{display:flex; gap:10px; align-items:center;}
+  .debrief button{padding:8px 16px; border-radius:8px; border:0; background:#1F3A5F;
+    color:#fff; cursor:pointer; font-weight:600;}
+  .debrief button.quiet{background:transparent; color:inherit; opacity:.6; font-weight:400;}
+</style>
+
+<div class="meetwrap">
+
+<h2>Decisions {{ label }} owes <span class="cnt">{{ decisions|length }}</span></h2>
+{% if not decisions %}<p class="caveat">Nothing waiting on a decision.</p>{% endif %}
+{% for it in decisions %}
+<div class="dec">
+  <div class="q"><a href="{{ url_for('board') }}#item-{{ it.id }}">{{ it.title|replace('DECIDE: ','')|replace('JOEL: ','')|replace('YECHIEL: ','') }}</a>
+    {% if last and (it.updated_at or '') > last %}<span class="newb">new</span>{% endif %}</div>
+  {% if it.decision_q or it.note %}<div class="kv"><b>Decision</b> {{ it.decision_q or it.note }}</div>{% endif %}
+  {% if it.decision_rec %}<div class="kv"><b>Recommend</b> {{ it.decision_rec }}</div>{% endif %}
+  {% if it.decision_cost %}<div class="kv"><b>Cost</b> {{ it.decision_cost }}</div>{% endif %}
+  {% if it.due_date %}<div class="kv"><b>Deadline</b> {{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}</div>{% endif %}
+  {% if it.decision_nothing %}<div class="kv"><b>If nothing</b> {{ it.decision_nothing }}</div>{% endif %}
+  {% if it.proj_title or it.sec_title %}<div class="kv"><b>Where</b> {{ it.proj_title or it.sec_title }}</div>{% endif %}
+  <form method="post" action="{{ url_for('item_decide', item_id=it.id) }}">
+    <input type="hidden" name="back" value="{{ url_for('meeting_view', who=who) }}">
+    <button type="submit" name="result" value="approved">Approved</button>
+    <input type="text" name="result" placeholder="Or: what was decided, one line" dir="auto">
+    <button type="submit" class="alt">Save</button>
+  </form>
+</div>
+{% endfor %}
+
+<h2>Waiting on {{ label }} <span class="cnt">{{ waiting|length }}</span></h2>
+{% if not waiting %}<p class="caveat">Nothing waiting.</p>{% endif %}
+{% for it in waiting %}
+<div class="mrow">
+  <div class="t"><a href="{{ url_for('board') }}#item-{{ it.id }}">{{ it.title }}</a>
+    {% if it.answered_at %}<span class="ansflag">answered</span>{% endif %}
+    {% if last and (it.updated_at or '') > last %}<span class="newb">new</span>{% endif %}</div>
+  <div class="m">
+    {% if it.note %}{{ it.note }} &middot; {% endif %}
+    {% if it.follow_up_at %}chase {{ it.follow_up_at[5:7]|int }}/{{ it.follow_up_at[8:10]|int }}{% if it.follow_up_count %} (x{{ it.follow_up_count }}){% endif %} &middot; {% endif %}
+    {% if it.due_date %}due {{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }} &middot; {% endif %}
+    {{ it.proj_title or it.sec_title }}
+    {% if it.source_link %} &middot; <a class="srclink" href="{{ it.source_link }}" target="_blank" rel="noopener">{% if 'whatsapp' in it.source_link %}&#128172; chat{% else %}&#9993; email{% endif %}</a>{% endif %}
+    {% set lw = latest.get(it.id) %}
+    {% if lw %}<span class="lastword">&ldquo;{{ lw.body[:140] }}&rdquo; &middot; {{ lw.created_at|stamp }}</span>{% endif %}
+  </div>
+</div>
+{% endfor %}
+
+<div class="debrief noprint">
+  <h2 style="margin-top:0">Debrief</h2>
+  <form method="post" action="{{ url_for('meeting_debrief', who=who) }}">
+    <textarea name="notes" placeholder="One line per outcome&hellip;" dir="auto"></textarea>
+    <div class="hint">Each line lands on the board: <b>JOEL:</b> / <b>YECHIEL:</b> / <b>DECIDE:</b> marks a decision &middot; <b>w Name: task</b> starts a wait with a chase date &middot; anything else is a task in the Inbox.</div>
+    <div class="btns">
+      <button type="submit">File debrief &amp; close meeting</button>
+      <button type="submit" class="quiet" formnovalidate>Close without notes</button>
+    </div>
+  </form>
+</div>
+
+<p class="meta noprint">Decisions clear right here. The &ldquo;new&rdquo; badge marks what moved since the last sit-down.</p>
+</div>
+</div>
+{% endblock %}
