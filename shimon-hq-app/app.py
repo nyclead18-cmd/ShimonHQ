@@ -750,7 +750,12 @@ def init_db():
                       # numbers, the file), so the brief reads like a chief of
                       # staff wrote it
                       ("brief", "TEXT DEFAULT ''"),
-                      ("brief_at", "TEXT")):
+                      ("brief_at", "TEXT"),
+                      # v119: the dossier - the full workup behind an operation-
+                      # sized task (last cycle's numbers, counts, files, open
+                      # questions), built by the evening run, read on /task/<id>
+                      ("dossier", "TEXT DEFAULT ''"),
+                      ("dossier_at", "TEXT")):
         if col not in cols:
             con.execute("ALTER TABLE items ADD COLUMN %s %s" % (col, decl))
     # Shimon OS rule: nothing waits without a chase date. Tasks that were already
@@ -5109,6 +5114,58 @@ def api_task_prep():
                  it["id"]))
     commit_retry(con)
     return "BRIEFED: " + it["title"], 200, _TXT
+
+
+@app.route("/api/dossier", methods=["GET", "POST"])
+def api_dossier():
+    """Write the full workup behind an operation-sized task: find, text.
+    Long content arrives in pieces - pass append=1 on every call after the
+    first and the text is added to what is there (16K cap). Plain text;
+    UPPERCASE lines read as section heads on the briefing page. Empty text
+    without append clears the dossier."""
+    if not _api_auth():
+        abort(401)
+    con = db()
+    it = _find_item(con, request.values.get("find"))
+    if not it:
+        return "ERROR: no task matches", 404, _TXT
+    text = (request.values.get("text") or "").strip()
+    if (request.values.get("append") or "") in ("1", "yes") and text:
+        cur = (it["dossier"] if "dossier" in it.keys() else "") or ""
+        text = (cur + "\n" + text).strip()
+    text = text[:16000]
+    con.execute("UPDATE items SET dossier=?, dossier_at=? WHERE id=?",
+                (text, _now_local().isoformat(timespec="seconds") if text else None,
+                 it["id"]))
+    commit_retry(con)
+    return "DOSSIER: %s (%d chars)" % (it["title"], len(text)), 200, _TXT
+
+
+@app.route("/task/<int:item_id>")
+@login_required
+def task_view(item_id):
+    """The operation page: one task with everything around it - the dossier
+    (the full workup), the prep, the conversation, the files, the way back to
+    the source email, and the same one-tap actions as the OS."""
+    con = db()
+    require_item(con, item_id)
+    it = con.execute(
+        "SELECT items.*, sections.title AS sec_title,"
+        " COALESCE(p.title,'') AS proj_title FROM items"
+        " JOIN sections ON items.section_id = sections.id"
+        " LEFT JOIN projects p ON p.id = items.project_id"
+        " WHERE items.id=?", (item_id,)).fetchone()
+    if not it:
+        abort(404)
+    notes = con.execute("SELECT * FROM item_notes WHERE item_id=? ORDER BY id",
+                        (item_id,)).fetchall()
+    files = con.execute("SELECT * FROM item_files WHERE item_id=? ORDER BY id",
+                        (item_id,)).fetchall()
+    return render_template("task.html", it=it, notes=notes, files=files,
+                           today_iso=_now_local().date().isoformat(),
+                           soon_iso=business_days_out(3),
+                           pretty=_now_local().strftime("%A, %B %-d"),
+                           decfor=_decision_for)
 
 
 @app.route("/api/meeting_prep", methods=["GET", "POST"])

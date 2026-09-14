@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}{{ it.title[:40] }} · HQ{% endblock %}
+{% block body %}
+<div class="wrap">
+<header class="top">
+  <div class="brandside">
+    {% if has_logo %}<img class="hqlogo" src="{{ url_for('static', filename='logo.png') }}?v={{ css_v }}" alt="">{% endif %}
+    <div>
+      <div class="eyebrow">{{ pretty }} &middot; {{ it.proj_title or it.sec_title }}</div>
+      <h1 dir="auto">{{ it.title }}</h1>
+    </div>
+  </div>
+  <div class="right">
+    <nav class="tabs">
+      <a class="tab" href="{{ url_for('os_view') }}">OS</a>
+      <a class="tab" href="{{ url_for('today_view') }}">Today</a>
+      <a class="tab" href="{{ url_for('board') }}#item-{{ it.id }}">Board</a>
+    </nav>
+    <a class="logout" href="{{ url_for('account_view') }}">{{ session.get('name') or 'Account' }}</a>
+    <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
+  </div>
+</header>
+
+<style>
+  .opwrap{max-width:760px; margin:0 auto;}
+  .opmeta{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:10px 0 16px; font-size:.88rem;}
+  .opmeta .pillbig{font-size:.72rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase;
+    border-radius:999px; padding:3px 10px; border:1px solid rgba(0,0,0,.2);}
+  .opmeta .pillbig.waiting{color:#8A671D; border-color:#8A671D;}
+  .opmeta .pillbig.done{color:#2E7D57; border-color:#2E7D57;}
+  .opprep{background:rgba(184,137,46,.09); border-left:3px solid #B8892E; border-radius:0 8px 8px 0;
+    padding:8px 12px; margin:0 0 14px; line-height:1.5; white-space:pre-wrap;}
+  .dossier{background:var(--card); border:1px solid var(--border); border-radius:12px;
+    padding:16px 20px; margin:0 0 18px; line-height:1.55; font-size:.95rem;}
+  .dossier .dtext{white-space:pre-wrap;}
+  .dossier .dhead{font-size:.72rem; font-weight:700; letter-spacing:.12em; text-transform:uppercase;
+    color:#B8892E; margin-bottom:8px;}
+  .dossier .dstamp{font-size:.74rem; opacity:.55; margin-top:10px;}
+  .opnotes{margin:0 0 16px;}
+  .opnotes h2, .opwrap h2{font-size:1rem; margin:18px 0 8px;}
+  .opnote{padding:7px 0; border-top:1px solid rgba(0,0,0,.07); font-size:.9rem; line-height:1.4;}
+  .opnote:first-of-type{border-top:0;}
+  .opnote .nd{font-size:.74rem; opacity:.6; margin-right:6px;}
+  .oprespond{display:flex; gap:8px; margin:10px 0 18px;}
+  .oprespond input{flex:1; min-width:0; padding:8px 11px; border:1px solid rgba(0,0,0,.15); border-radius:8px; font-size:16px;}
+  .oprespond button{padding:8px 14px; border-radius:8px; border:0; background:#1F3A5F; color:#fff; cursor:pointer;}
+  .opactions{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:6px 0 24px;}
+  .opactions form{display:flex; gap:6px; align-items:center; margin:0;}
+  .opactions button{padding:6px 13px; border-radius:999px; border:1px solid rgba(31,58,95,.35);
+    background:transparent; color:inherit; cursor:pointer;}
+  .opactions input[type=date]{padding:5px 7px; border:1px solid rgba(0,0,0,.15); border-radius:6px;}
+  .opactions input[name=who]{padding:5px 8px; border:1px solid rgba(0,0,0,.15); border-radius:6px; width:6em;}
+  .fchip2{font-size:.85rem;}
+</style>
+
+<div class="opwrap">
+<div class="opmeta">
+  <span class="pillbig {{ it.status }}">{{ it.status }}</span>
+  {% if it.waiting_on %}<span>waiting on <b dir="auto">{{ it.waiting_on }}</b></span>{% endif %}
+  {% if it.answered_at %}<span class="ansflag">answered</span>{% endif %}
+  {% if it.meeting_slug %}<span>sit-down <b>{{ it.meeting_slug|title }}</b></span>{% endif %}
+  {% if it.follow_up_at %}<span>chase {{ it.follow_up_at[5:7]|int }}/{{ it.follow_up_at[8:10]|int }}{% if it.follow_up_count %} (x{{ it.follow_up_count }}){% endif %}</span>{% endif %}
+  {% if it.due_date %}<span>due {{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}</span>{% endif %}
+  {% if it.source_link %}<a class="srclink" href="{{ it.source_link }}" target="_blank" rel="noopener">{% if 'whatsapp' in it.source_link %}&#128172; chat{% else %}&#9993; email{% endif %}</a>{% endif %}
+</div>
+
+{% if it.note %}<p dir="auto" style="margin:0 0 12px">{{ it.note }}</p>{% endif %}
+{% if it.brief %}<div class="opprep" dir="auto">{{ it.brief }}</div>{% endif %}
+
+{% if it.dossier %}
+<div class="dossier">
+  <div class="dhead">The briefing</div>
+  <div class="dtext" dir="auto">{{ it.dossier }}</div>
+  {% if it.dossier_at %}<div class="dstamp">prepared {{ it.dossier_at|stamp }}</div>{% endif %}
+</div>
+{% else %}
+<p class="caveat">No full briefing on this one yet &mdash; the evening run builds workups for
+operation-sized tasks, or ask Claude for a workup on this task by name.</p>
+{% endif %}
+
+<div class="opactions noprint">
+  <form method="post" action="{{ url_for('set_item_status', item_id=it.id) }}">
+    <input type="hidden" name="next" value="{{ url_for('task_view', item_id=it.id) }}">
+    <button type="submit" name="status" value="done">&#10003; Done</button>
+  </form>
+  {% if it.waiting_on %}
+  <form method="post" action="{{ url_for('item_chased', item_id=it.id) }}">
+    <input type="hidden" name="next" value="{{ url_for('task_view', item_id=it.id) }}">
+    <button type="submit">Chased</button>
+  </form>
+  {% endif %}
+  <form method="post" action="{{ url_for('item_followup', item_id=it.id) }}">
+    <input type="hidden" name="next" value="{{ url_for('task_view', item_id=it.id) }}">
+    <input type="date" name="at" value="{{ it.follow_up_at or soon_iso }}">
+    <button type="submit">Chase then</button>
+  </form>
+  {% if it.meeting_slug %}
+  <form method="post" action="{{ url_for('item_unpark', item_id=it.id) }}">
+    <input type="hidden" name="next" value="{{ url_for('task_view', item_id=it.id) }}">
+    <button type="submit">&#x2715; off agenda</button>
+  </form>
+  {% else %}
+  <form method="post" action="{{ url_for('item_park', item_id=it.id) }}">
+    <input type="hidden" name="next" value="{{ url_for('task_view', item_id=it.id) }}">
+    <input name="who" value="{{ ((it.waiting_on or '').split('/')[0].split(',')[0].split(' - ')[0]).strip() }}" placeholder="who">
+    <button type="submit">&rarr; sit-down</button>
+  </form>
+  {% endif %}
+</div>
+
+{% if files %}
+<h2>Files</h2>
+{% for f in files %}<span class="fchip fchip2"><a href="{{ url_for('get_file', file_id=f.id) }}" target="_blank" rel="noopener">{{ f.filename }}</a></span> {% endfor %}
+{% endif %}
+
+<div class="opnotes">
+<h2>The conversation</h2>
+{% if not notes %}<p class="caveat">Nothing filed yet.</p>{% endif %}
+{% for n in notes %}
+<div class="opnote"><span class="nd">{{ n.created_at|stamp }}</span> <span dir="auto">{{ n.body }}</span>
+  {% if n.source == 'email' %}<span class="srcchip">mail</span>{% elif n.source == 'wa' %}<span class="srcchip wa">wa</span>{% elif n.source == 'os' %}<span class="srcchip">os</span>{% endif %}</div>
+{% endfor %}
+</div>
+
+<form class="oprespond noprint" method="post" action="{{ url_for('add_note', item_id=it.id) }}">
+  <input type="hidden" name="next" value="{{ url_for('task_view', item_id=it.id) }}">
+  <input name="body" placeholder="Add a response&hellip;" dir="auto" autocomplete="off">
+  <button type="submit">&#8594;</button>
+</form>
+</div>
+</div>
+{% endblock %}

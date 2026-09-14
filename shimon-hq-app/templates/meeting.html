@@ -86,7 +86,7 @@
 <h2>On the agenda <span class="cnt">{{ agenda|length }}</span></h2>
 {% for it in agenda %}
 <div class="mrow">
-  <div class="t"><a href="{{ url_for('board') }}#item-{{ it.id }}">{{ it.title }}</a>
+  <div class="t"><a href="{{ url_for('task_view', item_id=it.id) }}">{{ it.title }}</a>
     {% if it.answered_at %}<span class="ansflag">answered</span>{% endif %}
     {% if last and (it.updated_at or '') > last %}<span class="newb">new</span>{% endif %}</div>
   <div class="m">
@@ -112,7 +112,7 @@
 {% if not decisions %}<p class="caveat">Nothing waiting on a decision.</p>{% endif %}
 {% for it in decisions %}
 <div class="dec">
-  <div class="q"><a href="{{ url_for('board') }}#item-{{ it.id }}">{{ it.title|replace('DECIDE: ','')|replace('JOEL: ','')|replace('YECHIEL: ','') }}</a>
+  <div class="q"><a href="{{ url_for('task_view', item_id=it.id) }}">{{ it.title|replace('DECIDE: ','')|replace('JOEL: ','')|replace('YECHIEL: ','') }}</a>
     {% if last and (it.updated_at or '') > last %}<span class="newb">new</span>{% endif %}</div>
   {% if it.decision_q or it.note %}<div class="kv"><b>Decision</b> {{ it.decision_q or it.note }}</div>{% endif %}
   {% if it.decision_rec %}<div class="kv"><b>Recommend</b> {{ it.decision_rec }}</div>{% endif %}
@@ -135,7 +135,7 @@
 {% if not waiting %}<p class="caveat">Nothing waiting.</p>{% endif %}
 {% for it in waiting %}
 <div class="mrow">
-  <div class="t"><a href="{{ url_for('board') }}#item-{{ it.id }}">{{ it.title }}</a>
+  <div class="t"><a href="{{ url_for('task_view', item_id=it.id) }}">{{ it.title }}</a>
     {% if it.answered_at %}<span class="ansflag">answered</span>{% endif %}
     {% if last and (it.updated_at or '') > last %}<span class="newb">new</span>{% endif %}</div>
   <div class="m">
