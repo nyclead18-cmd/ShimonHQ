@@ -5116,6 +5116,29 @@ def api_task_prep():
     return "BRIEFED: " + it["title"], 200, _TXT
 
 
+@app.route("/api/setlink", methods=["GET", "POST"])
+def api_setlink():
+    """Attach a source link in pieces: find, text (a URL fragment), append=1 on
+    every call after the first. The sweeps' fetch proxy drops URLs over ~250
+    chars, and an Outlook webLink alone is ~300 - so the link arrives in two
+    or three short calls and is validated once it is whole."""
+    if not _api_auth():
+        abort(401)
+    con = db()
+    it = _find_item(con, request.values.get("find"))
+    if not it:
+        return "ERROR: no task matches", 404, _TXT
+    frag = (request.values.get("text") or "").strip()
+    cur = (it["source_link"] or "") if "source_link" in it.keys() else ""
+    val = (cur + frag) if (request.values.get("append") or "") in ("1", "yes") else frag
+    val = val[:800]
+    con.execute("UPDATE items SET source_link=? WHERE id=?", (val, it["id"]))
+    commit_retry(con)
+    ok = val.startswith(("https://", "http://"))
+    return "LINK %s: %s (%d chars%s)" % ("OK" if ok else "PARTIAL", it["title"],
+                                         len(val), "" if ok else " - not a URL yet"), 200, _TXT
+
+
 @app.route("/api/dossier", methods=["GET", "POST"])
 def api_dossier():
     """Write the full workup behind an operation-sized task: find, text.
