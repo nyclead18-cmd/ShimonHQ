@@ -34,6 +34,13 @@
   .dec input[type=text]{flex:1; min-width:140px; padding:6px 9px; border:1px solid rgba(0,0,0,.15); border-radius:6px;}
   .dec button{padding:6px 12px; border-radius:6px; border:0; background:#1F3A5F; color:#fff; cursor:pointer;}
   .dec button.alt{background:#8A671D;}
+  .picture{background:#1F3A5F; color:#F5F0E9; border-radius:12px; padding:14px 18px; margin:16px 0 6px;}
+  .pichead{font-size:.72rem; font-weight:700; letter-spacing:.12em; text-transform:uppercase; color:#D9B36A; margin-bottom:6px;}
+  .pichead span{opacity:.65; text-transform:none; letter-spacing:0; font-weight:400;}
+  .pictext{white-space:pre-wrap; line-height:1.5; font-size:.95rem;}
+  .prep{background:rgba(184,137,46,.09); border-left:3px solid #B8892E; border-radius:0 8px 8px 0;
+    padding:6px 10px; margin:5px 0 2px; font-size:.86rem; line-height:1.45; white-space:pre-wrap;}
+  .prep .pat{display:block; font-size:.7rem; opacity:.55; margin-top:2px;}
   .nextrow{display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:14px 0 4px;
     background:var(--card); border:1px solid var(--border); border-radius:10px; padding:10px 14px;}
   .nextrow input[type=date]{padding:5px 8px; border:1px solid rgba(0,0,0,.15); border-radius:6px;}
@@ -68,6 +75,13 @@
   <span class="hint">Parked tasks wait for this day instead of being chased.</span>
 </form>
 
+{% if prep %}
+<div class="picture">
+  <div class="pichead">The picture{% if prep_at %} <span>as of {{ prep_at|stamp }}</span>{% endif %}</div>
+  <div class="pictext" dir="auto">{{ prep }}</div>
+</div>
+{% endif %}
+
 {% if agenda %}
 <h2>On the agenda <span class="cnt">{{ agenda|length }}</span></h2>
 {% for it in agenda %}
@@ -84,6 +98,8 @@
     {% set lw = latest.get(it.id) %}
     {% if lw %}<span class="lastword">&ldquo;{{ lw.body[:140] }}&rdquo; &middot; {{ lw.created_at|stamp }}</span>{% endif %}
   </div>
+  {% if it.brief %}<div class="prep" dir="auto">{{ it.brief }}{% if it.brief_at %}<span class="pat">prep {{ it.brief_at|stamp }}</span>{% endif %}</div>
+  {% endif %}
   <form class="unpark noprint" method="post" action="{{ url_for('item_unpark', item_id=it.id) }}">
     <input type="hidden" name="next" value="{{ url_for('meeting_view', who=who) }}">
     <button type="submit" title="Off the agenda - back to normal chasing">&#x2715; off agenda</button>
@@ -104,6 +120,8 @@
   {% if it.due_date %}<div class="kv"><b>Deadline</b> {{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}</div>{% endif %}
   {% if it.decision_nothing %}<div class="kv"><b>If nothing</b> {{ it.decision_nothing }}</div>{% endif %}
   {% if it.proj_title or it.sec_title %}<div class="kv"><b>Where</b> {{ it.proj_title or it.sec_title }}</div>{% endif %}
+  {% if it.brief %}<div class="prep" dir="auto">{{ it.brief }}{% if it.brief_at %}<span class="pat">prep {{ it.brief_at|stamp }}</span>{% endif %}</div>
+  {% endif %}
   <form method="post" action="{{ url_for('item_decide', item_id=it.id) }}">
     <input type="hidden" name="back" value="{{ url_for('meeting_view', who=who) }}">
     <button type="submit" name="result" value="approved">Approved</button>
@@ -129,6 +147,8 @@
     {% set lw = latest.get(it.id) %}
     {% if lw %}<span class="lastword">&ldquo;{{ lw.body[:140] }}&rdquo; &middot; {{ lw.created_at|stamp }}</span>{% endif %}
   </div>
+  {% if it.brief %}<div class="prep" dir="auto">{{ it.brief }}{% if it.brief_at %}<span class="pat">prep {{ it.brief_at|stamp }}</span>{% endif %}</div>
+  {% endif %}
 </div>
 {% endfor %}
 

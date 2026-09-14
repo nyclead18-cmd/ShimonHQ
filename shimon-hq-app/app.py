@@ -744,7 +744,13 @@ def init_db():
                       ("answered_at", "TEXT"),
                       # v116: a task parked for a sit-down carries the meeting's
                       # slug - it stops being chased and rides the agenda instead
-                      ("meeting_slug", "TEXT DEFAULT ''")):
+                      ("meeting_slug", "TEXT DEFAULT ''"),
+                      # v118: the prep - two or three lines a Claude run writes
+                      # onto a task from the real material (the email thread, the
+                      # numbers, the file), so the brief reads like a chief of
+                      # staff wrote it
+                      ("brief", "TEXT DEFAULT ''"),
+                      ("brief_at", "TEXT")):
         if col not in cols:
             con.execute("ALTER TABLE items ADD COLUMN %s %s" % (col, decl))
     # Shimon OS rule: nothing waits without a chase date. Tasks that were already
@@ -5085,6 +5091,45 @@ def api_park():
     return "PARKED: %s -> sit-down %s%s" % (it["title"], w, " " + at if at else ""), 200, _TXT
 
 
+@app.route("/api/prep", methods=["GET", "POST"])
+def api_task_prep():
+    """Write the prep onto a task: find, text (2-3 lines from the real material -
+    what the thread actually says, the number at stake, what to ask). Shown on
+    the OS row and the sit-down agenda. Empty text clears it.
+    (/api/brief already belongs to the morning-brief feed.)"""
+    if not _api_auth():
+        abort(401)
+    con = db()
+    it = _find_item(con, request.values.get("find"))
+    if not it:
+        return "ERROR: no task matches", 404, _TXT
+    text = (request.values.get("text") or "").strip()[:1200]
+    con.execute("UPDATE items SET brief=?, brief_at=? WHERE id=?",
+                (text, _now_local().isoformat(timespec="seconds") if text else None,
+                 it["id"]))
+    commit_retry(con)
+    return "BRIEFED: " + it["title"], 200, _TXT
+
+
+@app.route("/api/meeting_prep", methods=["GET", "POST"])
+def api_meeting_prep():
+    """Write the picture for a sit-down: who, text (the situation across emails,
+    numbers and files - what changed, what to raise first, what to walk out
+    with). Shown at the top of /meeting/<who>. Empty text clears it."""
+    if not _api_auth():
+        abort(401)
+    con = db()
+    w = (request.values.get("who") or "").strip().lower()[:40]
+    if not w:
+        return "ERROR: who required", 400, _TXT
+    text = (request.values.get("text") or "").strip()[:4000]
+    uset_put(con, "meet:" + w + ":prep", text)
+    uset_put(con, "meet:" + w + ":prep_at",
+             _now_local().isoformat(timespec="seconds") if text else "")
+    commit_retry(con)
+    return "PREPPED: sit-down %s (%d chars)" % (w, len(text)), 200, _TXT
+
+
 @app.route("/api/meetings")
 def api_meetings():
     """Every sit-down with anything on it, for the sweeps and the morning brief:
@@ -5262,6 +5307,8 @@ def meeting_view(who):
             latest[n["item_id"]] = n
     return render_template("meeting.html", who=w, label=w.title(), decisions=decisions,
                            waiting=waiting, agenda=agenda, latest=latest, last=last,
+                           prep=uset(con, "meet:" + w + ":prep"),
+                           prep_at=uset(con, "meet:" + w + ":prep_at"),
                            nxt=nxt, today_iso=_now_local().date().isoformat(),
                            pretty=_now_local().strftime("%A, %B %-d"),
                            decfor=_decision_for)
@@ -5357,6 +5404,7 @@ def meeting_debrief(who):
                 " WHERE lower(meeting_slug)=? AND status != 'done'",
                 (business_days_out(1), w))
     uset_put(con, "meet:" + w + ":next", "")
+    uset_put(con, "meet:" + w + ":prep", "")
     uset_put(con, "meet:" + w, now)
     commit_retry(con)
     return redirect(url_for("meeting_view", who=w))
