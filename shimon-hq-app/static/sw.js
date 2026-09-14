@@ -1,4 +1,4 @@
-const CACHE = 'hq-v5';
+const CACHE = 'hq-v6';   // bumped for the Shimon's HQ mark - clears every old cached icon
 const SHELL = ['/static/style.css', '/static/board.js', '/static/icon-192.png', '/static/icon-512.png'];
 
 self.addEventListener('install', function (e) {
