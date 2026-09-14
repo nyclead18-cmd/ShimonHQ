@@ -34,12 +34,28 @@
   .oslane .sec-head{flex:none}
   .lanebody{flex:1 1 auto;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
   .oslane .sec-head h2{font-size:1rem}
-  .osrow{padding:8px 10px;border-top:1px solid rgba(0,0,0,.06);line-height:1.3}
+  .osrow{border-top:1px solid rgba(0,0,0,.06);line-height:1.3}
   .osrow:first-child{border-top:0}
-  .osrow .t{font-weight:600}
-  .osrow .m{font-size:.82rem;opacity:.75;margin-top:2px}
+  .osrow summary{padding:8px 10px;cursor:pointer;list-style:none}
+  .osrow summary::-webkit-details-marker{display:none}
+  .osrow[open] summary{background:rgba(0,0,0,.03)}
+  .osrow .t{font-weight:600;display:block}
+  .osrow .m{font-size:.82rem;opacity:.75;margin-top:2px;display:block}
   .osrow .m b{font-weight:600;opacity:1}
   .osrow.over .m .d{color:#A33B2E;font-weight:700}
+  /* a row opens in place - the task never leaves the column */
+  .osd{padding:2px 10px 10px;font-size:.84rem}
+  .osd-n{opacity:.85;margin-bottom:4px}
+  .osd-note{opacity:.75;margin:3px 0}
+  .osd-note .nd{font-size:.72rem;opacity:.8;margin-right:4px}
+  .osd-respond{display:flex;gap:6px;margin:8px 0}
+  .osd-respond input{flex:1;min-width:0;padding:5px 8px;border:1px solid rgba(0,0,0,.15);border-radius:6px;font-size:16px}
+  .osd-respond button{padding:5px 10px;border-radius:6px;border:0;background:#1F3A5F;color:#fff;cursor:pointer}
+  .osd-actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .osd-actions form{display:flex;gap:4px;align-items:center;margin:0}
+  .osd-actions button{padding:4px 9px;border-radius:999px;border:1px solid rgba(31,58,95,.35);background:transparent;color:inherit;cursor:pointer;font-size:.8rem}
+  .osd-actions input[type=date]{padding:3px 5px;border:1px solid rgba(0,0,0,.15);border-radius:6px;font-size:.8rem}
+  .osd-board{font-size:.8rem;opacity:.7;text-decoration:none;margin-left:auto}
   .dec{background:rgba(107,74,138,.06);border-radius:8px;margin:6px;padding:8px 10px}
   .dec .q{font-weight:600}
   .dec .kv{font-size:.82rem;margin-top:3px}
@@ -98,17 +114,48 @@
       </form>
     </div>
     {% else %}
-    <div class="osrow{% if it.due_date and it.due_date < today_iso %} over{% endif %}">
-      <div class="t"><a href="{{ url_for('board') }}#item-{{ it.id }}">{{ it.title }}</a></div>
-      <div class="m">
+    <details class="osrow{% if it.due_date and it.due_date < today_iso %} over{% endif %}">
+      <summary>
+        <span class="t">{{ it.title }}</span>
+        <span class="m">
         {% if b == 'DELEGATE' %}<b>&rarr; {{ it.delegate_to }}</b>
         {% elif it.waiting_on %}<b>{{ it.waiting_on }}</b>{% endif %}
         {% if it.answered_at %} &middot; <span class="ansflag">answered</span>{% elif it.follow_up_at and b in ('WAITING','TODAY','PROBLEMS') %} &middot; chase <span class="d">{{ it.follow_up_at[5:7]|int }}/{{ it.follow_up_at[8:10]|int }}</span>{% if it.follow_up_count %} (x{{ it.follow_up_count }}){% endif %}{% endif %}
         {% if it.due_date %} &middot; due <span class="d">{{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}</span>{% endif %}
         {% if it.proj_title %} &middot; {{ it.proj_title }}{% elif it.sec_title %} &middot; {{ it.sec_title }}{% endif %}
-        {% if it.source_link %} &middot; <a class="srclink" href="{{ it.source_link }}" target="_blank" rel="noopener" title="Open the original message">{% if 'whatsapp' in it.source_link %}&#128172; chat{% else %}&#9993; email{% endif %}</a>{% endif %}
+        </span>
+      </summary>
+      <div class="osd">
+        {% if it.note %}<div class="osd-n" dir="auto">{{ it.note }}</div>{% endif %}
+        {% for n in (notes2.get(it.id) or []) %}
+        <div class="osd-note"><span class="nd">{{ n.created_at|stamp }}</span> <span dir="auto">{{ n.body }}</span></div>
+        {% endfor %}
+        <form class="osd-respond" method="post" action="{{ url_for('add_note', item_id=it.id) }}">
+          <input type="hidden" name="next" value="{{ url_for('os_view') }}">
+          <input name="body" placeholder="Add a response&hellip;" dir="auto" autocomplete="off">
+          <button type="submit">&#8594;</button>
+        </form>
+        <div class="osd-actions">
+          <form method="post" action="{{ url_for('set_item_status', item_id=it.id) }}">
+            <input type="hidden" name="next" value="{{ url_for('os_view') }}">
+            <button type="submit" name="status" value="done">&#10003; Done</button>
+          </form>
+          {% if it.waiting_on %}
+          <form method="post" action="{{ url_for('item_chased', item_id=it.id) }}">
+            <input type="hidden" name="next" value="{{ url_for('os_view') }}">
+            <button type="submit">Chased</button>
+          </form>
+          {% endif %}
+          <form method="post" action="{{ url_for('item_followup', item_id=it.id) }}">
+            <input type="hidden" name="next" value="{{ url_for('os_view') }}">
+            <input type="date" name="at" value="{{ it.follow_up_at or soon_iso }}">
+            <button type="submit">Chase then</button>
+          </form>
+          {% if it.source_link %}<a class="srclink" href="{{ it.source_link }}" target="_blank" rel="noopener">{% if 'whatsapp' in it.source_link %}&#128172; chat{% else %}&#9993; email{% endif %}</a>{% endif %}
+          <a class="osd-board" href="{{ url_for('board') }}#item-{{ it.id }}">full card &#8599;</a>
+        </div>
       </div>
-    </div>
+    </details>
     {% endif %}
   {% endfor %}
   </div>

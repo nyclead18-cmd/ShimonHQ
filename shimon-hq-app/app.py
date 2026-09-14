@@ -1733,6 +1733,9 @@ def set_item_status(item_id):
                 (st, now, now if st == "done" else None, item_id))
     commit_retry(con)
     _tell_status(con, item_id, was, st)
+    nxt = request.form.get("next") or ""
+    if nxt.startswith("/") and not nxt.startswith("//"):
+        return redirect(nxt)
     return jsonify(status=st)
 
 
@@ -5052,6 +5055,46 @@ def item_decide(item_id):
     return redirect(request.form.get("back") or url_for("os_view"))
 
 
+def _back_to(default="os_view"):
+    nxt = request.form.get("next") or ""
+    return redirect(nxt if nxt.startswith("/") and not nxt.startswith("//")
+                    else url_for(default))
+
+
+@app.route("/items/<int:item_id>/chased", methods=["POST"])
+@login_required
+def item_chased(item_id):
+    """The Chased button on an OS row: same bookkeeping as /api/chased,
+    from a signed-in tap instead of a sweep."""
+    con = db()
+    require_item(con, item_id)
+    it = con.execute("SELECT * FROM items WHERE id=?", (item_id,)).fetchone()
+    nxt = business_days_out(3)
+    now = datetime.now().isoformat(timespec="seconds")
+    con.execute("UPDATE items SET follow_up_count=COALESCE(follow_up_count,0)+1,"
+                " follow_up_at=?, answered_at=NULL, updated_at=? WHERE id=?",
+                (nxt, now, item_id))
+    con.execute("INSERT INTO item_notes(item_id, body, source, created_at) VALUES(?,?,?,?)",
+                (item_id, "Chased %s" % (it["waiting_on"] or "-"), "os", now))
+    commit_retry(con)
+    return _back_to()
+
+
+@app.route("/items/<int:item_id>/followup", methods=["POST"])
+@login_required
+def item_followup(item_id):
+    """Set or move a task's chase date from an OS row."""
+    con = db()
+    require_item(con, item_id)
+    at = _iso_or_blank(request.form.get("at")) or business_days_out(3)
+    con.execute("UPDATE items SET follow_up_at=?, answered_at=NULL,"
+                " status=CASE WHEN status='open' AND COALESCE(waiting_on,'')!=''"
+                " THEN 'waiting' ELSE status END, updated_at=? WHERE id=?",
+                (at, datetime.now().isoformat(timespec="seconds"), item_id))
+    commit_retry(con)
+    return _back_to()
+
+
 @app.route("/api/delegate")
 def api_delegate():
     """Hand a task to someone: find, to. It shows in DELEGATE until it moves."""
@@ -5113,6 +5156,13 @@ def os_view():
         if d in ("joel", "yechiel") and not r["decided_at"]:
             meetnames[d.title()] = meetnames.get(d.title(), 0) + 1
     meet = [n for n, _ in sorted(meetnames.items(), key=lambda kv: -kv[1])[:4]]
+    # a row opens in place: the last word or two on each task rides along
+    ids = {r["id"] for lane in lanes.values() for r in lane}
+    notes2 = {}
+    for n in con.execute("SELECT item_id, body, created_at FROM item_notes ORDER BY id"):
+        if n["item_id"] in ids:
+            notes2.setdefault(n["item_id"], []).append(n)
+    notes2 = {k: v[-2:] for k, v in notes2.items()}
     labels = {"TODAY": "Today", "WAITING": "Waiting on", "DECIDE": "Needs me",
               "JOEL": "Needs Joel", "DELEGATE": "Delegate", "PROBLEMS": "Problems",
               "UPCOMING": "Upcoming"}
@@ -5120,7 +5170,7 @@ def os_view():
               "JOEL": "#B8892E", "DELEGATE": "#3A6B3E", "PROBLEMS": "#A33B2E",
               "UPCOMING": "#5B6770"}
     return render_template("os.html", lanes=lanes, order=OS_BUCKETS, labels=labels,
-                           colors=colors, today_iso=today, meet=meet,
+                           colors=colors, today_iso=today, meet=meet, notes2=notes2,
                            soon_iso=(date.fromisoformat(today) + timedelta(days=3)).isoformat(),
                            pretty=_now_local().strftime("%A, %B %-d"),
                            decfor=_decision_for)
