@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Voicemail · HQ{% endblock %}
+{% block body %}
+<div class="wrap">
+<header class="top">
+  <div>
+    <div class="eyebrow">Joel's line · almanos &amp; tzedakah</div>
+    <h1>Voicemail</h1>
+  </div>
+  <div class="right">
+    <nav class="tabs">
+      <a class="tab" href="{{ url_for('os_view') }}">OS</a>
+      <a class="tab" href="{{ url_for('today_view') }}">Today</a>
+      <a class="tab" href="{{ url_for('board') }}">Board</a>
+      <a class="tab on" href="{{ url_for('vm_view') }}">Voicemail</a>
+      <a class="tab" href="{{ url_for('joel_view') }}">Review</a>
+    </nav>
+    <a class="logout" href="{{ url_for('account_view') }}">{{ session.get('name') or 'Account' }}</a>
+    <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
+  </div>
+</header>
+
+<style>
+  .vmbar{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin:.4rem 0 1rem;font-size:.9rem;opacity:.85}
+  .vmbar .sp{flex:1}
+  .vm{border-radius:12px;padding:.9rem 1rem;margin-bottom:.8rem;background:var(--card,#fff);box-shadow:0 1px 3px rgba(0,0,0,.08)}
+  .vm.done{opacity:.6}
+  .vmhead{display:flex;gap:.8rem;align-items:baseline;flex-wrap:wrap}
+  .vmhead b{font-size:1.05rem}
+  .vmhead .meta{opacity:.7;font-size:.85rem}
+  .vm audio{width:100%;margin:.5rem 0;height:36px}
+  .yi{direction:rtl;text-align:right;font-size:1.15rem;line-height:1.6;font-family:"Frank Ruhl Libre","Noto Serif Hebrew","David",serif;white-space:pre-wrap;margin:.5rem 0}
+  .en{white-space:pre-wrap;line-height:1.45;margin:.4rem 0;padding:.5rem .7rem;border-left:3px solid #1F3A5F;background:rgba(31,58,95,.05)}
+  .rc{font-size:.85rem;opacity:.7;white-space:pre-wrap}
+  .pend{font-size:.85rem;opacity:.7;font-style:italic}
+  .err{font-size:.8rem;color:#a33}
+  .acts{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.5rem;align-items:center}
+  .acts form{display:inline}
+  .acts input[type=text]{min-width:16rem;padding:.35rem .5rem;border-radius:8px;border:1px solid #ccc}
+  .pill{font-size:.75rem;padding:.1rem .5rem;border-radius:999px;background:#eee}
+  .pill.new{background:#fff3cd}.pill.failed{background:#f8d7da}.pill.skipped{background:#e2e3e5}
+  .warn{padding:.6rem .9rem;border-radius:10px;background:#fff3cd;margin-bottom:.8rem;font-size:.9rem}
+</style>
+
+{% if not rc_ok %}<div class="warn">RingCentral is not connected yet — set <code>RC_CLIENT_ID</code>, <code>RC_CLIENT_SECRET</code>, <code>RC_JWT</code>, <code>RC_EXTENSION_ID</code> on Render.</div>{% endif %}
+{% if rc_ok and not yl_ok %}<div class="warn">Recordings come in, but no transcripts until <code>YL_API_KEY</code> are set.</div>{% endif %}
+
+<div class="vmbar">
+  <span>{{ counts.open }} open{% if counts.pending %} · {{ counts.pending }} waiting on transcript{% endif %}</span>
+  <span class="sp"></span>
+  {% if show == 'all' %}<a href="{{ url_for('vm_view') }}">Open only</a>{% else %}<a href="{{ url_for('vm_view', show='all') }}">Show handled</a>{% endif %}
+  <form method="post" action="{{ url_for('api_vm_sync', back=1) }}"><button type="submit" class="printbtn">Check now</button></form>
+  <form method="post" action="{{ url_for('api_vm_sync', back=1, days=365) }}"><button type="submit" class="printbtn">Backfill 1 yr</button></form>
+  {% if last_sync %}<span class="meta">last check {{ last_sync[:16].replace('T',' ') }}</span>{% endif %}
+</div>
+
+{% if not rows %}<p class="hint">Nothing here.</p>{% endif %}
+
+{% for r in rows %}
+<article class="vm {% if r.handled %}done{% endif %}" id="vm-{{ r.id }}">
+  <div class="vmhead">
+    <b>{{ r.caller_name or fmt_phone(r.caller_number) or 'Unknown caller' }}</b>
+    {% if r.caller_name and r.caller_number %}<span class="meta">{{ fmt_phone(r.caller_number) }}</span>{% endif %}
+    <span class="meta">{{ (r.ts or '')[:16].replace('T',' ') }}</span>
+    {% if r.duration %}<span class="meta">{{ r.duration }}s</span>{% endif %}
+    {% if r.tstatus != 'done' %}<span class="pill {{ r.tstatus }}">{{ {'new':'transcribing…','failed':'transcript failed','skipped':'no recording'}[r.tstatus] }}</span>{% endif %}
+    {% if r.item_id %}<a class="pill" href="{{ url_for('task_view', item_id=r.item_id) }}">task #{{ r.item_id }}</a>{% endif %}
+  </div>
+  {% if r.stored_name %}<audio controls preload="none" src="{{ url_for('vm_audio', vid=r.id) }}"></audio>{% endif %}
+  {% if r.english %}<div class="en">{{ r.english }}</div>{% endif %}
+  {% if r.yiddish %}<div class="yi">{{ r.yiddish }}</div>{% endif %}
+  {% if not r.yiddish and r.rc_text %}<div class="rc">RingCentral (English, rough): {{ r.rc_text }}</div>{% endif %}
+  {% if r.terror %}<div class="err">{{ r.terror }}</div>{% endif %}
+  <div class="acts">
+    {% if not r.item_id %}
+    <form method="post" action="{{ url_for('vm_task', vid=r.id) }}">
+      <input type="text" name="title" placeholder="Call back {{ r.caller_name or fmt_phone(r.caller_number) }}">
+      <button type="submit" class="printbtn">Make task</button>
+    </form>
+    {% endif %}
+    <form method="post" action="{{ url_for('vm_handled', vid=r.id) }}">
+      <input type="hidden" name="show" value="{{ show }}">
+      {% if r.handled %}<input type="hidden" name="undo" value="1"><button type="submit">Reopen</button>
+      {% else %}<button type="submit">Handled</button>{% endif %}
+    </form>
+    {% if r.tstatus == 'failed' %}
+    <form method="post" action="{{ url_for('api_vm_retry', vid=r.id) }}"><input type="hidden" name="show" value="{{ show }}"><button type="submit">Retry transcript</button></form>
+    {% endif %}
+  </div>
+</article>
+{% endfor %}
+</div>
+{% endblock %}

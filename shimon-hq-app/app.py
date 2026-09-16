@@ -14,6 +14,7 @@ from markupsafe import Markup, escape
 import maps
 import pulse
 import wa
+import vm
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(BASE, "hq.db"))
@@ -707,6 +708,7 @@ def init_db():
         " from_me INTEGER NOT NULL DEFAULT 0, text TEXT, ts TEXT, received_at TEXT,"
         " handled INTEGER NOT NULL DEFAULT 0);"
         "CREATE INDEX IF NOT EXISTS wa_inbox_open ON wa_inbox(handled, ts);")
+    vm.ensure_schema(con)
     if "created_at" not in cols:
         con.execute("ALTER TABLE items ADD COLUMN created_at TEXT")
     # Today is a flag, not a list. Keeping "today" and "this week" as two lists
@@ -4768,12 +4770,34 @@ def reminder_tick():
     con.close()
 
 
+_vm_last = [0.0]
+
+
+def vm_tick():
+    """Every five minutes: anything new on the voicemail line comes in and goes
+    to Yiddish Labs. Own connection - this runs off the request thread."""
+    if not vm.configured() or _time.time() - _vm_last[0] < 300:
+        return
+    _vm_last[0] = _time.time()
+    con = sqlite3.connect(DB_PATH, timeout=15)
+    con.row_factory = sqlite3.Row
+    con.execute("PRAGMA busy_timeout = 15000")
+    try:
+        vm.sync(con, FILES_DIR, log=app.logger.info)
+    finally:
+        con.close()
+
+
 def _reminder_loop():
     while True:
         try:
             reminder_tick()
         except Exception as e:
             app.logger.warning("reminder tick failed: %s", e)
+        try:
+            vm_tick()
+        except Exception as e:
+            app.logger.warning("vm tick failed: %s", e)
         _time.sleep(60)
 
 
@@ -5567,6 +5591,107 @@ def meeting_debrief(who):
 _init_db_once()
 ensure_vapid()
 start_reminders()
+
+
+# ---------- voicemail (Joel's almanos / tzedakah line) ----------
+
+@app.route("/vm")
+@login_required
+def vm_view():
+    con = db()
+    show = request.args.get("show", "open")
+    where = "" if show == "all" else "WHERE handled=0"
+    rows = con.execute("SELECT * FROM voicemails %s ORDER BY ts DESC LIMIT 300" % where).fetchall()
+    last = con.execute("SELECT v FROM settings WHERE k='vm_last_sync'").fetchone()
+    counts = {
+        "open": con.execute("SELECT COUNT(*) FROM voicemails WHERE handled=0").fetchone()[0],
+        "pending": con.execute("SELECT COUNT(*) FROM voicemails WHERE tstatus IN ('new','failed')"
+                               " AND stored_name IS NOT NULL").fetchone()[0],
+    }
+    return render_template("vm.html", rows=rows, show=show, counts=counts,
+                           last_sync=(last["v"] if last else None),
+                           rc_ok=vm.configured(), yl_ok=vm.yl_configured(),
+                           fmt_phone=vm.fmt_phone)
+
+
+@app.route("/vm/<int:vid>/audio")
+@login_required
+def vm_audio(vid):
+    row = db().execute("SELECT stored_name FROM voicemails WHERE id=?", (vid,)).fetchone()
+    if not row or not row["stored_name"]:
+        abort(404)
+    return send_from_directory(os.path.join(FILES_DIR, "vm"), row["stored_name"],
+                               conditional=True)
+
+
+@app.route("/vm/<int:vid>/handled", methods=["POST"])
+@login_required
+def vm_handled(vid):
+    con = db()
+    con.execute("UPDATE voicemails SET handled=? WHERE id=?",
+                (0 if request.form.get("undo") else 1, vid))
+    commit_retry(con)
+    return redirect(url_for("vm_view", show=request.form.get("show", "open")))
+
+
+@app.route("/vm/<int:vid>/task", methods=["POST"])
+@login_required
+def vm_task(vid):
+    """One click: the voicemail becomes a task in Community/Charity, transcript in the note,
+    follow-up tomorrow, and the recording linked back."""
+    con = db()
+    r = con.execute("SELECT * FROM voicemails WHERE id=?", (vid,)).fetchone()
+    if not r:
+        abort(404)
+    uid = session.get("uid")
+    sid = ensure_buckets(con, uid)["Community/Charity"]
+    who = r["caller_name"] or vm.fmt_phone(r["caller_number"]) or "unknown caller"
+    title = (request.form.get("title") or "").strip() or ("Call back %s (voicemail)" % who)
+    note = "\n\n".join(x for x in (
+        (r["english"] or "").strip(),
+        (r["yiddish"] or "").strip(),
+        "Voicemail %s · %s · %ss\n%s" % (
+            (r["ts"] or "")[:16].replace("T", " "), vm.fmt_phone(r["caller_number"]),
+            r["duration"] or "?", url_for("vm_audio", vid=vid, _external=True))) if x)
+    pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM items WHERE section_id=?",
+                      (sid,)).fetchone()[0]
+    now = datetime.now().isoformat(timespec="seconds")
+    due = (date.today() + timedelta(days=1)).isoformat()
+    cur = con.execute(
+        "INSERT INTO items(section_id, title, note, waiting_on, status, pos, due_date,"
+        " updated_at, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+        (sid, title, note, "", "open", pos, due, now, now))
+    con.execute("UPDATE voicemails SET item_id=?, handled=1 WHERE id=?", (cur.lastrowid, vid))
+    commit_retry(con)
+    return redirect(url_for("task_view", item_id=cur.lastrowid))
+
+
+@app.route("/api/vm/sync", methods=["POST"])
+@login_required
+def api_vm_sync():
+    """Pull now instead of waiting for the five-minute tick. ?days=N widens the backfill."""
+    if not vm.configured():
+        return jsonify(error="RingCentral not configured (RC_CLIENT_ID / RC_CLIENT_SECRET / RC_JWT)"), 400
+    days = request.args.get("days", type=int)
+    dfrom = (date.today() - timedelta(days=days)).isoformat() if days else None
+    try:
+        new, done = vm.sync(db(), FILES_DIR, log=app.logger.info, date_from=dfrom)
+    except Exception as e:
+        return jsonify(error=str(e)[:500]), 502
+    if request.args.get("back"):
+        return redirect(url_for("vm_view"))
+    return jsonify(ok=True, new=new, transcribed=done)
+
+
+@app.route("/api/vm/<int:vid>/retry", methods=["POST"])
+@login_required
+def api_vm_retry(vid):
+    con = db()
+    con.execute("UPDATE voicemails SET tstatus='new' WHERE id=?", (vid,))
+    commit_retry(con)
+    vm.transcribe_pending(con, FILES_DIR, log=app.logger.info, max_n=1)
+    return redirect(url_for("vm_view", show=request.form.get("show", "open")))
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
