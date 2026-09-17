@@ -11,6 +11,10 @@ Env:
   RC_EXTENSION_ID    the extension whose voicemail box we read. "~" = the JWT user.
   RC_EXTENSION_NAME  or: resolve the box by its name/number (e.g. "Shefa yoel");
                      needs the ReadAccounts scope on the RC app.
+  RC_LINES           several boxes in one inbox: "spec=Label;spec=Label", spec being an
+                     extension id, number or name, e.g.
+                     "Shefa yoel=Shefa Yoel line;Rivky Mayer=Mrs. Mayer's line".
+                     Overrides RC_EXTENSION_ID / RC_EXTENSION_NAME when set.
   RC_DATE_FROM     backfill start, YYYY-MM-DD (default: 90 days back)
   YL_API_KEY       Yiddish Labs key (yl_live_... standard, or yl_flash_... flash)
   YL_MODE          standard | flash (inferred from the key prefix if unset)
@@ -78,7 +82,11 @@ def mirror_sync(con, files_dir, log=None):
     Handled / task / Divrei HaYamim state stays local to this HQ."""
     log = log or (lambda *a: None)
     h = {"Authorization": "Bearer " + os.environ["VM_MIRROR_TOKEN"]}
-    rows = _req(MIRROR_URL + "/api/vm/export", headers=h, timeout=120).get("voicemails", [])
+    exp = _req(MIRROR_URL + "/api/vm/export", headers=h, timeout=120)
+    rows = exp.get("voicemails", [])
+    if exp.get("lines"):
+        con.execute("INSERT INTO settings(k, v) VALUES('vm_lines', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+                    (json.dumps(exp["lines"]),))
     vm_dir = os.path.join(files_dir, "vm")
     os.makedirs(vm_dir, exist_ok=True)
     have = {r[0]: r for r in con.execute("SELECT rc_id, tstatus, stored_name FROM voicemails")}
@@ -175,16 +183,24 @@ def _rc_get(path, params=None, raw=False):
 
 _ext_cache = {}
 
+DEFAULT_LINE = "Shefa Yoel line"
+
 
 def rc_extension_id():
-    """RC_EXTENSION_ID wins; else RC_EXTENSION_NAME is matched against the account's
-    extensions (name or extension number, case-insensitive); else the JWT user."""
-    eid = (os.environ.get("RC_EXTENSION_ID") or "").strip()
-    if eid:
-        return eid
-    want = (os.environ.get("RC_EXTENSION_NAME") or "").strip().lower()
-    if not want:
+    """The first (main) line's extension id - RC_EXTENSION_ID wins; else
+    RC_EXTENSION_NAME is matched against the account's extensions; else the JWT user."""
+    return lines()[0]["id"]
+
+
+def _resolve_ext(spec):
+    """An extension id, an extension number, a name (case-insensitive, loose match
+    as a fallback), or '~' for the JWT user -> the extension id RingCentral wants."""
+    want = (spec or "").strip()
+    if not want or want == "~":
         return "~"
+    if want.isdigit() and len(want) >= 6:
+        return want                    # already an id
+    want = want.lower()
     if want in _ext_cache:
         return _ext_cache[want]
     page = 1
@@ -206,8 +222,68 @@ def rc_extension_id():
     raise RuntimeError("RingCentral extension %r not found (%d loose matches)" % (want, len(hits)))
 
 
-def rc_list_voicemails(date_from=None):
-    ext = rc_extension_id()
+def line_specs():
+    """[(spec, label)] from RC_LINES ("Shefa yoel=Shefa Yoel line;Rivky Mayer=Mrs. Mayer's line"),
+    else the single RC_EXTENSION_ID / RC_EXTENSION_NAME line."""
+    raw = (os.environ.get("RC_LINES") or "").strip()
+    out = []
+    if raw:
+        for part in raw.split(";"):
+            if not part.strip():
+                continue
+            spec, _, label = part.partition("=")
+            out.append((spec.strip(), (label.strip() or spec.strip())))
+    if not out:
+        spec = (os.environ.get("RC_EXTENSION_ID") or os.environ.get("RC_EXTENSION_NAME") or "~").strip()
+        out.append((spec, DEFAULT_LINE))
+    return out
+
+
+_lines_cache = {"at": 0, "data": None}
+
+
+def lines():
+    """[{id, label}] - the voicemail boxes this HQ reads, resolved once an hour."""
+    if _lines_cache["data"] and time.time() - _lines_cache["at"] < 3600:
+        return _lines_cache["data"]
+    out = []
+    for spec, label in line_specs():
+        try:
+            out.append({"id": _resolve_ext(spec), "label": label})
+        except Exception:
+            if not out and not _lines_cache["data"]:
+                raise
+    if out:
+        _lines_cache.update(at=time.time(), data=out)
+    return out or _lines_cache["data"] or [{"id": "~", "label": DEFAULT_LINE}]
+
+
+def line_labels(con=None):
+    """{extension id: label}. On a mirror (Joel's HQ) the labels come from the source
+    HQ, kept in settings; here they come from the env."""
+    if con is not None:
+        try:
+            row = con.execute("SELECT v FROM settings WHERE k='vm_lines'").fetchone()
+            if row and row[0]:
+                d = json.loads(row[0])
+                if d:
+                    return d
+        except Exception:
+            pass
+    if mirror_configured() or not configured():
+        return {}
+    try:
+        return {l["id"]: l["label"] for l in lines()}
+    except Exception:
+        return {}
+
+
+def line_label(ext, labels):
+    return labels.get(str(ext or ""), DEFAULT_LINE if len(labels) <= 1 else "Line %s" % ext)
+
+
+def rc_list_voicemails(date_from=None, ext=None):
+    ext = ext or rc_extension_id()
     if not date_from:
         days = 90
         date_from = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -460,9 +536,11 @@ def _read_plain(row):
             "callback": cb, "amount": "", "who": who, "by": "plain"}
 
 
-def read(row, families_label=""):
+def read(row, families_label="", line=""):
     """Return {title, todos[], kind, gist, callback, amount, who}. Never raises."""
     plain = _read_plain(row)
+    if line and line != DEFAULT_LINE:
+        plain["line"] = line
     key = os.environ.get("ANTHROPIC_API_KEY")
     text = (row["english"] or "").strip()
     yid = (row["yiddish"] or "").strip()
@@ -470,9 +548,9 @@ def read(row, families_label=""):
         return plain
     who = row["caller_name"] or families_label or fmt_phone(row["caller_number"]) or "unknown"
     prompt = (
-        "You read voicemails left on the Shefa Yoel line - a charity line that supports almanos and "
-        "yesomim (widows and orphans) with checks, yom tov packages, family help. The office turns each "
-        "message into a task on the board.\n\n"
+        "You read voicemails left for a charity office that supports almanos and yesomim (widows and "
+        "orphans) with checks, yom tov packages, family help. This one came in on: %s. The office turns "
+        "each message into a task on the board.\n\n"
         "Caller (as known): %s\nCallback number on the line: %s\n\n"
         "English transcript:\n%s\n\nYiddish transcript:\n%s\n\n"
         "Return ONLY a JSON object with these keys:\n"
@@ -489,8 +567,8 @@ def read(row, families_label=""):
         "  callback: the phone number to call back if the caller said one, else \"\".\n"
         "  amount: any dollar amount mentioned, as text, else \"\".\n"
         "  who: the caller's name as best you can tell (e.g. \"Mrs. Reich\"), else \"\".\n"
-        "No markdown, no preamble." % (who, fmt_phone(row["caller_number"]) or "unknown", text[:6000] or "(none)",
-                                       yid[:6000] or "(none)"))
+        "No markdown, no preamble." % (line or DEFAULT_LINE, who, fmt_phone(row["caller_number"]) or "unknown",
+                                       text[:6000] or "(none)", yid[:6000] or "(none)"))
     body = json.dumps({"model": os.environ.get("HQ_SUMMARY_MODEL", "claude-haiku-4-5"),
                        "max_tokens": 500,
                        "messages": [{"role": "user", "content": prompt}]}).encode()
@@ -504,7 +582,7 @@ def read(row, families_label=""):
         todos = [str(x).strip()[:90] for x in (d.get("todos") or []) if str(x).strip()][:5] or plain["todos"]
         kind = d.get("kind") if d.get("kind") in KINDS else plain["kind"]
         return {"title": (str(d.get("title") or "").strip()[:80] or plain["title"]),
-                "todos": todos, "kind": kind,
+                "todos": todos, "kind": kind, "line": plain.get("line", ""),
                 "gist": str(d.get("gist") or "").strip()[:400] or plain["gist"],
                 "callback": str(d.get("callback") or "").strip()[:30] or plain["callback"],
                 "amount": str(d.get("amount") or "").strip()[:30],
@@ -517,9 +595,10 @@ def read_pending(con, max_n=5, label_for=None):
     """Run the read step on transcribed voicemails that have not been read yet."""
     rows = con.execute("SELECT * FROM voicemails WHERE tstatus='done' AND read_json IS NULL"
                        " ORDER BY ts DESC LIMIT ?", (max_n,)).fetchall()
+    labels = line_labels(con)
     n = 0
     for r in rows:
-        d = read(r, label_for(r) if label_for else "")
+        d = read(r, label_for(r) if label_for else "", line_label(r["ext"], labels))
         con.execute("UPDATE voicemails SET read_json=?, kind=? WHERE id=?",
                     (json.dumps(d, ensure_ascii=False), d["kind"], r["id"]))
         con.commit()
@@ -669,7 +748,16 @@ def sync(con, files_dir, log=None, date_from=None, transcribe=True, limit=None):
     vm_dir = os.path.join(files_dir, "vm")
     os.makedirs(vm_dir, exist_ok=True)
     have = {r[0] for r in con.execute("SELECT rc_id FROM voicemails")}
-    recs = rc_list_voicemails(date_from or os.environ.get("RC_DATE_FROM"))
+    recs = []
+    for ln in lines():
+        for m in rc_list_voicemails(date_from or os.environ.get("RC_DATE_FROM"), ext=ln["id"]):
+            m["_ext"] = ln["id"]
+            recs.append(m)
+    try:
+        con.execute("INSERT INTO settings(k, v) VALUES('vm_lines', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+                    (json.dumps({l["id"]: l["label"] for l in lines()}),))
+    except Exception:
+        pass
     recs.sort(key=lambda m: m.get("creationTime", ""))
     new = 0
     for m in recs:
@@ -693,7 +781,7 @@ def sync(con, files_dir, log=None, date_from=None, transcribe=True, limit=None):
             "INSERT INTO voicemails(rc_id, ext, ts, caller_number, caller_name, duration,"
             " stored_name, rc_text, tstatus, received_at) VALUES(?,?,?,?,?,?,?,?,?,?)"
             " ON CONFLICT(rc_id) DO NOTHING",
-            (str(m["id"]), rc_extension_id(), to_local(m.get("creationTime")),
+            (str(m["id"]), m.get("_ext") or rc_extension_id(), to_local(m.get("creationTime")),
              num, name, dur, stored, rc_transcript(m),
              ("short" if (stored and dur is not None and int(dur) <= SHORT_SEC)
               else "new" if stored else "skipped"),

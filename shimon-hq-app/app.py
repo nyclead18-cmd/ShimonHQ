@@ -3234,7 +3234,7 @@ def _int_or_none(v):
 
 NOTIFY_KINDS = {"notes": "Someone responds on a shared task",
                 "done": "Someone closes a shared task",
-                "vm": "A new voicemail comes in on the Shefa Yoel line"}
+                "vm": "A new voicemail comes in on the Shefa Yoel line (or Mrs. Mayer's)"}
 
 
 def wants(con, uid, kind):
@@ -5256,9 +5256,10 @@ def _vm_task_note(r, rd):
         vm.KIND_LABEL.get(rd.get("kind") or "", "")) if x]
     head = "\n".join(x for x in (rd.get("gist", ""), " · ".join(facts)) if x)
     body = "\n\n".join(x for x in ((r["english"] or "").strip(), (r["yiddish"] or "").strip()) if x)
-    tail = "Voicemail %s · %s · %ss\n%s" % (
+    tail = "Voicemail %s · %s · %ss%s\n%s" % (
         (r["ts"] or "")[:16].replace("T", " "), vm.fmt_phone(r["caller_number"]),
-        r["duration"] or "?", url_for("vm_audio", vid=r["id"], _external=True))
+        r["duration"] or "?", (" · " + rd["line"]) if rd.get("line") else "",
+        url_for("vm_audio", vid=r["id"], _external=True))
     return "\n\n".join(x for x in (head, ("— transcript —\n" + body) if body else "", tail) if x)
 
 
@@ -5332,6 +5333,7 @@ def vm_notify(con):
         return
     everyone = [u[0] for u in con.execute("SELECT id FROM users")]
     admins = [u[0] for u in con.execute("SELECT id FROM users WHERE is_admin=1")]
+    labels = vm.line_labels(con)
     for r in rows:
         cur = con.execute("UPDATE voicemails SET notified=1 WHERE id=? AND notified=0", (r["id"],))
         commit_retry(con)
@@ -5343,6 +5345,8 @@ def vm_notify(con):
         name = r["caller_name"] or vm.fmt_phone(r["caller_number"]) or "Unknown caller"
         secs = int(r["duration"] or 0)
         title = "Voicemail \u00b7 %s" % name
+        if len(labels) > 1:
+            title = "%s \u00b7 %s" % (vm.line_label(r["ext"], labels).replace(" line", ""), name)
         if r["english"]:
             body = _short(r["english"], 140)
         else:
@@ -6188,6 +6192,14 @@ def vm_view():
         qwhere, qargs = "", ()
     else:
         qwhere, qargs = " AND v.assignee=?", (int(q),)
+    # Lines. One inbox, several voicemail boxes (Shefa Yoel, Mrs. Mayer); pick one or see all.
+    line_labels = vm.line_labels(con)
+    line = request.args.get("line", "")
+    if line and line in line_labels:
+        qwhere += " AND v.ext=?"
+        qargs += (line,)
+    else:
+        line = ""
     # "Handled" is mine alone: what I file away stays filed for me and untouched for
     # everyone else, so two people can work the same line without tripping over each other.
     where = {"all": "WHERE 1=1" + qwhere,
@@ -6245,7 +6257,19 @@ def vm_view():
             return d.strftime("%A")
         return d.strftime("%A, %B %-d") if d.year == today.year else d.strftime("%B %-d, %Y")
 
+    lcounts = {}
+    if len(line_labels) > 1:
+        for ext in line_labels:
+            lcounts[ext] = con.execute(
+                "SELECT COUNT(*) FROM voicemails v LEFT JOIN vm_handled h ON h.vm_id=v.id AND h.user_id=?"
+                " WHERE h.vm_id IS NULL AND tstatus NOT IN ('short','empty','skipped') AND v.ext=?"
+                + (" AND v.assignee IS NULL" if q == "" else "" if q == "all" else " AND v.assignee=?"),
+                (me(), ext) + (() if q in ("", "all") else (int(q),))).fetchone()[0]
     return render_template("vm.html", rows=rows, show=show, counts=counts, busy=_vm_lock.locked(),
+                           line=line, line_labels=line_labels, lcounts=lcounts,
+                           line_name=(line_labels.get(line) if line else
+                                      (vm.DEFAULT_LINE if len(line_labels) <= 1 else " · ".join(line_labels.values()))),
+                           line_of=lambda r: vm.line_label(r["ext"], line_labels),
                            dh=dh, dh_url=vm.DH_URL, share_token=vm_share_token, day_label=day_label,
                            mirror=vm.mirror_configured(), folk=folk, q=q, qcounts=qcounts, admin=admin,
                            me_id=me(), fam_of=fam_of, digits10=families.digits10, fam_label=families.label,
@@ -6452,7 +6476,7 @@ def vm_task(vid):
     tag_to = r["assignee"] or (me() if me() != owner else None)
     # what the message asks for: read once by the read step, or on the spot
     if not r["read_json"]:
-        d = vm.read(r, _fam_label_for(con)(r))
+        d = vm.read(r, _fam_label_for(con)(r), vm.line_label(r["ext"], vm.line_labels(con)))
         con.execute("UPDATE voicemails SET read_json=?, kind=? WHERE id=?",
                     (json.dumps(d, ensure_ascii=False), d["kind"], vid))
         r = con.execute("SELECT * FROM voicemails WHERE id=?", (vid,)).fetchone()
@@ -6516,7 +6540,7 @@ def api_vm_export():
         return jsonify(error="unauthorized"), 401
     rows = db().execute("SELECT rc_id, ext, ts, caller_number, caller_name, duration, stored_name,"
                         " rc_text, yiddish, english, tstatus, read_json, kind FROM voicemails ORDER BY ts").fetchall()
-    return jsonify(voicemails=[dict(r) for r in rows])
+    return jsonify(voicemails=[dict(r) for r in rows], lines=vm.line_labels(db()))
 
 
 @app.route("/api/vm/<rc_id>/audio")
