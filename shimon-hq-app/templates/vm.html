@@ -44,7 +44,7 @@
   .vmpage .vm.done .who,.vmpage .vm.done .peek{opacity:.5}
   .vmpage .row{position:relative;display:grid;grid-template-columns:14px 1fr auto;column-gap:8px;align-items:start;
     padding:12px 14px 12px 10px;cursor:pointer;background:var(--card);transition:background .15s;
-    transform:translateX(0);-webkit-tap-highlight-color:transparent;user-select:none}
+    transform:translateX(0);-webkit-tap-highlight-color:transparent;user-select:none;touch-action:pan-y}
   .vmpage .vm.sw .row,.vmpage .vm.swiped .row{will-change:transform}
   .vmpage .row:active{background:var(--row)}
   .vmpage .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);margin-top:7px;justify-self:center;transition:opacity .3s,transform .3s}
@@ -220,9 +220,6 @@
         {% if dh and not r.dh_event_id and r.stored_name %}<button type="button" class="ib" data-sheet="dh-{{ r.id }}"><svg viewBox="0 0 24 24"><path d="M4 5h11a3 3 0 0 1 3 3v11H7a3 3 0 0 1-3-3z"/><path d="M8 9h6M8 13h6"/></svg>Chronicle</button>{% endif %}
         <div class="more"><button type="button" class="ib quiet" data-menu><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/></svg>More</button>
           <div class="menu">
-            {% if r.english %}<button type="button" data-copy="en">Copy English</button>{% endif %}
-            {% if r.yiddish %}<button type="button" data-copy="yi">Copy Yiddish</button>{% endif %}
-            {% if r.english or r.yiddish %}<button type="button" data-copy="all">Copy everything</button>{% endif %}
             {% if r.stored_name %}<button type="button" data-copy="link">Copy web link</button>
             <a href="{{ url_for('vm_audio', vid=r.id, dl=1) }}">Download mp3</a>{% endif %}
             {% if not mirror and r.tstatus in ('failed','empty','short') and r.stored_name %}<hr>
@@ -432,15 +429,20 @@
     if (x > 0) x = 0; if (x < -w) x = -w - (-w - x) * 0.15;     // a little give past the buttons
     sw.dx = dx; sw.row.style.transform = 'translateX(' + x + 'px)';
   }, {passive: true});
-  document.addEventListener('touchend', function(){
+  function endSwipe(cancel){
     if (!sw) return; var c = sw.c, row = sw.row, dx = sw.dx, live = sw.live, was = sw.was; sw = null;
     if (!live) return;
     c.classList.add('anim'); row.style.transform = '';
-    var openIt = was ? dx < 40 : dx < -50;
+    // iOS sends touchcancel when it takes the gesture for scrolling: snap back to where we were
+    var openIt = cancel ? was : (was ? dx < 40 : dx < -50);
     c.classList.toggle('swiped', openIt);
     if (!openIt) setTimeout(function(){ c.classList.remove('sw'); }, 340); else c.classList.remove('sw');
     if (openIt) cards.forEach(function(o){ if (o !== c && o.classList.contains('swiped')) { o.classList.add('anim'); o.classList.remove('swiped'); } });
-  });
+  }
+  document.addEventListener('touchend', function(){ endSwipe(false); });
+  document.addEventListener('touchcancel', function(){ endSwipe(true); });
+  // a tap anywhere else closes an open swipe
+  document.addEventListener('touchstart', function(e){ if (!e.target.closest('.rowwrap')) unswipeAll(); }, {passive: true});
 
   // ---- keyboard ----
   document.addEventListener('keydown', function(e){
