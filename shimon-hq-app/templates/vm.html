@@ -77,7 +77,9 @@
   .vmpage .scrub::-webkit-slider-thumb{-webkit-appearance:none;width:10px;height:10px;border-radius:50%;background:var(--ink);margin-top:-3px;transition:transform .15s}
   .vmpage .scrub:active::-webkit-slider-thumb{transform:scale(1.8)}
   .vmpage .scrub::-moz-range-thumb{width:10px;height:10px;border:0;border-radius:50%;background:var(--ink)}
-  .vmpage .times{display:flex;justify-content:space-between;color:var(--muted);font-size:11.5px;font-variant-numeric:tabular-nums;margin-top:-2px}
+  .vmpage .times{display:flex;justify-content:space-between;align-items:center;color:var(--muted);font-size:11.5px;font-variant-numeric:tabular-nums;margin-top:-2px}
+  .vmpage .speed{font:inherit;font-size:11.5px;font-weight:700;letter-spacing:.02em;color:var(--muted);background:var(--row);border:1px solid var(--border);border-radius:999px;padding:2px 9px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+  .vmpage .speed.fast{color:var(--btn-tx);background:var(--btn-bg);border-color:var(--btn-bg)}
   .vmpage .ctl{display:flex;align-items:center;justify-content:space-between;margin:8px 0 12px}
   .vmpage .ctl .grp{display:flex;align-items:center;gap:4px}
   .vmpage .ib{display:inline-flex;flex-direction:column;align-items:center;gap:3px;min-width:54px;padding:6px 4px;border:0;background:none;color:var(--ink);font:inherit;font-size:10.5px;letter-spacing:.02em;cursor:pointer;border-radius:10px;-webkit-tap-highlight-color:transparent;text-decoration:none}
@@ -203,7 +205,7 @@
     {% if r.stored_name %}
     <div class="player">
       <input type="range" class="scrub" min="0" max="1000" value="0" aria-label="Position">
-      <div class="times"><span class="t0">0:00</span><span class="t1">-{{ '%d:%02d'|format((r.duration or 0)//60, (r.duration or 0)%60) }}</span></div>
+      <div class="times"><span class="t0">0:00</span><button type="button" class="speed" data-speed title="Playback speed">1×</button><span class="t1">-{{ '%d:%02d'|format((r.duration or 0)//60, (r.duration or 0)%60) }}</span></div>
     </div>
     {% endif %}
     <div class="ctl">
@@ -271,6 +273,12 @@
   // ---- one shared audio element, one message playing at a time ----
   var audio = new Audio(); audio.preload = 'none';
   var current = null;      // card whose recording is loaded
+  // playback speed: 1x -> 1.5x -> 2x, remembered on this phone
+  var SPEEDS = [1, 1.5, 2], speed = 1;
+  try { speed = +localStorage.getItem('vm_speed') || 1; if (SPEEDS.indexOf(speed) < 0) speed = 1; } catch(e){}
+  function paintSpeed(){ document.querySelectorAll('.speed').forEach(function(b){ b.textContent = (speed % 1 ? speed : speed) + '\u00d7'; b.classList.toggle('fast', speed !== 1); }); }
+  function setSpeed(v){ speed = v; audio.playbackRate = v; try { localStorage.setItem('vm_speed', String(v)); } catch(e){} paintSpeed(); }
+  paintSpeed();
   function fmt(s){ s = Math.max(0, Math.round(s || 0)); return Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2); }
   function dur(c){ return audio.duration && isFinite(audio.duration) && current === c ? audio.duration : (+c.dataset.dur || 0); }
   function paint(c){
@@ -284,9 +292,9 @@
   function load(c){
     if (current === c) return;
     if (current) { current.classList.remove('playing'); paintReset(current); }
-    current = c; audio.src = c.dataset.audio; audio.load();
+    current = c; audio.src = c.dataset.audio; audio.load(); audio.playbackRate = speed;
   }
-  function play(c){ if (!c.dataset.audio) return; load(c); audio.play().then(function(){ c.classList.add('playing'); markHeard(c); }).catch(function(){}); }
+  function play(c){ if (!c.dataset.audio) return; load(c); audio.playbackRate = speed; audio.play().then(function(){ c.classList.add('playing'); audio.playbackRate = speed; markHeard(c); }).catch(function(){}); }
   function pause(){ audio.pause(); if (current) current.classList.remove('playing'); }
   audio.addEventListener('timeupdate', function(){ paint(current); });
   audio.addEventListener('loadedmetadata', function(){ paint(current); });
@@ -403,6 +411,7 @@
     if (!e.target.closest('.menu')) closeMenus();
     var c = cardOf(e.target); if (!c) return;
     if (e.target.closest('[data-play]')) { if (current === c && !audio.paused) pause(); else play(c); return; }
+    if (e.target.closest('[data-speed]')) { setSpeed(SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length]); return; }
     if (e.target.closest('[data-file]')) { fileAway(c); return; }
     var cp = e.target.closest('[data-copy]'); if (cp) { copy(textOf(c, cp.dataset.copy), c, cp.dataset.copy === 'link' ? 'Link copied' : 'Copied \u2014 ready to paste'); closeMenus(); return; }
     var sh = e.target.closest('[data-share-btn]'); if (sh) { shareFile(c, sh); return; }
