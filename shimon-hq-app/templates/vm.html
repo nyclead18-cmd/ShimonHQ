@@ -138,7 +138,8 @@
       {% if r.handled %}<input type="hidden" name="undo" value="1"><button type="submit" class="b">Reopen</button>
       {% else %}<button type="submit" class="b">Handled</button>{% endif %}
     </form>
-    {% if r.stored_name %}<button type="button" class="b" data-share-btn>Share</button>{% endif %}
+    {% if r.stored_name %}<button type="button" class="b" data-share-btn data-audio="{{ url_for('vm_audio', vid=r.id) }}" data-fname="Voicemail_{{ (r.ts or '')[:10] }}_{{ (r.caller_name or fmt_phone(r.caller_number) or 'unknown')|replace(' ','_')|replace('(','')|replace(')','')|replace('-','') }}.mp3">Share</button>
+    <a class="b" href="{{ url_for('vm_audio', vid=r.id, dl=1) }}">Download</a>{% endif %}
     {% if dh and not r.dh_event_id and r.stored_name %}<button type="button" class="b" data-sheet="dh-{{ r.id }}">→ Divrei HaYamim</button>{% endif %}
     <span class="sp"></span>
     <span class="note"></span>
@@ -147,8 +148,7 @@
         {% if r.english %}<button type="button" data-copy="en">Copy English</button>{% endif %}
         {% if r.yiddish %}<button type="button" data-copy="yi">Copy Yiddish</button>{% endif %}
         {% if r.english or r.yiddish %}<button type="button" data-copy="all">Copy everything</button>{% endif %}
-        {% if r.stored_name %}<button type="button" data-copy="link">Copy share link</button>
-        <a href="{{ url_for('vm_audio', vid=r.id, dl=1) }}">Download mp3</a>{% endif %}
+        {% if r.stored_name %}<button type="button" data-copy="link">Copy web link</button>{% endif %}
         {% if r.tstatus in ('failed','empty','short') and r.stored_name %}<hr>
         <form method="post" action="{{ url_for('api_vm_retry', vid=r.id) }}"><input type="hidden" name="show" value="{{ show }}"><button type="submit">{% if r.tstatus == 'failed' %}Retry transcript{% else %}Transcribe anyway{% endif %}</button></form>{% endif %}
       </div>
@@ -193,6 +193,20 @@
       try { document.execCommand('copy'); note(c, msg); } catch(e){ prompt('Copy:', s); } document.body.removeChild(ta);
     });
   }
+  function shareFile(btn){
+    // The recording itself goes into the share sheet (WhatsApp, Mail, AirDrop...), with the
+    // transcript as the message. Where the browser cannot share files, it downloads instead.
+    var c = cardOf(btn), body = textOf(c, 'all'), name = btn.dataset.fname || 'voicemail.mp3';
+    if (!navigator.share) { window.location = btn.dataset.audio + '?dl=1'; return; }
+    note(c, 'preparing…'); btn.disabled = true;
+    fetch(btn.dataset.audio, {credentials: 'same-origin'}).then(function(r){ return r.blob(); }).then(function(blob){
+      var f = new File([blob], name, {type: blob.type || 'audio/mpeg'});
+      var data = { files: [f], title: 'Voicemail · ' + c.dataset.who, text: body };
+      if (navigator.canShare && !navigator.canShare({files: [f]})) { delete data.files; data.url = c.dataset.share; }
+      return navigator.share(data);
+    }).then(function(){ note(c, 'shared'); }, function(err){ if (err && err.name !== 'AbortError') window.location = btn.dataset.audio + '?dl=1'; })
+      .then(function(){ btn.disabled = false; });
+  }
   function closeMenus(){ document.querySelectorAll('.more.open').forEach(function(m){ m.classList.remove('open'); }); }
   document.addEventListener('click', function(e){
     var m = e.target.closest('[data-menu]');
@@ -201,10 +215,7 @@
     var cp = e.target.closest('[data-copy]');
     if (cp) { var c = cardOf(cp); copy(textOf(c, cp.dataset.copy), c, cp.dataset.copy === 'link' ? 'link copied' : 'copied'); closeMenus(); return; }
     var sh = e.target.closest('[data-share-btn]');
-    if (sh) { var c2 = cardOf(sh), url = c2.dataset.share, body = textOf(c2, 'all');
-      if (navigator.share) navigator.share({ title: 'Voicemail · ' + c2.dataset.who, text: body, url: url }).catch(function(){});
-      else copy(body + '\n\n' + url, c2, 'text + link copied');
-      return; }
+    if (sh) { shareFile(sh); return; }
     var st = e.target.closest('[data-sheet]');
     if (st) { var sheet = document.getElementById(st.dataset.sheet); sheet.classList.toggle('open'); if (sheet.classList.contains('open')) { var f = sheet.querySelector('select,input'); if (f) f.focus(); } }
   });
