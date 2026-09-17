@@ -17,6 +17,8 @@ Env:
   YL_CONTEXT       optional hint text for the transcriber
   VM_SHORT_SEC     voicemails this long or shorter are filed as "short" and not transcribed (default 5)
   ANTHROPIC_API_KEY  optional - English gist of each transcript
+  DH_URL / DH_TOKEN  Divrei HaYamim app (https://divrei-hayamim.onrender.com) + its APP_TOKEN,
+                     for "send to Divrei HaYamim" on a voicemail
 
 Pure urllib, like wa.py: no new dependencies.
 """
@@ -311,6 +313,55 @@ def gist(yiddish, caller=""):
         return ""
 
 
+# ---------- Divrei HaYamim ----------
+
+DH_URL = (os.environ.get("DH_URL") or "").rstrip("/")
+_dh_cache = {"at": 0, "data": None}
+
+
+def dh_configured():
+    return bool(DH_URL and os.environ.get("DH_TOKEN"))
+
+
+def dh_projects():
+    """Project + category names from the chronicle app, cached ten minutes."""
+    if not dh_configured():
+        return {"projects": [], "categories": []}
+    if _dh_cache["data"] and time.time() - _dh_cache["at"] < 600:
+        return _dh_cache["data"]
+    try:
+        j = _req("%s/api/projects?t=%s" % (DH_URL, urllib.parse.quote(os.environ["DH_TOKEN"])), timeout=30)
+        _dh_cache.update(at=time.time(), data={"projects": j.get("projects", []),
+                                                "categories": j.get("categories", [])})
+    except Exception:
+        if not _dh_cache["data"]:
+            return {"projects": [], "categories": []}
+    return _dh_cache["data"]
+
+
+def dh_push(row, files_dir, project, day, title="", category=""):
+    """Post one voicemail to Divrei HaYamim as a story on `day` under `project`,
+    recording attached. Returns the story id."""
+    who = row["caller_name"] or fmt_phone(row["caller_number"]) or "Unknown caller"
+    title = title or ("Voicemail from %s" % who)
+    header = "Voicemail %s · %s · %ss" % ((row["ts"] or "")[:16].replace("T", " "),
+                                          fmt_phone(row["caller_number"]), row["duration"] or "?")
+    fields = {"date": day, "title": title, "project": project, "category": category or "",
+              "body_en": ((row["english"] or "").strip() + "\n\n" + header).strip(),
+              "body_yi": (row["yiddish"] or "").strip()}
+    path = os.path.join(files_dir, "vm", row["stored_name"]) if row["stored_name"] else None
+    if path and os.path.exists(path):
+        body, ct = _multipart(fields, "files", path)
+    else:
+        body, ct = _multipart(fields, "files", "/dev/null")
+    j = _req("%s/api/story?t=%s" % (DH_URL, urllib.parse.quote(os.environ["DH_TOKEN"])), data=body,
+             method="POST", timeout=120, headers={"Content-Type": ct})
+    if not j.get("ok"):
+        raise RuntimeError(j.get("error") or "Divrei HaYamim refused the story")
+    _dh_cache["at"] = 0  # a new project may have been typed in
+    return j["id"], j.get("url", "")
+
+
 # ---------- storage ----------
 
 def ensure_schema(con):
@@ -325,6 +376,10 @@ def ensure_schema(con):
         " terror TEXT, item_id INTEGER, handled INTEGER NOT NULL DEFAULT 0,"
         " received_at TEXT)")
     con.execute("CREATE INDEX IF NOT EXISTS vm_open ON voicemails(handled, ts)")
+    cols = [r[1] for r in con.execute("PRAGMA table_info(voicemails)")]
+    for c in ("dh_event_id TEXT", "dh_project TEXT", "dh_url TEXT"):
+        if c.split()[0] not in cols:
+            con.execute("ALTER TABLE voicemails ADD COLUMN " + c)
     # file what is already in: short recordings not yet transcribed, and transcripts with nothing in them
     con.execute("UPDATE voicemails SET tstatus='short' WHERE tstatus IN ('new','failed')"
                 " AND duration IS NOT NULL AND duration <= ?", (SHORT_SEC,))

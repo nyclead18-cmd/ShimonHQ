@@ -5629,7 +5629,9 @@ def vm_view():
         "pending": con.execute("SELECT COUNT(*) FROM voicemails WHERE tstatus IN ('new','failed')"
                                " AND stored_name IS NOT NULL").fetchone()[0],
     }
+    dh = vm.dh_projects() if vm.dh_configured() else None
     return render_template("vm.html", rows=rows, show=show, counts=counts, busy=_vm_lock.locked(),
+                           dh=dh, dh_url=vm.DH_URL,
                            last_sync=(last["v"] if last else None),
                            rc_ok=vm.configured(), yl_ok=vm.yl_configured(),
                            fmt_phone=vm.fmt_phone)
@@ -5685,6 +5687,35 @@ def vm_task(vid):
     con.execute("UPDATE voicemails SET item_id=?, handled=1 WHERE id=?", (cur.lastrowid, vid))
     commit_retry(con)
     return redirect(url_for("task_view", item_id=cur.lastrowid))
+
+
+@app.route("/vm/<int:vid>/dh", methods=["POST"])
+@login_required
+def vm_to_dh(vid):
+    """Send a voicemail to Divrei HaYamim: a story on the chosen day under the chosen
+    project, recording attached; the app mirrors it into that project's Dropbox folder."""
+    con = db()
+    r = con.execute("SELECT * FROM voicemails WHERE id=?", (vid,)).fetchone()
+    if not r:
+        abort(404)
+    if not vm.dh_configured():
+        return jsonify(error="Divrei HaYamim not configured (DH_URL / DH_TOKEN)"), 400
+    project = (request.form.get("project_new") or request.form.get("project") or "").strip()
+    if not project:
+        return redirect(url_for("vm_view", show=request.form.get("show", "open"), _anchor="vm-%d" % vid))
+    day = (request.form.get("day") or "").strip() or (r["ts"] or "")[:10]
+    try:
+        eid, link = vm.dh_push(r, FILES_DIR, project, day,
+                               title=(request.form.get("title") or "").strip(),
+                               category=(request.form.get("category") or "").strip())
+    except Exception as e:
+        con.execute("UPDATE voicemails SET terror=? WHERE id=?", ("Divrei HaYamim: %s" % str(e)[:300], vid))
+        commit_retry(con)
+        return redirect(url_for("vm_view", show=request.form.get("show", "open"), _anchor="vm-%d" % vid))
+    con.execute("UPDATE voicemails SET dh_event_id=?, dh_project=?, dh_url=?, terror=NULL WHERE id=?",
+                (eid, project, link, vid))
+    commit_retry(con)
+    return redirect(url_for("vm_view", show=request.form.get("show", "open"), _anchor="vm-%d" % vid))
 
 
 @app.route("/api/vm/sync", methods=["POST"])
