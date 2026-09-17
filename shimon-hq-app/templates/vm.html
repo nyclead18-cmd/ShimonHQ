@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Voicemail · HQ{% endblock %}
+{% block title %}Voicemail · {{ hq_title }}{% endblock %}
 {% block body %}
 <div class="wrap vmpage">
 <header class="top">
@@ -21,77 +21,115 @@
 </header>
 
 <style>
+  /* The list works the way the phone's own Voicemail does: one continuous sheet of
+     rows, a hairline between them, the message opening in place under your finger. */
+  .vmpage{--ease:cubic-bezier(.32,.72,0,1); --dur:.42s}
   .vmpage .seg{display:inline-flex;border:1px solid var(--border);border-radius:999px;overflow:hidden;background:var(--card)}
   .vmpage .seg a{padding:7px 14px;font-size:13px;color:var(--muted);text-decoration:none;border-right:1px solid var(--border)}
   .vmpage .seg a:last-child{border-right:0}
   .vmpage .seg a.on{background:var(--btn-bg);color:var(--btn-tx);font-weight:600}
-  .vmpage .bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:6px 0 22px}
+  .vmpage .bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:6px 0 18px}
   .vmpage .bar .sp{flex:1}
   .vmpage .bar .stat{padding:0;border:0;background:none;box-shadow:none;color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
   .vmpage .working{font-size:12px;color:var(--pill-wait-tx);background:var(--pill-wait-bg);border-radius:999px;padding:3px 10px}
+  .vmpage .hint{color:var(--muted)}
 
-  .vmpage .day{margin:26px 0 10px;display:flex;align-items:baseline;gap:10px}
-  .vmpage .day h2{font-family:'Playfair Display','Frank Ruhl Libre',Georgia,serif;font-weight:600;font-size:17px;margin:0}
-  .vmpage .day span{color:var(--muted);font-size:12.5px}
+  .vmpage .day{margin:22px 4px 6px;font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600}
+  .vmpage .bar + .day{margin-top:4px}
+  .vmpage .group{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:var(--shadow)}
 
-  html{scroll-behavior:smooth}
-  .vmpage .vm{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:12px 16px;margin-bottom:8px;box-shadow:var(--shadow);
-    scroll-snap-align:start;scroll-margin-top:10px;transition:box-shadow .2s,transform .2s}
-  .vmpage .vm.done{opacity:.55}
-  .vmpage .vm .head,.vmpage .vm .peek{cursor:pointer}
-  .vmpage .vm.open{padding:16px 18px 12px;box-shadow:0 10px 30px rgba(0,0,0,.10);border-color:color-mix(in srgb,var(--accent) 45%,var(--border))}
-  .vmpage .vm:not(.open) .body{display:none}
-  .vmpage .vm.open .peek{display:none}
-  .vmpage .peek{margin-top:5px;color:var(--muted);font-size:13.5px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-  .vmpage .peek:empty{display:none}
-  .vmpage .chev{color:var(--muted);font-size:12px;transition:transform .2s;margin-left:2px}
-  .vmpage .vm.open .chev{transform:rotate(180deg)}
-  .vmpage .body{animation:vmin .18s ease-out}
-  .vmpage .vm.open{touch-action:pan-y;will-change:transform}
-  .vmpage .vm.swiping{transition:none}
-  .vmpage .vm.gone{transition:transform .22s ease-in,opacity .22s ease-in;opacity:0}
-  .vmpage .vm.filed{transition:max-height .25s ease,opacity .25s ease,margin .25s ease,padding .25s ease;max-height:0!important;opacity:0;margin:0;padding:0 16px;overflow:hidden;border-width:0}
-  .vmpage .swipehint{text-align:center;color:var(--muted);font-size:12px;margin:4px 0 14px;display:none}
-  @media (pointer:coarse){ .vmpage .swipehint{display:block} }
-  @keyframes vmin{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
-  .vmpage .head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
-  .vmpage .head b{font-size:16px}
-  .vmpage .head .m{color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
-  .vmpage .head .sp{flex:1}
-  .vmpage .tag{font-size:11px;letter-spacing:.04em;text-transform:uppercase;padding:2px 9px;border-radius:999px;background:var(--row);color:var(--muted);border:1px solid var(--border)}
+  /* row */
+  .vmpage .vm{position:relative;overflow:hidden;border-top:1px solid var(--border);background:var(--card)}
+  .vmpage .vm:first-child{border-top:0}
+  .vmpage .vm.done .who,.vmpage .vm.done .peek{opacity:.5}
+  .vmpage .row{position:relative;display:grid;grid-template-columns:14px 1fr auto;column-gap:8px;align-items:start;
+    padding:12px 14px 12px 10px;cursor:pointer;background:var(--card);transition:background .15s;
+    transform:translateX(0);will-change:transform;-webkit-tap-highlight-color:transparent;user-select:none}
+  .vmpage .row:active{background:var(--row)}
+  .vmpage .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);margin-top:7px;justify-self:center;transition:opacity .3s,transform .3s}
+  .vmpage .vm.heard .dot,.vmpage .vm.done .dot{opacity:0;transform:scale(.4)}
+  .vmpage .who{font-size:16.5px;font-weight:600;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .vmpage .who small{font-weight:400;color:var(--muted);font-size:13px}
+  .vmpage .peek{color:var(--muted);font-size:13.5px;line-height:1.4;margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;transition:opacity var(--dur) var(--ease)}
+  .vmpage .vm.open .peek{opacity:0;-webkit-line-clamp:1;height:0;margin:0}
+  .vmpage .meta{margin:0;text-align:right;color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap;line-height:1.3;padding-top:2px}
+  .vmpage .meta .dur{display:block;font-size:12px;opacity:.85}
+  .vmpage .tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  .vmpage .tag{font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;padding:2px 8px;border-radius:999px;background:var(--row);color:var(--muted);border:1px solid var(--border);text-decoration:none}
   .vmpage .tag.wait{background:var(--pill-wait-bg);color:var(--pill-wait-tx);border-color:transparent}
   .vmpage .tag.bad{background:var(--pill-open-bg);color:var(--pill-open-tx);border-color:transparent}
-  .vmpage .tag.ok{background:var(--pill-done-bg);color:var(--pill-done-tx);border-color:transparent;text-decoration:none}
+  .vmpage .tag.ok{background:var(--pill-done-bg);color:var(--pill-done-tx);border-color:transparent}
 
-  .vmpage audio{width:100%;height:34px;margin:12px 0 4px;filter:saturate(0) contrast(1.05);opacity:.9}
-  .vmpage .en{font-size:15px;line-height:1.55;margin:10px 0 0;white-space:pre-wrap}
-  .vmpage .yi{direction:rtl;text-align:right;font-family:'Frank Ruhl Libre','Noto Serif Hebrew','David',serif;font-size:17px;line-height:1.75;margin:10px 0 0;padding-top:10px;border-top:1px dashed var(--border);white-space:pre-wrap;color:var(--ink)}
-  .vmpage .rc{margin-top:10px;color:var(--muted);font-size:13px;font-style:italic}
+  /* the open message: height animates through a grid track, which is what makes it glide */
+  .vmpage .fold{display:grid;grid-template-rows:0fr;transition:grid-template-rows var(--dur) var(--ease)}
+  .vmpage .vm.open .fold{grid-template-rows:1fr}
+  .vmpage .fold > div{overflow:hidden;min-height:0}
+  .vmpage .inner{padding:0 16px 14px 32px;opacity:0;transform:translateY(-6px);transition:opacity .3s ease .08s,transform var(--dur) var(--ease)}
+  .vmpage .vm.open .inner{opacity:1;transform:none}
+
+  /* player */
+  .vmpage .player{margin:2px 0 6px}
+  .vmpage .scrub{-webkit-appearance:none;appearance:none;width:100%;height:22px;background:transparent;margin:0;cursor:pointer;display:block}
+  .vmpage .scrub::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:linear-gradient(to right,var(--ink) 0 var(--p,0%),color-mix(in srgb,var(--muted) 30%,transparent) var(--p,0%) 100%)}
+  .vmpage .scrub::-moz-range-track{height:4px;border-radius:2px;background:color-mix(in srgb,var(--muted) 30%,transparent)}
+  .vmpage .scrub::-moz-range-progress{height:4px;border-radius:2px;background:var(--ink)}
+  .vmpage .scrub::-webkit-slider-thumb{-webkit-appearance:none;width:10px;height:10px;border-radius:50%;background:var(--ink);margin-top:-3px;transition:transform .15s}
+  .vmpage .scrub:active::-webkit-slider-thumb{transform:scale(1.8)}
+  .vmpage .scrub::-moz-range-thumb{width:10px;height:10px;border:0;border-radius:50%;background:var(--ink)}
+  .vmpage .times{display:flex;justify-content:space-between;color:var(--muted);font-size:11.5px;font-variant-numeric:tabular-nums;margin-top:-2px}
+  .vmpage .ctl{display:flex;align-items:center;justify-content:space-between;margin:8px 0 12px}
+  .vmpage .ctl .grp{display:flex;align-items:center;gap:4px}
+  .vmpage .ib{display:inline-flex;flex-direction:column;align-items:center;gap:3px;min-width:54px;padding:6px 4px;border:0;background:none;color:var(--ink);font:inherit;font-size:10.5px;letter-spacing:.02em;cursor:pointer;border-radius:10px;-webkit-tap-highlight-color:transparent;text-decoration:none}
+  .vmpage .ib:active{background:var(--row)}
+  .vmpage .ib svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .vmpage .ib.play{min-width:0;width:54px;height:54px;border-radius:50%;background:var(--btn-bg);color:var(--btn-tx);padding:0;justify-content:center;transition:transform .15s}
+  .vmpage .ib.play:active{transform:scale(.92)}
+  .vmpage .ib.play svg{width:24px;height:24px;fill:currentColor;stroke:none}
+  .vmpage .ib.play .pause{display:none}
+  .vmpage .vm.playing .ib.play .pause{display:block}
+  .vmpage .vm.playing .ib.play .go{display:none}
+  .vmpage .ib.quiet{color:var(--muted)}
+  .vmpage .ib[disabled]{opacity:.35;pointer-events:none}
+
+  .vmpage .en{font-size:15px;line-height:1.55;margin:4px 0 0;white-space:pre-wrap}
+  .vmpage .yi{direction:rtl;text-align:right;font-family:'Frank Ruhl Libre','Noto Serif Hebrew','David',serif;font-size:17px;line-height:1.75;margin:10px 0 0;padding-top:10px;border-top:1px dashed var(--border);white-space:pre-wrap}
+  .vmpage .rc{margin-top:8px;color:var(--muted);font-size:13px;font-style:italic}
   .vmpage .err{margin-top:8px;color:var(--danger);font-size:12.5px}
+  .vmpage .note{position:absolute;right:16px;bottom:8px;font-size:12px;color:var(--pill-done-tx);pointer-events:none}
 
-  .vmpage .actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:14px;padding-top:10px;border-top:1px solid var(--border)}
-  .vmpage .actions form{display:inline;margin:0}
-  .vmpage .b{font:inherit;font-size:13px;padding:6px 13px;border-radius:999px;border:1px solid var(--border);background:var(--card);color:var(--ink);cursor:pointer;text-decoration:none;line-height:1.2}
-  .vmpage .b:hover{background:var(--row)}
-  .vmpage .b.primary{background:var(--btn-bg);color:var(--btn-tx);border-color:var(--btn-bg)}
-  .vmpage .b.quiet{color:var(--muted)}
-  .vmpage .actions .sp{flex:1}
-  .vmpage .note{font-size:12px;color:var(--pill-done-tx)}
+  /* swipe a row to the left: Task · Handled, like Mail */
+  .vmpage .rowwrap{position:relative;overflow:hidden}
+  .vmpage .under{position:absolute;top:0;right:0;bottom:0;display:flex;visibility:hidden}
+  .vmpage .vm.swiped .under,.vmpage .vm.sw .under{visibility:visible}
+  .vmpage .under button{border:0;font:inherit;font-weight:600;font-size:13px;color:#fff;padding:0 18px;cursor:pointer;width:84px}
+  .vmpage .under .u-done{background:#3A6B3E}
+  .vmpage .under .u-task{background:#1F3A5F}
+  .vmpage .vm.swiped .row{transform:translateX(calc(-1 * var(--uw,84px)))}
+  .vmpage .vm.anim .row{transition:transform .32s var(--ease)}
+  .vmpage .vm.filed{transition:max-height .32s var(--ease),opacity .25s ease;max-height:0!important;opacity:0;border-top-width:0}
 
+  /* menus and the Divrei HaYamim sheet */
   .vmpage .more{position:relative}
-  .vmpage .menu{display:none;position:absolute;right:0;top:calc(100% + 6px);z-index:20;min-width:230px;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.12);padding:6px}
+  .vmpage .menu{display:none;position:absolute;right:0;bottom:calc(100% + 6px);z-index:20;min-width:230px;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.14);padding:6px}
   .vmpage .more.open .menu{display:block}
-  .vmpage .menu button,.vmpage .menu a{display:block;width:100%;text-align:left;font:inherit;font-size:13.5px;padding:8px 10px;border:0;background:none;color:var(--ink);border-radius:8px;cursor:pointer;text-decoration:none}
+  .vmpage .menu button,.vmpage .menu a{display:block;width:100%;text-align:left;font:inherit;font-size:14px;padding:9px 10px;border:0;background:none;color:var(--ink);border-radius:8px;cursor:pointer;text-decoration:none}
   .vmpage .menu button:hover,.vmpage .menu a:hover{background:var(--row)}
   .vmpage .menu hr{border:0;border-top:1px solid var(--border);margin:6px 0}
-
-  .vmpage .sheet{display:none;margin-top:12px;padding:12px;border-radius:12px;background:var(--row);border:1px solid var(--border)}
+  .vmpage .menu form{margin:0}
+  .vmpage .sheet{display:none;margin:10px 0 4px;padding:12px;border-radius:12px;background:var(--row);border:1px solid var(--border)}
   .vmpage .sheet.open{display:block}
   .vmpage .sheet form{display:flex;gap:8px;flex-wrap:wrap;align-items:end}
   .vmpage .sheet label{display:flex;flex-direction:column;gap:3px;font-size:11.5px;color:var(--muted);letter-spacing:.03em;text-transform:uppercase}
   .vmpage .sheet input,.vmpage .sheet select{font:inherit;font-size:14px;padding:7px 10px;border-radius:9px;border:1px solid var(--border);background:var(--card);color:var(--ink);min-width:150px}
-  .vmpage .hint{color:var(--muted)}
-  @media (max-width:640px){ .vmpage .vm{padding:14px 14px 10px} .vmpage .yi{font-size:18px} }
+  .vmpage .b{font:inherit;font-size:13px;padding:6px 13px;border-radius:999px;border:1px solid var(--border);background:var(--card);color:var(--ink);cursor:pointer;text-decoration:none;line-height:1.2}
+  .vmpage .b.primary{background:var(--btn-bg);color:var(--btn-tx);border-color:var(--btn-bg)}
+  .vmpage .b.quiet{color:var(--muted)}
+  @media (max-width:640px){
+    .vmpage .inner{padding-left:14px}
+    .vmpage .ib{min-width:48px}
+    .vmpage .yi{font-size:18px}
+  }
+  @media (prefers-reduced-motion:reduce){ .vmpage *{transition:none!important} }
 </style>
 
 {% if not rc_ok %}<p class="hint">RingCentral is not connected — set <code>RC_CLIENT_ID</code>, <code>RC_CLIENT_SECRET</code>, <code>RC_JWT</code>, <code>RC_EXTENSION_ID</code> on Render.</p>{% endif %}
@@ -106,9 +144,9 @@
   {% if counts.pending %}<span class="stat">{{ counts.pending }} transcribing</span>{% endif %}
   {% if busy %}<span class="working">working in background</span>{% endif %}
   <span class="sp"></span>
-  <form method="post" action="{{ url_for('api_vm_sync', back=1) }}"><button type="submit" class="b quiet">Check now</button></form>
+  <form method="post" action="{{ url_for('api_vm_sync', back=1) }}" style="margin:0"><button type="submit" class="b quiet">Check now</button></form>
   <div class="more"><button type="button" class="b quiet" data-menu>⋯</button>
-    <div class="menu">
+    <div class="menu" style="top:calc(100% + 6px);bottom:auto">
       {% if not mirror %}<form method="post" action="{{ url_for('api_vm_sync', back=1, days=365) }}"><button type="submit">Backfill 1 year</button></form>{% endif %}
       {% if last_sync %}<hr><div class="hint" style="padding:6px 10px;font-size:12px">last check {{ last_sync[:16].replace('T',' ') }}</div>{% endif %}
     </div>
@@ -116,84 +154,101 @@
 </div>
 
 {% if not rows %}<p class="hint">Nothing here.</p>{% endif %}
-{% if rows %}<p class="swipehint">Tap a message to open it &middot; swipe left for the next, right for the previous</p>{% endif %}
 
 {% set ns = namespace(day=None) %}
 {% for r in rows %}
 {% set d = (r.ts or '')[:10] %}
-{% if d != ns.day %}{% set ns.day = d %}
-<div class="day"><h2>{{ day_label(d) }}</h2><span>{{ d }}</span></div>
+{% if d != ns.day %}{% if ns.day %}</div>{% endif %}{% set ns.day = d %}
+<div class="day">{{ day_label(d) }}</div>
+<div class="group">
 {% endif %}
-<article class="vm {% if r.handled %}done{% endif %}" id="vm-{{ r.id }}"
-  data-who="{{ r.caller_name or fmt_phone(r.caller_number) or 'Unknown caller' }}"
-  data-num="{{ fmt_phone(r.caller_number) }}" data-when="{{ (r.ts or '')[:16].replace('T',' ') }}"
-  {% if r.stored_name %}data-share="{{ url_for('vm_share', vid=r.id, tok=share_token(r.id), _external=True) }}"{% endif %}>
-  <div class="head">
-    <b>{{ r.caller_name or fmt_phone(r.caller_number) or 'Unknown caller' }}</b>
-    {% if r.caller_name and r.caller_number %}<span class="m">{{ fmt_phone(r.caller_number) }}</span>{% endif %}
-    <span class="m">{{ (r.ts or '')[11:16] }}{% if r.duration %} · {{ r.duration }}s{% endif %}</span>
-    <span class="sp"></span>
-    {% if r.tstatus == 'new' %}<span class="tag wait">transcribing</span>
-    {% elif r.tstatus == 'failed' %}<span class="tag bad">transcript failed</span>
-    {% elif r.tstatus == 'short' %}<span class="tag">short</span>
-    {% elif r.tstatus == 'empty' %}<span class="tag">nothing said</span>
-    {% elif r.tstatus == 'skipped' %}<span class="tag">no recording</span>{% endif %}
-    {% if r.item_id %}<a class="tag ok" href="{{ url_for('task_view', item_id=r.item_id) }}">task</a>{% endif %}
-    {% if r.dh_event_id %}<a class="tag ok" href="{{ r.dh_url or dh_url }}" target="_blank">{{ r.dh_project }}</a>{% endif %}
-    <span class="chev">&#9660;</span>
-  </div>
-  <div class="peek">{{ (r.english or r.rc_text or '')|truncate(180) }}</div>
-
-  <div class="body">
-  {% if r.stored_name %}<audio controls preload="none" src="{{ url_for('vm_audio', vid=r.id) }}"></audio>{% endif %}
-  {% if r.english %}<div class="en">{{ r.english }}</div>{% endif %}
-  {% if r.yiddish %}<div class="yi">{{ r.yiddish }}</div>{% endif %}
-  {% if not r.yiddish and r.rc_text and r.tstatus in ('new','failed') %}<div class="rc">{{ r.rc_text }}</div>{% endif %}
-  {% if r.terror %}<div class="err">{{ r.terror }}</div>{% endif %}
-
-  <div class="actions">
-    {% if not r.item_id %}
-    <form method="post" action="{{ url_for('vm_task', vid=r.id) }}"><button type="submit" class="b primary">Make task</button></form>
-    {% endif %}
-    <form method="post" action="{{ url_for('vm_handled', vid=r.id) }}" data-handled>
-      <input type="hidden" name="show" value="{{ show }}">
-      {% if r.handled %}<input type="hidden" name="undo" value="1"><button type="submit" class="b">Reopen</button>
-      {% else %}<button type="submit" class="b">Handled</button>{% endif %}
-    </form>
-    {% if r.stored_name %}<button type="button" class="b" data-share-btn data-audio="{{ url_for('vm_audio', vid=r.id) }}" data-fname="Voicemail_{{ (r.ts or '')[:10] }}_{{ (r.caller_name or fmt_phone(r.caller_number) or 'unknown')|replace(' ','_')|replace('(','')|replace(')','')|replace('-','') }}.mp3">Share</button>
-    <a class="b" href="{{ url_for('vm_audio', vid=r.id, dl=1) }}">Download</a>{% endif %}
-    {% if dh and not r.dh_event_id and r.stored_name %}<button type="button" class="b" data-sheet="dh-{{ r.id }}">→ Divrei HaYamim</button>{% endif %}
-    <span class="sp"></span>
-    <span class="note"></span>
-    <button type="button" class="b quiet" data-step="-1" title="Previous">&uarr;</button>
-    <button type="button" class="b quiet" data-step="1" title="Next">&darr;</button>
-    <div class="more"><button type="button" class="b quiet" data-menu>⋯</button>
-      <div class="menu">
-        {% if r.english %}<button type="button" data-copy="en">Copy English</button>{% endif %}
-        {% if r.yiddish %}<button type="button" data-copy="yi">Copy Yiddish</button>{% endif %}
-        {% if r.english or r.yiddish %}<button type="button" data-copy="all">Copy everything</button>{% endif %}
-        {% if r.stored_name %}<button type="button" data-copy="link">Copy web link</button>{% endif %}
-        {% if not mirror and r.tstatus in ('failed','empty','short') and r.stored_name %}<hr>
-        <form method="post" action="{{ url_for('api_vm_retry', vid=r.id) }}"><input type="hidden" name="show" value="{{ show }}"><button type="submit">{% if r.tstatus == 'failed' %}Retry transcript{% else %}Transcribe anyway{% endif %}</button></form>{% endif %}
-      </div>
-    </div>
-  </div>
-
-  {% if dh and not r.dh_event_id and r.stored_name %}
-  <div class="sheet" id="dh-{{ r.id }}">
-    <form method="post" action="{{ url_for('vm_to_dh', vid=r.id) }}">
-      <input type="hidden" name="show" value="{{ show }}">
-      <label>Story <select name="project"><option value="">— pick —</option>{% for p in dh.projects %}<option value="{{ p }}">{{ p }}</option>{% endfor %}</select></label>
-      <label>or new story <input type="text" name="project_new" placeholder="name"></label>
-      <label>Day <input type="date" name="day" value="{{ (r.ts or '')[:10] }}"></label>
-      <label>Type <select name="category"><option value="">—</option>{% for c in dh.categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select></label>
-      <label>Title <input type="text" name="title" placeholder="Voicemail from {{ r.caller_name or fmt_phone(r.caller_number) }}"></label>
-      <button type="submit" class="b primary">Send to Divrei HaYamim</button>
-    </form>
+{% set who = r.caller_name or fmt_phone(r.caller_number) or 'Unknown caller' %}
+{% set nunder = (0 if r.handled else 1) + (0 if (r.handled or r.item_id) else 1) %}
+<article class="vm {% if r.handled %}done{% endif %}" id="vm-{{ r.id }}" data-id="{{ r.id }}"
+  data-who="{{ who }}" data-num="{{ fmt_phone(r.caller_number) }}" data-when="{{ (r.ts or '')[:16].replace('T',' ') }}"
+  data-dur="{{ r.duration or 0 }}" style="--uw:{{ nunder * 84 }}px"
+  {% if r.stored_name %}data-audio="{{ url_for('vm_audio', vid=r.id) }}" data-share="{{ url_for('vm_share', vid=r.id, tok=share_token(r.id), _external=True) }}"
+  data-fname="Voicemail_{{ (r.ts or '')[:10] }}_{{ who|replace(' ','_')|replace('(','')|replace(')','')|replace('-','') }}.mp3"{% endif %}>
+  <div class="rowwrap">
+  {% if not r.handled %}
+  <div class="under">
+    {% if not r.item_id %}<form method="post" action="{{ url_for('vm_task', vid=r.id) }}" style="display:contents"><button type="submit" class="u-task">Task</button></form>{% endif %}
+    <button type="button" class="u-done" data-file>Handled</button>
   </div>
   {% endif %}
+  <div class="row">
+    <span class="dot"></span>
+    <div>
+      <div class="who">{{ who }}{% if r.caller_name and r.caller_number %} <small>{{ fmt_phone(r.caller_number) }}</small>{% endif %}</div>
+      <div class="peek">{% if r.english or r.rc_text %}{{ (r.english or r.rc_text)|truncate(160) }}{% elif r.tstatus == 'new' %}<i>Transcribing…</i>{% endif %}</div>
+      {% if r.tstatus in ('failed','short','empty','skipped') or r.item_id or r.dh_event_id %}
+      <div class="tags">
+        {% if r.tstatus == 'failed' %}<span class="tag bad">transcript failed</span>
+        {% elif r.tstatus == 'short' %}<span class="tag">short</span>
+        {% elif r.tstatus == 'empty' %}<span class="tag">nothing said</span>
+        {% elif r.tstatus == 'skipped' %}<span class="tag">no recording</span>{% endif %}
+        {% if r.item_id %}<a class="tag ok" href="{{ url_for('task_view', item_id=r.item_id) }}">task</a>{% endif %}
+        {% if r.dh_event_id %}<a class="tag ok" href="{{ r.dh_url or dh_url }}" target="_blank">{{ r.dh_project }}</a>{% endif %}
+      </div>
+      {% endif %}
+    </div>
+    <div class="meta">{{ (r.ts or '')[11:16]|fmt12 }}{% if r.duration %}<span class="dur">{{ '%d:%02d'|format(r.duration//60, r.duration%60) }}</span>{% endif %}</div>
   </div>
+  </div>
+
+  <div class="fold"><div><div class="inner">
+    <span class="note"></span>
+    {% if r.stored_name %}
+    <div class="player">
+      <input type="range" class="scrub" min="0" max="1000" value="0" aria-label="Position">
+      <div class="times"><span class="t0">0:00</span><span class="t1">-{{ '%d:%02d'|format((r.duration or 0)//60, (r.duration or 0)%60) }}</span></div>
+    </div>
+    {% endif %}
+    <div class="ctl">
+      <div class="grp">
+        {% if not r.handled %}<button type="button" class="ib" data-file title="Handled"><svg viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5"/></svg>Handled</button>
+        {% else %}<form method="post" action="{{ url_for('vm_handled', vid=r.id) }}" style="margin:0"><input type="hidden" name="show" value="{{ show }}"><input type="hidden" name="undo" value="1"><button type="submit" class="ib quiet"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5"/></svg>Reopen</button></form>{% endif %}
+        {% if not r.item_id %}<form method="post" action="{{ url_for('vm_task', vid=r.id) }}" style="margin:0"><button type="submit" class="ib"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M12 8v8M8 12h8"/></svg>Task</button></form>{% endif %}
+      </div>
+      {% if r.stored_name %}<button type="button" class="ib play" data-play aria-label="Play"><svg class="go" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg><svg class="pause" viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg></button>{% else %}<span></span>{% endif %}
+      <div class="grp">
+        {% if r.stored_name %}<button type="button" class="ib" data-share-btn><svg viewBox="0 0 24 24"><path d="M12 3v13M7 8l5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>Share</button>{% endif %}
+        {% if dh and not r.dh_event_id and r.stored_name %}<button type="button" class="ib" data-sheet="dh-{{ r.id }}"><svg viewBox="0 0 24 24"><path d="M4 5h11a3 3 0 0 1 3 3v11H7a3 3 0 0 1-3-3z"/><path d="M8 9h6M8 13h6"/></svg>Chronicle</button>{% endif %}
+        <div class="more"><button type="button" class="ib quiet" data-menu><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/></svg>More</button>
+          <div class="menu">
+            {% if r.english %}<button type="button" data-copy="en">Copy English</button>{% endif %}
+            {% if r.yiddish %}<button type="button" data-copy="yi">Copy Yiddish</button>{% endif %}
+            {% if r.english or r.yiddish %}<button type="button" data-copy="all">Copy everything</button>{% endif %}
+            {% if r.stored_name %}<button type="button" data-copy="link">Copy web link</button>
+            <a href="{{ url_for('vm_audio', vid=r.id, dl=1) }}">Download mp3</a>{% endif %}
+            {% if not mirror and r.tstatus in ('failed','empty','short') and r.stored_name %}<hr>
+            <form method="post" action="{{ url_for('api_vm_retry', vid=r.id) }}"><input type="hidden" name="show" value="{{ show }}"><button type="submit">{% if r.tstatus == 'failed' %}Retry transcript{% else %}Transcribe anyway{% endif %}</button></form>{% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {% if dh and not r.dh_event_id and r.stored_name %}
+    <div class="sheet" id="dh-{{ r.id }}">
+      <form method="post" action="{{ url_for('vm_to_dh', vid=r.id) }}">
+        <input type="hidden" name="show" value="{{ show }}">
+        <label>Story <select name="project"><option value="">— pick —</option>{% for p in dh.projects %}<option value="{{ p }}">{{ p }}</option>{% endfor %}</select></label>
+        <label>or new story <input type="text" name="project_new" placeholder="name"></label>
+        <label>Day <input type="date" name="day" value="{{ (r.ts or '')[:10] }}"></label>
+        <label>Type <select name="category"><option value="">—</option>{% for c in dh.categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select></label>
+        <label>Title <input type="text" name="title" placeholder="Voicemail from {{ who }}"></label>
+        <button type="submit" class="b primary">Send to Divrei HaYamim</button>
+      </form>
+    </div>
+    {% endif %}
+
+    {% if r.english %}<div class="en">{{ r.english }}</div>{% endif %}
+    {% if r.yiddish %}<div class="yi">{{ r.yiddish }}</div>{% endif %}
+    {% if not r.yiddish and r.rc_text and r.tstatus in ('new','failed') %}<div class="rc">{{ r.rc_text }}</div>{% endif %}
+    {% if r.terror %}<div class="err">{{ r.terror }}</div>{% endif %}
+  </div></div></div>
 </article>
+{% if loop.last %}</div>{% endif %}
 {% endfor %}
 </div>
 {% endblock %}
@@ -201,7 +256,69 @@
 {% block scripts %}
 <script>
 (function(){
+  var cards = Array.prototype.slice.call(document.querySelectorAll('article.vm'));
   var cardOf = function(el){ return el.closest('article.vm'); };
+  var HANDLED_URL = {{ url_for('vm_handled', vid=0)|tojson }};
+  var SHOW = {{ show|tojson }};
+
+  // ---- heard / unheard dot (this phone remembers what it has played) ----
+  var heard = {};
+  try { heard = JSON.parse(localStorage.getItem('vm_heard') || '{}'); } catch(e){}
+  cards.forEach(function(c){ if (heard[c.dataset.id]) c.classList.add('heard'); });
+  function markHeard(c){ c.classList.add('heard'); heard[c.dataset.id] = 1; try { localStorage.setItem('vm_heard', JSON.stringify(heard)); } catch(e){} }
+
+  // ---- one shared audio element, one message playing at a time ----
+  var audio = new Audio(); audio.preload = 'none';
+  var current = null;      // card whose recording is loaded
+  function fmt(s){ s = Math.max(0, Math.round(s || 0)); return Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2); }
+  function dur(c){ return audio.duration && isFinite(audio.duration) && current === c ? audio.duration : (+c.dataset.dur || 0); }
+  function paint(c){
+    if (!c) return;
+    var d = dur(c), t = audio.currentTime || 0, p = d ? Math.min(1, t / d) : 0;
+    var s = c.querySelector('.scrub'); if (s && !s.matches(':active')) { s.value = Math.round(p * 1000); s.style.setProperty('--p', (p * 100) + '%'); }
+    var t0 = c.querySelector('.t0'), t1 = c.querySelector('.t1');
+    if (t0) t0.textContent = fmt(t); if (t1) t1.textContent = '-' + fmt(d - t);
+  }
+  function paintReset(c){ var s = c.querySelector('.scrub'); if (s) { s.value = 0; s.style.setProperty('--p', '0%'); } var t0 = c.querySelector('.t0'), t1 = c.querySelector('.t1'); if (t0) t0.textContent = '0:00'; if (t1) t1.textContent = '-' + fmt(+c.dataset.dur); }
+  function load(c){
+    if (current === c) return;
+    if (current) { current.classList.remove('playing'); paintReset(current); }
+    current = c; audio.src = c.dataset.audio; audio.load();
+  }
+  function play(c){ if (!c.dataset.audio) return; load(c); audio.play().then(function(){ c.classList.add('playing'); markHeard(c); }).catch(function(){}); }
+  function pause(){ audio.pause(); if (current) current.classList.remove('playing'); }
+  audio.addEventListener('timeupdate', function(){ paint(current); });
+  audio.addEventListener('loadedmetadata', function(){ paint(current); });
+  audio.addEventListener('ended', function(){ if (current) { current.classList.remove('playing'); paintReset(current); } });
+  audio.addEventListener('pause', function(){ if (current) current.classList.remove('playing'); });
+  document.addEventListener('input', function(e){
+    var s = e.target.closest('.scrub'); if (!s) return;
+    var c = cardOf(s); load(c);
+    var d = dur(c), p = s.value / 1000; s.style.setProperty('--p', (p * 100) + '%');
+    var t0 = c.querySelector('.t0'), t1 = c.querySelector('.t1'); if (t0) t0.textContent = fmt(p * d); if (t1) t1.textContent = '-' + fmt(d - p * d);
+  });
+  document.addEventListener('change', function(e){
+    var s = e.target.closest('.scrub'); if (!s) return;
+    var seek = function(){ var d = audio.duration && isFinite(audio.duration) ? audio.duration : 0; if (d) audio.currentTime = s.value / 1000 * d; };
+    if (audio.readyState >= 1) seek(); else audio.addEventListener('loadedmetadata', seek, {once: true});
+  });
+
+  // ---- open / close, one at a time, gliding ----
+  function openCard(c, opts){
+    opts = opts || {};
+    cards.forEach(function(o){ if (o !== c && o.classList.contains('open')) o.classList.remove('open'); });
+    unswipeAll();
+    c.classList.add('open');
+    if (opts.autoplay !== false && c.dataset.audio && !c.classList.contains('done')) play(c);
+    if (opts.scroll !== false) setTimeout(function(){
+      var r = c.getBoundingClientRect();
+      if (r.top < 60 || r.bottom > innerHeight - 40) c.scrollIntoView({block: 'start', behavior: 'smooth'});
+    }, 60);
+  }
+  function closeCard(c){ c.classList.remove('open'); if (current === c) pause(); }
+  function next(c, dir){ var i = cards.indexOf(c) + dir; if (i >= 0 && i < cards.length) openCard(cards[i]); }
+
+  // ---- copy / share ----
   function textOf(c, what){
     var en = (c.querySelector('.en')||{}).innerText || '', yi = (c.querySelector('.yi')||{}).innerText || '';
     var head = c.dataset.who + (c.dataset.num && c.dataset.num !== c.dataset.who ? ' · ' + c.dataset.num : '') + ' · ' + c.dataset.when;
@@ -218,104 +335,99 @@
       try { document.execCommand('copy'); note(c, msg); } catch(e){ prompt('Copy:', s); } document.body.removeChild(ta);
     });
   }
-  function shareFile(btn){
+  function shareFile(c, btn){
     // The recording itself goes into the share sheet (WhatsApp, Mail, AirDrop...), with the
     // transcript as the message. Where the browser cannot share files, it downloads instead.
-    var c = cardOf(btn), body = textOf(c, 'all'), name = btn.dataset.fname || 'voicemail.mp3';
-    if (!navigator.share) { window.location = btn.dataset.audio + '?dl=1'; return; }
+    var body = textOf(c, 'all'), name = c.dataset.fname || 'voicemail.mp3';
+    if (!navigator.share) { window.location = c.dataset.audio + '?dl=1'; return; }
     note(c, 'preparing…'); btn.disabled = true;
-    fetch(btn.dataset.audio, {credentials: 'same-origin'}).then(function(r){ return r.blob(); }).then(function(blob){
+    fetch(c.dataset.audio, {credentials: 'same-origin'}).then(function(r){ return r.blob(); }).then(function(blob){
       var f = new File([blob], name, {type: blob.type || 'audio/mpeg'});
       var data = { files: [f], title: 'Voicemail · ' + c.dataset.who, text: body };
       if (navigator.canShare && !navigator.canShare({files: [f]})) { delete data.files; data.url = c.dataset.share; }
       return navigator.share(data);
-    }).then(function(){ note(c, 'shared'); }, function(err){ if (err && err.name !== 'AbortError') window.location = btn.dataset.audio + '?dl=1'; })
+    }).then(function(){ note(c, 'shared'); }, function(err){ if (err && err.name !== 'AbortError') window.location = c.dataset.audio + '?dl=1'; })
       .then(function(){ btn.disabled = false; });
   }
+
+  // ---- Handled: the row folds shut and the next message slides up into its place ----
+  function fileAway(c){
+    var fd = new FormData(); fd.append('show', SHOW); fd.append('ajax', '1');
+    fetch(HANDLED_URL.replace('/0/', '/' + c.dataset.id + '/'), {method: 'POST', body: fd, credentials: 'same-origin'}).then(function(r){
+      if (!r.ok) throw 0;
+      if (current === c) pause();
+      var i = cards.indexOf(c);
+      c.style.maxHeight = c.offsetHeight + 'px';
+      requestAnimationFrame(function(){ c.classList.add('filed'); });
+      setTimeout(function(){
+        var g = c.parentElement, day = g.previousElementSibling;
+        c.remove(); cards.splice(i, 1);
+        if (!g.querySelector('article')) { g.remove(); if (day && day.classList.contains('day')) day.remove(); }
+        var nx = cards[i] || cards[i - 1]; if (nx && SHOW === 'open') openCard(nx, {autoplay: false});
+      }, 330);
+      var seg = document.querySelector('.seg a.on'); if (seg) seg.textContent = seg.textContent.replace(/\d+$/, function(n){ return Math.max(0, n - 1); });
+    }).catch(function(){ location.reload(); });
+  }
+
+  // ---- menus ----
   function closeMenus(){ document.querySelectorAll('.more.open').forEach(function(m){ m.classList.remove('open'); }); }
+
   document.addEventListener('click', function(e){
     var m = e.target.closest('[data-menu]');
     if (m) { var wrap = m.parentElement, was = wrap.classList.contains('open'); closeMenus(); if (!was) wrap.classList.add('open'); e.stopPropagation(); return; }
     if (!e.target.closest('.menu')) closeMenus();
-    var cp = e.target.closest('[data-copy]');
-    if (cp) { var c = cardOf(cp); copy(textOf(c, cp.dataset.copy), c, cp.dataset.copy === 'link' ? 'link copied' : 'copied'); closeMenus(); return; }
-    var sh = e.target.closest('[data-share-btn]');
-    if (sh) { shareFile(sh); return; }
-    var st = e.target.closest('[data-sheet]');
-    if (st) { var sheet = document.getElementById(st.dataset.sheet); sheet.classList.toggle('open'); if (sheet.classList.contains('open')) { var f = sheet.querySelector('select,input'); if (f) f.focus(); } }
+    var c = cardOf(e.target); if (!c) return;
+    if (e.target.closest('[data-play]')) { if (current === c && !audio.paused) pause(); else play(c); return; }
+    if (e.target.closest('[data-file]')) { fileAway(c); return; }
+    var cp = e.target.closest('[data-copy]'); if (cp) { copy(textOf(c, cp.dataset.copy), c, cp.dataset.copy === 'link' ? 'link copied' : 'copied'); closeMenus(); return; }
+    var sh = e.target.closest('[data-share-btn]'); if (sh) { shareFile(c, sh); return; }
+    var st = e.target.closest('[data-sheet]'); if (st) { var sheet = document.getElementById(st.dataset.sheet); sheet.classList.toggle('open'); if (sheet.classList.contains('open')) { var f = sheet.querySelector('select,input'); if (f) f.focus(); } return; }
+    if (e.target.closest('.row') && !e.target.closest('a')) {
+      if (c.classList.contains('swiped')) { unswipeAll(); return; }
+      if (c.classList.contains('open')) closeCard(c); else openCard(c);
+    }
   });
-  document.addEventListener('play', function(e){ document.querySelectorAll('audio').forEach(function(a){ if (a !== e.target) a.pause(); }); }, true);
 
-  // One voicemail open at a time. Cards sit closed - caller, time, two lines of the
-  // message - and open in place; the next/previous arrows (or J/K) step through them
-  // so the whole line can be worked through like a mailbox.
-  var cards = Array.prototype.slice.call(document.querySelectorAll('article.vm'));
-  function openCard(c, scroll){
-    cards.forEach(function(o){ if (o !== c && o.classList.contains('open')) { o.classList.remove('open'); var a = o.querySelector('audio'); if (a) a.pause(); } });
-    c.classList.add('open');
-    if (scroll !== false) setTimeout(function(){ c.scrollIntoView({block:'start', behavior:'smooth'}); }, 20);
-  }
-  function step(c, dir){
-    var i = cards.indexOf(c) + dir;
-    if (i < 0 || i >= cards.length) return;
-    openCard(cards[i]);
-  }
-  document.addEventListener('click', function(e){
-    var st = e.target.closest('[data-step]');
-    if (st) { step(cardOf(st), +st.dataset.step); return; }
-    var hd = e.target.closest('.head, .peek');
-    if (hd && !e.target.closest('a')) { var c = cardOf(hd); if (c.classList.contains('open')) c.classList.remove('open'); else openCard(c); }
+  // ---- swipe a row to the left: Task · Handled, like Mail ----
+  var sw = null;
+  function unswipeAll(){ cards.forEach(function(o){ if (o.classList.contains('swiped')) { o.classList.add('anim'); o.classList.remove('swiped'); o.querySelector('.row').style.transform = ''; } }); }
+  function uw(c){ return parseInt(getComputedStyle(c).getPropertyValue('--uw')) || 0; }
+  document.addEventListener('touchstart', function(e){
+    var row = e.target.closest('.row'); if (!row) return;
+    var c = cardOf(row); if (!uw(c)) return;
+    var t = e.touches[0]; sw = {c: c, row: row, x: t.clientX, y: t.clientY, dx: 0, live: false, was: c.classList.contains('swiped')};
+  }, {passive: true});
+  document.addEventListener('touchmove', function(e){
+    if (!sw) return; var t = e.touches[0], dx = t.clientX - sw.x, dy = t.clientY - sw.y;
+    if (!sw.live) { if (Math.abs(dx) < 10 || Math.abs(dx) < Math.abs(dy) * 1.2) return; sw.live = true; sw.c.classList.remove('anim'); sw.c.classList.add('sw'); }
+    var w = uw(sw.c), base = sw.was ? -w : 0, x = base + dx;
+    if (x > 0) x = 0; if (x < -w) x = -w - (-w - x) * 0.15;     // a little give past the buttons
+    sw.dx = dx; sw.row.style.transform = 'translateX(' + x + 'px)';
+  }, {passive: true});
+  document.addEventListener('touchend', function(){
+    if (!sw) return; var c = sw.c, row = sw.row, dx = sw.dx, live = sw.live, was = sw.was; sw = null;
+    if (!live) return;
+    c.classList.add('anim'); row.style.transform = '';
+    var openIt = was ? dx < 40 : dx < -50;
+    c.classList.toggle('swiped', openIt);
+    if (!openIt) setTimeout(function(){ c.classList.remove('sw'); }, 340); else c.classList.remove('sw');
+    if (openIt) cards.forEach(function(o){ if (o !== c && o.classList.contains('swiped')) { o.classList.add('anim'); o.classList.remove('swiped'); } });
   });
+
+  // ---- keyboard ----
   document.addEventListener('keydown', function(e){
     if (e.target.matches('input,select,textarea') || e.metaKey || e.ctrlKey) return;
     var cur = document.querySelector('article.vm.open');
-    if (e.key === 'j' || e.key === 'ArrowDown' && cur) { e.preventDefault(); cur ? step(cur, 1) : (cards[0] && openCard(cards[0])); }
-    else if (e.key === 'k' || e.key === 'ArrowUp' && cur) { e.preventDefault(); if (cur) step(cur, -1); }
-    else if (e.key === 'Escape' && cur) { cur.classList.remove('open'); }
-    else if (e.key === ' ' && cur) { var a = cur.querySelector('audio'); if (a) { e.preventDefault(); a.paused ? a.play() : a.pause(); } }
-  });
-  // Handled without a page reload: the card folds away and the next one opens, so a
-  // stack of messages can be cleared with one thumb.
-  document.addEventListener('submit', function(e){
-    var f = e.target.closest('form[data-handled]');
-    if (!f || f.querySelector('[name=undo]')) return;
-    e.preventDefault();
-    var c = cardOf(f), i = cards.indexOf(c), fd = new FormData(f); fd.append('ajax', '1');
-    fetch(f.action, {method: 'POST', body: fd, credentials: 'same-origin'}).then(function(r){
-      if (!r.ok) throw 0;
-      var a = c.querySelector('audio'); if (a) a.pause();
-      c.style.maxHeight = c.offsetHeight + 'px';
-      requestAnimationFrame(function(){ c.classList.add('filed'); });
-      setTimeout(function(){ c.remove(); cards.splice(i, 1); var nx = cards[i] || cards[i - 1]; if (nx) openCard(nx); }, 260);
-      var seg = document.querySelector('.seg a.on'); if (seg) seg.textContent = seg.textContent.replace(/\d+$/, function(n){ return Math.max(0, n - 1); });
-    }).catch(function(){ f.submit(); });
+    if (e.key === 'j' || (e.key === 'ArrowDown' && cur)) { e.preventDefault(); cur ? next(cur, 1) : (cards[0] && openCard(cards[0])); }
+    else if (e.key === 'k' || (e.key === 'ArrowUp' && cur)) { e.preventDefault(); if (cur) next(cur, -1); }
+    else if (e.key === 'Escape' && cur) closeCard(cur);
+    else if (e.key === ' ' && cur) { e.preventDefault(); if (current === cur && !audio.paused) pause(); else play(cur); }
+    else if (e.key === 'h' && cur && cur.querySelector('[data-file]')) fileAway(cur);
   });
 
-  // Swipe on an open message: left goes to the next, right to the previous. The card
-  // follows the finger, so it feels like flicking through a stack rather than a page.
-  var sw = null;
-  document.addEventListener('touchstart', function(e){
-    var c = e.target.closest('article.vm.open'); if (!c || e.target.closest('audio,button,a,select,input')) return;
-    var t = e.touches[0]; sw = {c: c, x: t.clientX, y: t.clientY, dx: 0, live: false};
-  }, {passive: true});
-  document.addEventListener('touchmove', function(e){
-    if (!sw) return; var t = e.touches[0]; var dx = t.clientX - sw.x, dy = t.clientY - sw.y;
-    if (!sw.live) { if (Math.abs(dx) < 12 || Math.abs(dx) < Math.abs(dy) * 1.3) return; sw.live = true; sw.c.classList.add('swiping'); }
-    sw.dx = dx; sw.c.style.transform = 'translateX(' + dx * 0.9 + 'px)'; sw.c.style.opacity = String(Math.max(.4, 1 - Math.abs(dx) / 420));
-  }, {passive: true});
-  document.addEventListener('touchend', function(){
-    if (!sw) return; var c = sw.c, dx = sw.dx, live = sw.live; sw = null;
-    c.classList.remove('swiping');
-    if (!live || Math.abs(dx) < 70) { c.style.transform = ''; c.style.opacity = ''; return; }
-    var i = cards.indexOf(c), nx = cards[i + (dx < 0 ? 1 : -1)];
-    if (!nx) { c.style.transform = ''; c.style.opacity = ''; return; }
-    c.classList.add('gone'); c.style.transform = 'translateX(' + (dx < 0 ? -1 : 1) * window.innerWidth + 'px)';
-    setTimeout(function(){ c.classList.remove('gone'); c.style.transform = ''; c.style.opacity = ''; openCard(nx); }, 200);
-  });
-
+  // ---- deep link from a push ----
   var target = location.hash && document.querySelector(location.hash.replace(/[^#\w-]/g, ''));
-  if (target && target.matches('article.vm')) openCard(target);
-  else if (cards.length && matchMedia('(min-width: 900px)').matches) openCard(cards[0], false);
+  if (target && target.matches('article.vm')) openCard(target, {autoplay: false});
 })();
 </script>
 {% endblock %}
