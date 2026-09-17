@@ -240,6 +240,11 @@ def line_specs():
 
 
 _lines_cache = {"at": 0, "data": None}
+_line_err = {}          # extension id -> last error reading its box (cleared on success)
+
+
+def line_errors():
+    return dict(_line_err)
 
 
 def lines():
@@ -750,9 +755,16 @@ def sync(con, files_dir, log=None, date_from=None, transcribe=True, limit=None):
     have = {r[0] for r in con.execute("SELECT rc_id FROM voicemails")}
     recs = []
     for ln in lines():
-        for m in rc_list_voicemails(date_from or os.environ.get("RC_DATE_FROM"), ext=ln["id"]):
-            m["_ext"] = ln["id"]
-            recs.append(m)
+        # one box that RingCentral refuses (403: the JWT user may not read it) must
+        # not stop the others; it is logged and shown on the page until it is fixed
+        try:
+            for m in rc_list_voicemails(date_from or os.environ.get("RC_DATE_FROM"), ext=ln["id"]):
+                m["_ext"] = ln["id"]
+                recs.append(m)
+            _line_err.pop(ln["id"], None)
+        except Exception as e:
+            _line_err[ln["id"]] = str(e)[:200]
+            log("vm: %s (ext %s): %s", ln["label"], ln["id"], e)
     try:
         con.execute("INSERT INTO settings(k, v) VALUES('vm_lines', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
                     (json.dumps({l["id"]: l["label"] for l in lines()}),))

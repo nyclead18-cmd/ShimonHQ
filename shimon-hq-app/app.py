@@ -6266,7 +6266,7 @@ def vm_view():
                 + (" AND v.assignee IS NULL" if q == "" else "" if q == "all" else " AND v.assignee=?"),
                 (me(), ext) + (() if q in ("", "all") else (int(q),))).fetchone()[0]
     return render_template("vm.html", rows=rows, show=show, counts=counts, busy=_vm_lock.locked(),
-                           line=line, line_labels=line_labels, lcounts=lcounts,
+                           line=line, line_labels=line_labels, lcounts=lcounts, line_errors=vm.line_errors(),
                            line_name=(line_labels.get(line) if line else
                                       (vm.DEFAULT_LINE if len(line_labels) <= 1 else " · ".join(line_labels.values()))),
                            line_of=lambda r: vm.line_label(r["ext"], line_labels),
