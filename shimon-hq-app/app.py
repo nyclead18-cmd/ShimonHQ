@@ -1094,13 +1094,32 @@ def login_required(f):
             if request.method == "POST" or request.path.startswith("/api/"):
                 return jsonify(error="login required"), 401
             return redirect(url_for("login"))
-        if session.get("needs_2fa") and not request.path.startswith(("/account/2fa", "/api/")):
-            return redirect(url_for("twofa_setup"))
+        if not request.path.startswith(("/account/2fa", "/api/", "/brand/", "/static/", "/logout")):
+            if session.get("needs_2fa"):
+                return redirect(url_for("twofa_setup"))
+            if session.get("uid") and request.method == "GET":
+                # the switch may have been flipped since this person signed in (one tiny read)
+                con = db()
+                if require_2fa(con) and uset(con, "totp_on", session["uid"]) != "1":
+                    session["needs_2fa"] = True
+                    return redirect(url_for("twofa_setup"))
         return f(*a, **k)
     return wrapped
 
 
-REQUIRE_2FA = (os.environ.get("HQ_REQUIRE_2FA") or "").lower() in ("1", "true", "yes")
+_REQUIRE_2FA_ENV = (os.environ.get("HQ_REQUIRE_2FA") or "").lower() in ("1", "true", "yes")
+
+
+def require_2fa(con=None):
+    """Two-step for everyone: the HQ_REQUIRE_2FA env var, or the admin's switch on the
+    Account page (settings key require_2fa). Either one turns it on."""
+    if _REQUIRE_2FA_ENV:
+        return True
+    try:
+        row = (con or db()).execute("SELECT v FROM settings WHERE k='require_2fa'").fetchone()
+        return bool(row and row[0] == "1")
+    except Exception:
+        return False
 
 
 def _finish_login(con, row, remember_device=False):
@@ -1113,7 +1132,7 @@ def _finish_login(con, row, remember_device=False):
     session["admin"] = bool(row["is_admin"])
     session.permanent = True
     g.api_uid = 0
-    if REQUIRE_2FA and uset(con, "totp_on", row["id"]) != "1":
+    if require_2fa(con) and uset(con, "totp_on", row["id"]) != "1":
         session["needs_2fa"] = True
     resp = redirect(url_for(
         "today_view" if display_mode(con, row["id"]) == "simple" else "board"))
@@ -1236,6 +1255,20 @@ def login_2fa():
                            login_title=hq_title(), wait=_fail_wait(con, row["id"]))
 
 
+@app.route("/account/require2fa", methods=["POST"])
+@login_required
+def set_require_2fa():
+    """Admin switch: everyone must set up two-step. Takes effect at each person's next
+    sign-in; anyone already signed in is walked into setup on their next page."""
+    if not session.get("admin"):
+        abort(403)
+    con = db()
+    con.execute("INSERT INTO settings(k, v) VALUES('require_2fa', ?)"
+                " ON CONFLICT(k) DO UPDATE SET v=excluded.v", ("1" if request.form.get("on") else "0",))
+    commit_retry(con)
+    return redirect(url_for("account_view"))
+
+
 @app.route("/account/2fa")
 @login_required
 def twofa_setup():
@@ -1243,7 +1276,7 @@ def twofa_setup():
     as pending until a code from the phone proves the scan worked."""
     con = db()
     on = uset(con, "totp_on") == "1"
-    ctx = dict(mode="setup", on=on, required=REQUIRE_2FA and not on,
+    ctx = dict(mode="setup", on=on, required=require_2fa(con) and not on,
                codes_left=len(json.loads(uset(con, "totp_recovery", default="[]") or "[]")),
                login_title=hq_title())
     if not on:
@@ -1267,7 +1300,7 @@ def twofa_confirm():
     ctr = twofa.verify(secret, request.form.get("code"))
     if ctr is None:
         uri = twofa.otpauth_uri(secret, session.get("user", ""), hq_title())
-        return render_template("twofa.html", mode="setup", on=False, required=REQUIRE_2FA,
+        return render_template("twofa.html", mode="setup", on=False, required=require_2fa(con),
                                secret=twofa.pretty_secret(secret), qr=twofa.qr_svg(uri), uri=uri,
                                login_title=hq_title(), codes_left=0,
                                error="That code did not match. Check the phone's clock and try the next one.")
@@ -1306,7 +1339,7 @@ def twofa_off():
     from werkzeug.security import check_password_hash
     con = db()
     row = user_row(con)
-    if REQUIRE_2FA:
+    if require_2fa(con):
         abort(403)
     ok = row and check_password_hash(row["pw_hash"], request.form.get("password", ""))
     if ok and not _check_second_factor(con, row["id"], request.form.get("code")):
@@ -3230,6 +3263,8 @@ def _account_page(con, **extra):
                notify_kinds=NOTIFY_KINDS,
                notify_on={k: wants(con, me(), k) for k in NOTIFY_KINDS},
                twofa_on=uset(con, "totp_on") == "1",
+               require_2fa=require_2fa(con), require_2fa_env=_REQUIRE_2FA_ENV,
+               twofa_status={r["id"]: uset(con, "totp_on", r["id"]) == "1" for r in folk},
                feed_url=request.url_root.rstrip("/") + url_for("ics_feed", token=_feed_token(con)))
     ctx.update(extra)
     return render_template("account.html", **ctx)
