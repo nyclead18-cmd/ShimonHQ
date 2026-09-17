@@ -3428,6 +3428,44 @@ def new_api_key():
     return redirect(url_for("account_view"))
 
 
+def _temp_password():
+    """Something a person can read off a text message and type: word-word-digits."""
+    import secrets
+    words = ("amber", "cedar", "delta", "ember", "flint", "grove", "harbor", "ivory", "jade", "kestrel",
+             "lumen", "maple", "north", "olive", "pearl", "quartz", "river", "slate", "tidal", "umber",
+             "velvet", "willow", "zephyr", "birch", "coral", "dune", "fjord", "glade", "heron", "indigo")
+    return "%s-%s-%02d" % (secrets.choice(words), secrets.choice(words), secrets.randbelow(100))
+
+
+@app.route("/account/reset/<int:uid>", methods=["POST"])
+@login_required
+def reset_person(uid):
+    """Admin hands somebody a fresh temporary password - and, if their phone is gone,
+    clears their two-step so setup runs again at the next sign-in. Never for oneself
+    (use Change password), never for another admin."""
+    from werkzeug.security import generate_password_hash
+    con = db()
+    if not session.get("admin"):
+        abort(403)
+    row = con.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    if not row:
+        abort(404)
+    if row["id"] == me() or row["is_admin"]:
+        return _account_page(con, error="Admins change their own password under Your password.")
+    pw = _temp_password()
+    con.execute("UPDATE users SET pw_hash=? WHERE id=?", (generate_password_hash(pw), uid))
+    note = ""
+    if request.form.get("twofa"):
+        uset_del(con, ("totp_secret", "totp_on", "totp_last", "totp_recovery", "totp_pending",
+                       "totp_fails", "totp_fail_at"), uid)
+        note = " Two-step is cleared too; the app sets it up again when they sign in."
+    else:
+        uset_del(con, ("totp_fails", "totp_fail_at"), uid)   # a lockout ends with the reset
+    commit_retry(con)
+    return _account_page(con, ok="%s's new password: %s — send it to them and have them change it under Account.%s"
+                              % (row["display_name"], pw, note), reset_pw=pw, reset_uid=uid)
+
+
 @app.route("/account/add", methods=["POST"])
 @login_required
 def add_person():
@@ -3443,7 +3481,7 @@ def add_person():
                or " ".join(x for x in (fn, ln) if x) or username.title())
     email = (request.form.get("email") or "").strip().lower()[:120]
     phone = _clean_phone(request.form.get("phone"))
-    pw = request.form.get("password") or ""
+    pw = request.form.get("password") or _temp_password()
     err = None
     if not re.match(r"^[a-z0-9_.-]{2,32}$", username):
         err = "Username: letters, digits, dot, dash or underscore."
@@ -3468,8 +3506,9 @@ def add_person():
     ensure_buckets(con, uid)
     my_inbox(con, uid)
     commit_retry(con)
-    return _account_page(con, ok="%s can sign in now. Their own board key is on their Account page."
-                              % display)
+    return _account_page(con, ok="%s can sign in now as @%s with the password %s. Send it to them; the app "
+                                 "walks them through two-step and they change the password under Account."
+                              % (display, username, pw))
 
 
 # ---------- pulse ----------
