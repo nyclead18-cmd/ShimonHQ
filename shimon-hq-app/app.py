@@ -5593,7 +5593,7 @@ ensure_vapid()
 start_reminders()
 
 
-# ---------- voicemail (Joel's almanos / tzedakah line) ----------
+# ---------- voicemail (Shefa Yoel almanos / tzedakah line) ----------
 
 @app.route("/vm")
 @login_required
@@ -5672,6 +5672,11 @@ def api_vm_sync():
     """Pull now instead of waiting for the five-minute tick. ?days=N widens the backfill."""
     if not vm.configured():
         return jsonify(error="RingCentral not configured (RC_CLIENT_ID / RC_CLIENT_SECRET / RC_JWT)"), 400
+    if request.args.get("whoami"):
+        try:
+            return jsonify(extension_id=vm.rc_extension_id())
+        except Exception as e:
+            return jsonify(error=str(e)[:500]), 502
     days = request.args.get("days", type=int)
     dfrom = (date.today() - timedelta(days=days)).isoformat() if days else None
     try:

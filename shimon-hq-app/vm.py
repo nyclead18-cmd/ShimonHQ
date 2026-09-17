@@ -1,6 +1,6 @@
 """RingCentral voicemail -> Yiddish transcript, for HQ.
 
-Joel's line takes the calls from the almanos / tzedakah families. Every new
+The Shefa Yoel line takes the calls from the almanos / tzedakah families. Every new
 voicemail is pulled from RingCentral, the audio kept on the HQ disk, and the
 recording sent to Yiddish Labs for a transcript, so nobody has to sit with
 the phone to know what came in.
@@ -8,7 +8,9 @@ the phone to know what came in.
 Env:
   RC_CLIENT_ID / RC_CLIENT_SECRET / RC_JWT   RingCentral app (JWT auth flow)
   RC_SERVER        default https://platform.ringcentral.com
-  RC_EXTENSION_ID  the extension whose voicemail box we read (Joel's). "~" = the JWT user.
+  RC_EXTENSION_ID    the extension whose voicemail box we read. "~" = the JWT user.
+  RC_EXTENSION_NAME  or: resolve the box by its name/number (e.g. "Shefa yoel");
+                     needs the ReadAccounts scope on the RC app.
   RC_DATE_FROM     backfill start, YYYY-MM-DD (default: 90 days back)
   YL_API_KEY       Yiddish Labs key (yl_live_... standard, or yl_flash_... flash)
   YL_MODE          standard | flash (inferred from the key prefix if unset)
@@ -90,8 +92,41 @@ def _rc_get(path, params=None, raw=False):
     return _retry(lambda: _req(url, headers=h, raw=raw, timeout=120))
 
 
+_ext_cache = {}
+
+
+def rc_extension_id():
+    """RC_EXTENSION_ID wins; else RC_EXTENSION_NAME is matched against the account's
+    extensions (name or extension number, case-insensitive); else the JWT user."""
+    eid = (os.environ.get("RC_EXTENSION_ID") or "").strip()
+    if eid:
+        return eid
+    want = (os.environ.get("RC_EXTENSION_NAME") or "").strip().lower()
+    if not want:
+        return "~"
+    if want in _ext_cache:
+        return _ext_cache[want]
+    page = 1
+    while True:
+        j = _rc_get("/restapi/v1.0/account/~/extension", {"perPage": 1000, "page": page})
+        for e in j.get("records", []):
+            if (e.get("name") or "").strip().lower() == want or str(e.get("extensionNumber")) == want:
+                _ext_cache[want] = str(e["id"])
+                return _ext_cache[want]
+        if page >= (j.get("paging") or {}).get("totalPages", 1):
+            break
+        page += 1
+    # loose match as a fallback (e.g. "shefa" -> "Shefa yoel")
+    j = _rc_get("/restapi/v1.0/account/~/extension", {"perPage": 1000})
+    hits = [e for e in j.get("records", []) if want in (e.get("name") or "").lower()]
+    if len(hits) == 1:
+        _ext_cache[want] = str(hits[0]["id"])
+        return _ext_cache[want]
+    raise RuntimeError("RingCentral extension %r not found (%d loose matches)" % (want, len(hits)))
+
+
 def rc_list_voicemails(date_from=None):
-    ext = os.environ.get("RC_EXTENSION_ID", "~")
+    ext = rc_extension_id()
     if not date_from:
         days = 90
         date_from = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -143,7 +178,7 @@ def rc_transcript(record):
 YL_STD = "https://app.yiddishlabs.com/api/v1"
 YL_FLASH = "https://flash.yiddishlabs.com/v1"
 YL_CONTEXT = os.environ.get("YL_CONTEXT",
-    "Voicemail left on a tzedakah phone line by almanos and yesomim families; "
+    "Voicemail left on the Shefa Yoel tzedakah phone line by almanos and yesomim families; "
     "Chassidish Yiddish, names, addresses, phone numbers, dollar amounts.")
 
 
@@ -291,6 +326,18 @@ def ensure_schema(con):
     con.execute("CREATE INDEX IF NOT EXISTS vm_open ON voicemails(handled, ts)")
 
 
+def _caller_name(n):
+    """RC labels queue voicemails "Shefa yoel - DASKAL,CHANA"; keep just the caller,
+    and drop carrier placeholders that are not a name."""
+    n = re.sub(r"^[^-]{1,40}\s+-\s+", "", n.strip())
+    if re.fullmatch(r"(WIRELESS CALLER|UNKNOWN|UNAVAILABLE|ANONYMOUS|PRIVATE|Possible spam call|[A-Z ]{2,}\s{2,}[A-Z]{2})", n, re.I):
+        return ""
+    if "," in n and n.isupper():
+        last, first = [x.strip() for x in n.split(",", 1)]
+        n = ("%s %s" % (first, last)).title()
+    return n
+
+
 def _safe(s):
     return re.sub(r"[^A-Za-z0-9+_-]+", "_", s or "unknown").strip("_")[:40]
 
@@ -313,7 +360,7 @@ def sync(con, files_dir, log=None, date_from=None, transcribe=True, limit=None):
             break
         frm = m.get("from") or {}
         num = frm.get("phoneNumber") or frm.get("extensionNumber") or ""
-        name = frm.get("name") or ""
+        name = _caller_name(frm.get("name") or "")
         got = rc_audio(m)
         stored = None
         dur = None
@@ -327,7 +374,7 @@ def sync(con, files_dir, log=None, date_from=None, transcribe=True, limit=None):
             "INSERT INTO voicemails(rc_id, ext, ts, caller_number, caller_name, duration,"
             " stored_name, rc_text, tstatus, received_at) VALUES(?,?,?,?,?,?,?,?,?,?)"
             " ON CONFLICT(rc_id) DO NOTHING",
-            (str(m["id"]), os.environ.get("RC_EXTENSION_ID", "~"), m.get("creationTime"),
+            (str(m["id"]), rc_extension_id(), m.get("creationTime"),
              num, name, dur, stored, rc_transcript(m),
              "new" if stored else "skipped",
              datetime.now().isoformat(timespec="seconds")))
