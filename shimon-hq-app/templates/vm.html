@@ -77,7 +77,7 @@
 </style>
 
 {% if not rc_ok %}<p class="hint">RingCentral is not connected — set <code>RC_CLIENT_ID</code>, <code>RC_CLIENT_SECRET</code>, <code>RC_JWT</code>, <code>RC_EXTENSION_ID</code> on Render.</p>{% endif %}
-{% if rc_ok and not yl_ok %}<p class="hint">Recordings come in, but no transcripts until <code>YL_API_KEY</code> is set.</p>{% endif %}
+{% if rc_ok and not yl_ok and not mirror %}<p class="hint">Recordings come in, but no transcripts until <code>YL_API_KEY</code> is set.</p>{% endif %}
 
 <div class="bar">
   <div class="seg">
@@ -91,7 +91,7 @@
   <form method="post" action="{{ url_for('api_vm_sync', back=1) }}"><button type="submit" class="b quiet">Check now</button></form>
   <div class="more"><button type="button" class="b quiet" data-menu>⋯</button>
     <div class="menu">
-      <form method="post" action="{{ url_for('api_vm_sync', back=1, days=365) }}"><button type="submit">Backfill 1 year</button></form>
+      {% if not mirror %}<form method="post" action="{{ url_for('api_vm_sync', back=1, days=365) }}"><button type="submit">Backfill 1 year</button></form>{% endif %}
       {% if last_sync %}<hr><div class="hint" style="padding:6px 10px;font-size:12px">last check {{ last_sync[:16].replace('T',' ') }}</div>{% endif %}
     </div>
   </div>
@@ -149,7 +149,7 @@
         {% if r.yiddish %}<button type="button" data-copy="yi">Copy Yiddish</button>{% endif %}
         {% if r.english or r.yiddish %}<button type="button" data-copy="all">Copy everything</button>{% endif %}
         {% if r.stored_name %}<button type="button" data-copy="link">Copy web link</button>{% endif %}
-        {% if r.tstatus in ('failed','empty','short') and r.stored_name %}<hr>
+        {% if not mirror and r.tstatus in ('failed','empty','short') and r.stored_name %}<hr>
         <form method="post" action="{{ url_for('api_vm_retry', vid=r.id) }}"><input type="hidden" name="show" value="{{ show }}"><button type="submit">{% if r.tstatus == 'failed' %}Retry transcript{% else %}Transcribe anyway{% endif %}</button></form>{% endif %}
       </div>
     </div>
