@@ -5066,11 +5066,14 @@ def vm_notify(con):
                        " ORDER BY ts").fetchall()
     if not rows:
         return
-    who = [r[0] for r in con.execute("SELECT id FROM users")]
-    who = [u for u in who if wants(con, u, "vm")]
+    everyone = [u[0] for u in con.execute("SELECT id FROM users")]
+    admins = [u[0] for u in con.execute("SELECT id FROM users WHERE is_admin=1")]
     for r in rows:
         cur = con.execute("UPDATE voicemails SET notified=1 WHERE id=? AND notified=0", (r["id"],))
         commit_retry(con)
+        # a message in somebody's queue buzzes them; the desk buzzes the admins
+        pool = [r["assignee"]] if r["assignee"] else (admins or everyone)
+        who = [u for u in pool if wants(con, u, "vm")]
         if not cur.rowcount or not who:
             continue
         name = r["caller_name"] or vm.fmt_phone(r["caller_number"]) or "Unknown caller"
@@ -5908,20 +5911,45 @@ start_reminders()
 def vm_view():
     con = db()
     show = request.args.get("show", "open")
+    # Queues. Every message sits in one queue: unassigned (the admin's desk) or a
+    # person's. An admin sees whichever queue they pick; anyone else sees only their own.
+    folk = people_list(con)
+    admin = bool(session.get("admin"))
+    q = request.args.get("q", "")
+    if not admin:
+        q = str(me())
+    if q == "":
+        qwhere, qargs = " AND v.assignee IS NULL", ()
+    elif q == "all":
+        qwhere, qargs = "", ()
+    else:
+        qwhere, qargs = " AND v.assignee=?", (int(q),)
     # "Handled" is mine alone: what I file away stays filed for me and untouched for
     # everyone else, so two people can work the same line without tripping over each other.
-    where = {"all": "",
-             "short": "WHERE tstatus IN ('short','empty','skipped')",
-             }.get(show, "WHERE h.vm_id IS NULL AND tstatus NOT IN ('short','empty','skipped')")
+    where = {"all": "WHERE 1=1" + qwhere,
+             "short": "WHERE tstatus IN ('short','empty','skipped')" + qwhere,
+             }.get(show, "WHERE h.vm_id IS NULL AND tstatus NOT IN ('short','empty','skipped')" + qwhere)
     rows = con.execute(
-        "SELECT v.*, (h.vm_id IS NOT NULL) AS handled FROM voicemails v"
-        " LEFT JOIN vm_handled h ON h.vm_id=v.id AND h.user_id=? %s ORDER BY v.ts DESC LIMIT 300"
-        % where, (me(),)).fetchall()
+        "SELECT v.*, (h.vm_id IS NOT NULL) AS handled, u.display_name AS assignee_name FROM voicemails v"
+        " LEFT JOIN vm_handled h ON h.vm_id=v.id AND h.user_id=?"
+        " LEFT JOIN users u ON u.id=v.assignee %s ORDER BY v.ts DESC LIMIT 300"
+        % where, (me(),) + qargs).fetchall()
     last = con.execute("SELECT v FROM settings WHERE k='vm_last_sync'").fetchone()
+    # open count per queue, each person's own "handled" respected
+    qcounts = {}
+    for f in folk:
+        qcounts[f["id"]] = con.execute(
+            "SELECT COUNT(*) FROM voicemails v LEFT JOIN vm_handled h ON h.vm_id=v.id AND h.user_id=?"
+            " WHERE h.vm_id IS NULL AND tstatus NOT IN ('short','empty','skipped') AND v.assignee=?",
+            (f["id"], f["id"])).fetchone()[0]
+    qcounts[""] = con.execute(
+        "SELECT COUNT(*) FROM voicemails v LEFT JOIN vm_handled h ON h.vm_id=v.id AND h.user_id=?"
+        " WHERE h.vm_id IS NULL AND tstatus NOT IN ('short','empty','skipped') AND v.assignee IS NULL",
+        (me(),)).fetchone()[0]
     counts = {
         "open": con.execute("SELECT COUNT(*) FROM voicemails v LEFT JOIN vm_handled h"
                             " ON h.vm_id=v.id AND h.user_id=? WHERE h.vm_id IS NULL"
-                            " AND tstatus NOT IN ('short','empty','skipped')", (me(),)).fetchone()[0],
+                            " AND tstatus NOT IN ('short','empty','skipped')" + qwhere, (me(),) + qargs).fetchone()[0],
         "short": con.execute("SELECT COUNT(*) FROM voicemails"
                              " WHERE tstatus IN ('short','empty','skipped')").fetchone()[0],
         "pending": con.execute("SELECT COUNT(*) FROM voicemails WHERE tstatus IN ('new','failed')"
@@ -5946,7 +5974,8 @@ def vm_view():
 
     return render_template("vm.html", rows=rows, show=show, counts=counts, busy=_vm_lock.locked(),
                            dh=dh, dh_url=vm.DH_URL, share_token=vm_share_token, day_label=day_label,
-                           mirror=vm.mirror_configured(),
+                           mirror=vm.mirror_configured(), folk=folk, q=q, qcounts=qcounts, admin=admin,
+                           me_id=me(),
                            last_sync=(last["v"] if last else None),
                            rc_ok=vm.configured(), yl_ok=vm.yl_configured(),
                            fmt_phone=vm.fmt_phone)
@@ -6014,6 +6043,55 @@ def vm_handled(vid):
     return redirect(url_for("vm_view", show=request.form.get("show", "open")))
 
 
+def _board_owner(con):
+    """Whose board the line works off: the first admin (Shimon on his HQ, Joel on his)."""
+    row = con.execute("SELECT id FROM users WHERE is_admin=1 ORDER BY id LIMIT 1").fetchone()
+    return row["id"] if row else me()
+
+
+def _let_see(con, section_id, uid):
+    """Make sure `uid` can see this section of the owner's board without opening it to all."""
+    sec = con.execute("SELECT owner_id, visibility FROM sections WHERE id=?", (section_id,)).fetchone()
+    if not sec or sec["owner_id"] == uid or sec["visibility"] == "shared":
+        return
+    if sec["visibility"] == "private":
+        con.execute("UPDATE sections SET visibility='some' WHERE id=?", (section_id,))
+    con.execute("INSERT OR IGNORE INTO section_shares(section_id, user_id) VALUES(?,?)", (section_id, uid))
+
+
+@app.route("/vm/<int:vid>/assign", methods=["POST"])
+@login_required
+def vm_assign(vid):
+    """Hand a voicemail to somebody's queue (or back to the desk). They get a push, and the
+    admin's Community/Charity box is opened to them so the task that follows lands on the
+    board they can see."""
+    con = db()
+    r = con.execute("SELECT * FROM voicemails WHERE id=?", (vid,)).fetchone()
+    if not r:
+        abort(404)
+    if not session.get("admin") and r["assignee"] not in (None, me()):
+        abort(403)
+    to = request.form.get("to", "")
+    uid = int(to) if to.isdigit() else None
+    if uid is not None and not con.execute("SELECT 1 FROM users WHERE id=?", (uid,)).fetchone():
+        abort(404)
+    con.execute("UPDATE voicemails SET assignee=? WHERE id=?", (uid, vid))
+    if uid is not None:
+        _let_see(con, ensure_buckets(con, _board_owner(con))["Community/Charity"], uid)
+    commit_retry(con)
+    if uid is not None and uid != me() and wants(con, uid, "vm"):
+        who = r["caller_name"] or vm.fmt_phone(r["caller_number"]) or "Unknown caller"
+        try:
+            send_push("Voicemail for you \u00b7 %s" % who, _short(r["english"] or "", 140) or "from %s" % _actor_name(con),
+                      "/vm#vm-%d" % vid, uid=uid)
+        except Exception as e:
+            app.logger.warning("assign push failed: %s", e)
+    if request.form.get("ajax"):
+        name = con.execute("SELECT display_name FROM users WHERE id=?", (uid,)).fetchone() if uid else None
+        return jsonify(ok=True, assignee=uid, name=(name["display_name"] if name else None))
+    return redirect(url_for("vm_view", show=request.form.get("show", "open"), q=request.form.get("q", "")))
+
+
 @app.route("/vm/<int:vid>/task", methods=["POST"])
 @login_required
 def vm_task(vid):
@@ -6023,8 +6101,11 @@ def vm_task(vid):
     r = con.execute("SELECT * FROM voicemails WHERE id=?", (vid,)).fetchone()
     if not r:
         abort(404)
-    uid = session.get("uid")
-    sid = ensure_buckets(con, uid)["Community/Charity"]
+    # The task lives on the board owner's Community/Charity box - the one board everyone
+    # works off - and is put on the list of whoever the voicemail is assigned to.
+    owner = _board_owner(con)
+    sid = ensure_buckets(con, owner)["Community/Charity"]
+    tag_to = r["assignee"] or (me() if me() != owner else None)
     who = r["caller_name"] or vm.fmt_phone(r["caller_number"]) or "unknown caller"
     title = (request.form.get("title") or "").strip() or ("Call back %s (voicemail)" % who)
     note = "\n\n".join(x for x in (
@@ -6044,6 +6125,9 @@ def vm_task(vid):
     con.execute("UPDATE voicemails SET item_id=? WHERE id=?", (cur.lastrowid, vid))
     con.execute("INSERT OR IGNORE INTO vm_handled(vm_id, user_id, at) VALUES(?,?,?)",
                 (vid, me(), datetime.now().isoformat(timespec="seconds")))
+    if tag_to:
+        _let_see(con, sid, tag_to)
+        con.execute("INSERT OR IGNORE INTO list_tags(item_id, user_id) VALUES(?,?)", (cur.lastrowid, tag_to))
     commit_retry(con)
     return redirect(url_for("task_view", item_id=cur.lastrowid))
 
