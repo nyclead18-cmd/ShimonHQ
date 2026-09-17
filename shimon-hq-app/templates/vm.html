@@ -51,6 +51,7 @@
   {% if show == 'all' %}<a href="{{ url_for('vm_view') }}">Open only</a>{% else %}<a href="{{ url_for('vm_view', show='all') }}">Show handled</a>{% endif %}
   <form method="post" action="{{ url_for('api_vm_sync', back=1) }}"><button type="submit" class="printbtn">Check now</button></form>
   <form method="post" action="{{ url_for('api_vm_sync', back=1, days=365) }}"><button type="submit" class="printbtn">Backfill 1 yr</button></form>
+  {% if busy %}<span class="pill new">working in background — refresh</span>{% endif %}
   {% if last_sync %}<span class="meta">last check {{ last_sync[:16].replace('T',' ') }}</span>{% endif %}
 </div>
 
