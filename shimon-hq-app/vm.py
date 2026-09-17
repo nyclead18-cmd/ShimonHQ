@@ -252,12 +252,17 @@ def lines():
     if _lines_cache["data"] and time.time() - _lines_cache["at"] < 3600:
         return _lines_cache["data"]
     out = []
-    for spec, label in line_specs():
+    for i, (spec, label) in enumerate(line_specs()):
         try:
             out.append({"id": _resolve_ext(spec), "label": label})
-        except Exception:
-            if not out and not _lines_cache["data"]:
-                raise
+            _line_err.pop("spec:" + spec, None)
+        except Exception as e:
+            # a name we cannot look up (no ReadAccounts permission, or a typo): the main
+            # line falls back to RC_EXTENSION_ID / the JWT user; others are reported
+            _line_err["spec:" + spec] = "%s: %s" % (label, str(e)[:160])
+            if i == 0:
+                fb = (os.environ.get("RC_EXTENSION_ID") or "~").strip()
+                out.append({"id": fb, "label": label})
     if out:
         _lines_cache.update(at=time.time(), data=out)
     return out or _lines_cache["data"] or [{"id": "~", "label": DEFAULT_LINE}]
