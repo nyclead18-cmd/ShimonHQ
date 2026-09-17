@@ -4771,6 +4771,28 @@ def reminder_tick():
 
 
 _vm_last = [0.0]
+_vm_lock = threading.Lock()
+
+
+def vm_work(date_from=None, budget=240):
+    """Pull new voicemails, then transcribe what is pending, for up to `budget`
+    seconds. Runs off the request thread; one at a time."""
+    if not vm.configured() or not _vm_lock.acquire(blocking=False):
+        return
+    con = sqlite3.connect(DB_PATH, timeout=15)
+    con.row_factory = sqlite3.Row
+    con.execute("PRAGMA busy_timeout = 15000")
+    t0 = _time.time()
+    try:
+        vm.sync(con, FILES_DIR, log=app.logger.info, date_from=date_from, transcribe=False)
+        while _time.time() - t0 < budget:
+            if not vm.transcribe_pending(con, FILES_DIR, log=app.logger.info, max_n=3):
+                break
+    except Exception as e:
+        app.logger.warning("vm work failed: %s", e)
+    finally:
+        con.close()
+        _vm_lock.release()
 
 
 def vm_tick():
@@ -4779,13 +4801,7 @@ def vm_tick():
     if not vm.configured() or _time.time() - _vm_last[0] < 300:
         return
     _vm_last[0] = _time.time()
-    con = sqlite3.connect(DB_PATH, timeout=15)
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA busy_timeout = 15000")
-    try:
-        vm.sync(con, FILES_DIR, log=app.logger.info)
-    finally:
-        con.close()
+    vm_work()
 
 
 def _reminder_loop():
@@ -5608,7 +5624,7 @@ def vm_view():
         "pending": con.execute("SELECT COUNT(*) FROM voicemails WHERE tstatus IN ('new','failed')"
                                " AND stored_name IS NOT NULL").fetchone()[0],
     }
-    return render_template("vm.html", rows=rows, show=show, counts=counts,
+    return render_template("vm.html", rows=rows, show=show, counts=counts, busy=_vm_lock.locked(),
                            last_sync=(last["v"] if last else None),
                            rc_ok=vm.configured(), yl_ok=vm.yl_configured(),
                            fmt_phone=vm.fmt_phone)
@@ -5669,7 +5685,8 @@ def vm_task(vid):
 @app.route("/api/vm/sync", methods=["POST"])
 @login_required
 def api_vm_sync():
-    """Pull now instead of waiting for the five-minute tick. ?days=N widens the backfill."""
+    """Start a pull now instead of waiting for the five-minute tick; ?days=N widens the
+    backfill. Runs in the background - the page shows progress on refresh."""
     if not vm.configured():
         return jsonify(error="RingCentral not configured (RC_CLIENT_ID / RC_CLIENT_SECRET / RC_JWT)"), 400
     if request.args.get("whoami"):
@@ -5679,13 +5696,13 @@ def api_vm_sync():
             return jsonify(error=str(e)[:500]), 502
     days = request.args.get("days", type=int)
     dfrom = (date.today() - timedelta(days=days)).isoformat() if days else None
-    try:
-        new, done = vm.sync(db(), FILES_DIR, log=app.logger.info, date_from=dfrom)
-    except Exception as e:
-        return jsonify(error=str(e)[:500]), 502
+    busy = _vm_lock.locked()
+    if not busy:
+        threading.Thread(target=vm_work, kwargs={"date_from": dfrom, "budget": 3000},
+                         daemon=True, name="hq-vm-sync").start()
     if request.args.get("back"):
         return redirect(url_for("vm_view"))
-    return jsonify(ok=True, new=new, transcribed=done)
+    return jsonify(ok=True, started=not busy, already_running=busy)
 
 
 @app.route("/api/vm/<int:vid>/retry", methods=["POST"])
@@ -5694,7 +5711,7 @@ def api_vm_retry(vid):
     con = db()
     con.execute("UPDATE voicemails SET tstatus='new' WHERE id=?", (vid,))
     commit_retry(con)
-    vm.transcribe_pending(con, FILES_DIR, log=app.logger.info, max_n=1)
+    threading.Thread(target=vm_work, kwargs={"budget": 600}, daemon=True).start()
     return redirect(url_for("vm_view", show=request.form.get("show", "open")))
 
 
