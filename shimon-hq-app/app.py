@@ -5616,11 +5616,16 @@ start_reminders()
 def vm_view():
     con = db()
     show = request.args.get("show", "open")
-    where = "" if show == "all" else "WHERE handled=0"
+    where = {"all": "",
+             "short": "WHERE tstatus IN ('short','empty','skipped')",
+             }.get(show, "WHERE handled=0 AND tstatus NOT IN ('short','empty','skipped')")
     rows = con.execute("SELECT * FROM voicemails %s ORDER BY ts DESC LIMIT 300" % where).fetchall()
     last = con.execute("SELECT v FROM settings WHERE k='vm_last_sync'").fetchone()
     counts = {
-        "open": con.execute("SELECT COUNT(*) FROM voicemails WHERE handled=0").fetchone()[0],
+        "open": con.execute("SELECT COUNT(*) FROM voicemails WHERE handled=0"
+                            " AND tstatus NOT IN ('short','empty','skipped')").fetchone()[0],
+        "short": con.execute("SELECT COUNT(*) FROM voicemails"
+                             " WHERE tstatus IN ('short','empty','skipped')").fetchone()[0],
         "pending": con.execute("SELECT COUNT(*) FROM voicemails WHERE tstatus IN ('new','failed')"
                                " AND stored_name IS NOT NULL").fetchone()[0],
     }

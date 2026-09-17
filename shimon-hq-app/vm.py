@@ -15,6 +15,7 @@ Env:
   YL_API_KEY       Yiddish Labs key (yl_live_... standard, or yl_flash_... flash)
   YL_MODE          standard | flash (inferred from the key prefix if unset)
   YL_CONTEXT       optional hint text for the transcriber
+  VM_SHORT_SEC     voicemails this long or shorter are filed as "short" and not transcribed (default 5)
   ANTHROPIC_API_KEY  optional - English gist of each transcript
 
 Pure urllib, like wa.py: no new dependencies.
@@ -324,6 +325,24 @@ def ensure_schema(con):
         " terror TEXT, item_id INTEGER, handled INTEGER NOT NULL DEFAULT 0,"
         " received_at TEXT)")
     con.execute("CREATE INDEX IF NOT EXISTS vm_open ON voicemails(handled, ts)")
+    # file what is already in: short recordings not yet transcribed, and transcripts with nothing in them
+    con.execute("UPDATE voicemails SET tstatus='short' WHERE tstatus IN ('new','failed')"
+                " AND duration IS NOT NULL AND duration <= ?", (SHORT_SEC,))
+    for r in con.execute("SELECT id, yiddish FROM voicemails WHERE tstatus='done'").fetchall():
+        if _is_empty_text(r[1]):
+            con.execute("UPDATE voicemails SET tstatus='empty' WHERE id=?", (r[0],))
+    # strip the queue prefix off names stored before the cleanup existed
+    for r in con.execute("SELECT id, caller_name FROM voicemails WHERE caller_name LIKE '% - %'").fetchall():
+        con.execute("UPDATE voicemails SET caller_name=? WHERE id=?", (_caller_name(r[1]), r[0]))
+
+
+SHORT_SEC = int(os.environ.get("VM_SHORT_SEC", "5"))
+
+
+def _is_empty_text(t):
+    """A hang-up, breathing, or a single word: nothing worth reading."""
+    words = re.findall(r"[\w\u0590-\u05ff']+", t or "")
+    return len(words) < 3
 
 
 def _caller_name(n):
@@ -376,7 +395,8 @@ def sync(con, files_dir, log=None, date_from=None, transcribe=True, limit=None):
             " ON CONFLICT(rc_id) DO NOTHING",
             (str(m["id"]), rc_extension_id(), m.get("creationTime"),
              num, name, dur, stored, rc_transcript(m),
-             "new" if stored else "skipped",
+             ("short" if (stored and dur is not None and int(dur) <= SHORT_SEC)
+              else "new" if stored else "skipped"),
              datetime.now().isoformat(timespec="seconds")))
         con.commit()
         new += 1
@@ -401,8 +421,9 @@ def transcribe_pending(con, files_dir, log=None, max_n=10):
         try:
             t = yl_transcribe(path, name="VM %s %s" % ((r["ts"] or "")[:16], r["caller_number"] or ""))
             en = t["english"] or t.get("summary") or gist(t["yiddish"], r["caller_name"] or r["caller_number"])
-            con.execute("UPDATE voicemails SET yiddish=?, english=?, yl_raw=?, tstatus='done',"
-                        " terror=NULL WHERE id=?", (t["yiddish"], en, t["raw"], r["id"]))
+            status = "empty" if _is_empty_text(t["yiddish"]) else "done"
+            con.execute("UPDATE voicemails SET yiddish=?, english=?, yl_raw=?, tstatus=?,"
+                        " terror=NULL WHERE id=?", (t["yiddish"], en, t["raw"], status, r["id"]))
             n += 1
         except Exception as e:
             con.execute("UPDATE voicemails SET tstatus='failed', terror=? WHERE id=?",
