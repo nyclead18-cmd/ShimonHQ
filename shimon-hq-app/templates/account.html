@@ -60,6 +60,13 @@
   password gets nobody in.</p>
   <a class="ghostbtn linkbtn" href="{{ url_for('twofa_setup') }}">Turn it on</a>
   {% endif %}
+  {% if who and who.is_admin %}
+  <form method="post" action="{{ url_for('set_require_2fa') }}" class="stack" style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
+    <label class="checkrow"><input type="checkbox" name="on" {% if require_2fa %}checked{% endif %} {% if require_2fa_env %}disabled{% endif %} onchange="this.form.submit()">
+      Require two-step sign-in for everyone on this HQ</label>
+    {% if require_2fa_env %}<p class="caveat" style="margin:0">Locked on by the server setting.</p>{% endif %}
+  </form>
+  {% endif %}
 </section>
 
 {% if maps_key %}
@@ -121,6 +128,7 @@
     <form method="post" action="{{ url_for('set_identity') }}" class="stack peoplerow">
       <input type="hidden" name="uid" value="{{ f.id }}">
       <label>Name<input name="display_name" value="{{ f.display_name }}" maxlength="40"></label>
+      <div class="caveat" style="margin:0">@{{ f.username }} &middot; two-step {% if twofa_status.get(f.id) %}<b style="color:var(--pill-done-tx)">on</b>{% else %}off{% endif %}</div>
       <label>Their board is called<input name="board_title" value="{{ titles.get(f.id, '') }}" maxlength="40"></label>
       <label>Small line above it<input name="tagline" value="{{ taglines.get(f.id, '') }}" placeholder="leave empty for none" maxlength="60"></label>
       <button type="submit">Save {{ f.display_name }}</button>
