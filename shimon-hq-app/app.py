@@ -5630,21 +5630,74 @@ def vm_view():
                                " AND stored_name IS NOT NULL").fetchone()[0],
     }
     dh = vm.dh_projects() if vm.dh_configured() else None
+    today = _now_local().date()
+
+    def day_label(iso):
+        try:
+            d = date.fromisoformat(iso)
+        except (TypeError, ValueError):
+            return iso or "Undated"
+        delta = (today - d).days
+        if delta == 0:
+            return "Today"
+        if delta == 1:
+            return "Yesterday"
+        if 1 < delta < 7:
+            return d.strftime("%A")
+        return d.strftime("%A, %B %-d") if d.year == today.year else d.strftime("%B %-d, %Y")
+
     return render_template("vm.html", rows=rows, show=show, counts=counts, busy=_vm_lock.locked(),
-                           dh=dh, dh_url=vm.DH_URL,
+                           dh=dh, dh_url=vm.DH_URL, share_token=vm_share_token, day_label=day_label,
                            last_sync=(last["v"] if last else None),
                            rc_ok=vm.configured(), yl_ok=vm.yl_configured(),
                            fmt_phone=vm.fmt_phone)
 
 
+def vm_share_token(vid):
+    """Unguessable per-voicemail token: a share link works without an HQ login, so it
+    has to be one nobody can derive from the id alone."""
+    return hmac.new(app.secret_key.encode() if isinstance(app.secret_key, str) else app.secret_key,
+                    ("vm-share-%d" % vid).encode(), "sha256").hexdigest()[:20]
+
+
+def _vm_share_row(vid, tok):
+    if not hmac.compare_digest(tok, vm_share_token(vid)):
+        abort(404)
+    row = db().execute("SELECT * FROM voicemails WHERE id=?", (vid,)).fetchone()
+    if not row:
+        abort(404)
+    return row
+
+
+def _vm_send_audio(row, download=False):
+    if not row["stored_name"]:
+        abort(404)
+    who = vm._safe(row["caller_name"] or vm.fmt_phone(row["caller_number"]) or "voicemail")
+    nice = "Voicemail_%s_%s.%s" % ((row["ts"] or "")[:10], who, row["stored_name"].rsplit(".", 1)[-1])
+    return send_from_directory(os.path.join(FILES_DIR, "vm"), row["stored_name"], conditional=True,
+                               as_attachment=download, download_name=nice)
+
+
 @app.route("/vm/<int:vid>/audio")
 @login_required
 def vm_audio(vid):
-    row = db().execute("SELECT stored_name FROM voicemails WHERE id=?", (vid,)).fetchone()
-    if not row or not row["stored_name"]:
+    row = db().execute("SELECT * FROM voicemails WHERE id=?", (vid,)).fetchone()
+    if not row:
         abort(404)
-    return send_from_directory(os.path.join(FILES_DIR, "vm"), row["stored_name"],
-                               conditional=True)
+    return _vm_send_audio(row, download=bool(request.args.get("dl")))
+
+
+@app.route("/s/vm/<int:vid>/<tok>")
+def vm_share(vid, tok):
+    """Public page for one voicemail: player, English, Yiddish, download. No login;
+    the token in the link is the key."""
+    row = _vm_share_row(vid, tok)
+    return render_template("vm_share.html", r=row, tok=tok, fmt_phone=vm.fmt_phone)
+
+
+@app.route("/s/vm/<int:vid>/<tok>/audio")
+def vm_share_audio(vid, tok):
+    return _vm_send_audio(_vm_share_row(vid, tok), download=bool(request.args.get("dl")))
 
 
 @app.route("/vm/<int:vid>/handled", methods=["POST"])
