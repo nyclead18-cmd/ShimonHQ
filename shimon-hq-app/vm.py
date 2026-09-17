@@ -31,7 +31,25 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid as _uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+TZ = ZoneInfo(os.environ.get("TZ_NAME", "America/New_York"))
+
+
+def to_local(ts):
+    """RingCentral stamps everything in UTC ('...Z'); HQ shows New York time.
+    Returns a naive local ISO string (YYYY-MM-DDTHH:MM:SS)."""
+    if not ts:
+        return ts
+    try:
+        t = ts.replace("Z", "+00:00")
+        d = datetime.fromisoformat(t)
+        if d.tzinfo is None:
+            return ts[:19]
+        return d.astimezone(TZ).replace(tzinfo=None).isoformat(timespec="seconds")
+    except ValueError:
+        return ts
 
 RC_SERVER = os.environ.get("RC_SERVER", "https://platform.ringcentral.com")
 UA = "ShimonHQ-vm/1.0"
@@ -386,6 +404,9 @@ def ensure_schema(con):
     for r in con.execute("SELECT id, yiddish FROM voicemails WHERE tstatus='done'").fetchall():
         if _is_empty_text(r[1]):
             con.execute("UPDATE voicemails SET tstatus='empty' WHERE id=?", (r[0],))
+    # timestamps stored in UTC before to_local existed -> New York time
+    for r in con.execute("SELECT id, ts FROM voicemails WHERE ts LIKE '%Z' OR ts LIKE '%+00:00'").fetchall():
+        con.execute("UPDATE voicemails SET ts=? WHERE id=?", (to_local(r[1]), r[0]))
     # strip the queue prefix off names stored before the cleanup existed
     for r in con.execute("SELECT id, caller_name FROM voicemails WHERE caller_name LIKE '% - %'").fetchall():
         con.execute("UPDATE voicemails SET caller_name=? WHERE id=?", (_caller_name(r[1]), r[0]))
@@ -440,7 +461,7 @@ def sync(con, files_dir, log=None, date_from=None, transcribe=True, limit=None):
         dur = None
         if got:
             blob, ext, dur = got
-            stamp = m["creationTime"].replace("-", "").replace(":", "")[:13].replace("T", "_")
+            stamp = to_local(m["creationTime"]).replace("-", "").replace(":", "")[:13].replace("T", "_")
             stored = "%s_%s_%s.%s" % (stamp, _safe(name or num), m["id"], ext)
             with open(os.path.join(vm_dir, stored), "wb") as f:
                 f.write(blob)
@@ -448,7 +469,7 @@ def sync(con, files_dir, log=None, date_from=None, transcribe=True, limit=None):
             "INSERT INTO voicemails(rc_id, ext, ts, caller_number, caller_name, duration,"
             " stored_name, rc_text, tstatus, received_at) VALUES(?,?,?,?,?,?,?,?,?,?)"
             " ON CONFLICT(rc_id) DO NOTHING",
-            (str(m["id"]), rc_extension_id(), m.get("creationTime"),
+            (str(m["id"]), rc_extension_id(), to_local(m.get("creationTime")),
              num, name, dur, stored, rc_transcript(m),
              ("short" if (stored and dur is not None and int(dur) <= SHORT_SEC)
               else "new" if stored else "skipped"),
