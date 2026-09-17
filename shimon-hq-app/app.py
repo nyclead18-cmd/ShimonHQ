@@ -3216,24 +3216,29 @@ def _actor_name(con, uid=None):
 
 # ---------- account ----------
 
+def _account_page(con, **extra):
+    """The Account page with everything it needs - one place, so a message rendered
+    after a change (password, new person) never lands on a half-built page."""
+    folk = people_list(con)
+    home, work = _origins(con)
+    ctx = dict(home=home, work=work, maps_key=bool(maps.KEY),
+               who=user_row(con), folk=folk,
+               titles={r["id"]: board_title(con, r["id"]) for r in folk},
+               taglines={r["id"]: uset(con, "tagline", r["id"]) for r in folk},
+               my_title=uset(con, "board_title"),
+               api_token=api_token_for(con),
+               notify_kinds=NOTIFY_KINDS,
+               notify_on={k: wants(con, me(), k) for k in NOTIFY_KINDS},
+               twofa_on=uset(con, "totp_on") == "1",
+               feed_url=request.url_root.rstrip("/") + url_for("ics_feed", token=_feed_token(con)))
+    ctx.update(extra)
+    return render_template("account.html", **ctx)
+
+
 @app.route("/account")
 @login_required
 def account_view():
-    con = db()
-    folk = people_list(con)
-    home, work = _origins(con)
-    return render_template("account.html",
-                           home=home, work=work, maps_key=bool(maps.KEY),
-                           who=user_row(con), folk=folk,
-                           titles={r["id"]: board_title(con, r["id"]) for r in folk},
-                           taglines={r["id"]: uset(con, "tagline", r["id"]) for r in folk},
-                           my_title=uset(con, "board_title"),
-                           api_token=api_token_for(con),
-                           notify_kinds=NOTIFY_KINDS,
-                           notify_on={k: wants(con, me(), k) for k in NOTIFY_KINDS},
-                           twofa_on=uset(con, "totp_on") == "1",
-                           feed_url=request.url_root.rstrip("/")
-                           + url_for("ics_feed", token=_feed_token(con)))
+    return _account_page(db())
 
 
 @app.route("/account/password", methods=["POST"])
@@ -3245,16 +3250,13 @@ def change_password():
     old = request.form.get("current", "")
     new = request.form.get("new", "")
     if not row or not check_password_hash(row["pw_hash"], old):
-        return render_template("account.html", who=row, folk=people_list(con),
-                               feed_url="", api_token="", error="That is not your current password.")
+        return _account_page(con, error="That is not your current password.")
     if len(new) < 8:
-        return render_template("account.html", who=row, folk=people_list(con),
-                               feed_url="", api_token="", error="Use at least 8 characters.")
+        return _account_page(con, error="Use at least 8 characters.")
     con.execute("UPDATE users SET pw_hash=? WHERE id=?",
                 (generate_password_hash(new), row["id"]))
     commit_retry(con)
-    return render_template("account.html", who=row, folk=people_list(con),
-                           feed_url="", api_token="", ok="Password changed.")
+    return _account_page(con, ok="Password changed.")
 
 
 @app.route("/account/identity", methods=["POST"])
@@ -3323,8 +3325,7 @@ def add_person():
     elif con.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone():
         err = "That username is taken."
     if err:
-        return render_template("account.html", who=user_row(con), folk=people_list(con),
-                               feed_url="", api_token="", error=err)
+        return _account_page(con, error=err)
     uid = con.execute(
         "INSERT INTO users(username, display_name, pw_hash, is_admin, created_at)"
         " VALUES(?,?,?,0,?)",
@@ -3334,9 +3335,7 @@ def add_person():
     ensure_buckets(con, uid)
     my_inbox(con, uid)
     commit_retry(con)
-    return render_template("account.html", who=user_row(con), folk=people_list(con),
-                           feed_url="", api_token="",
-                           ok="%s can sign in now. Their own board key is on their Account page."
+    return _account_page(con, ok="%s can sign in now. Their own board key is on their Account page."
                               % display)
 
 
