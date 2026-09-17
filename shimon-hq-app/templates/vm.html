@@ -33,6 +33,11 @@
   .vmpage .bar .stat{padding:0;border:0;background:none;box-shadow:none;color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
   .vmpage .working{font-size:12px;color:var(--pill-wait-tx);background:var(--pill-wait-bg);border-radius:999px;padding:3px 10px}
   .vmpage .hint{color:var(--muted)}
+  .vmpage .queues{display:flex;gap:8px;flex-wrap:wrap;margin:-8px 0 16px}
+  .vmpage .qchip{display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border-radius:999px;border:1px solid var(--border);background:var(--card);color:var(--muted);font-size:13px;text-decoration:none}
+  .vmpage .qchip b{font-weight:600;font-variant-numeric:tabular-nums;color:var(--ink);background:var(--row);border-radius:999px;padding:0 7px;font-size:12px}
+  .vmpage .qchip.on{border-color:var(--ink);color:var(--ink)}
+  .vmpage .tag.who{background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent);border-color:transparent;text-transform:none;letter-spacing:0;font-size:11px}
 
   .vmpage .day{margin:22px 4px 6px;font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600}
   .vmpage .bar + .day{margin-top:4px}
@@ -158,6 +163,14 @@
   </div>
 </div>
 
+{% if admin and folk|length > 1 %}
+<div class="queues">
+  <a class="qchip {% if q == '' %}on{% endif %}" href="{{ url_for('vm_view', show=show) }}">Desk<b>{{ qcounts[''] }}</b></a>
+  {% for f in folk %}{% if not f.is_admin %}<a class="qchip {% if q == f.id|string %}on{% endif %}" href="{{ url_for('vm_view', show=show, q=f.id) }}">{{ f.display_name }}<b>{{ qcounts[f.id] }}</b></a>{% endif %}{% endfor %}
+  <a class="qchip {% if q == 'all' %}on{% endif %}" href="{{ url_for('vm_view', show=show, q='all') }}">Everyone</a>
+</div>
+{% endif %}
+
 {% if not rows %}<p class="hint">Nothing here.</p>{% endif %}
 
 {% set ns = namespace(day=None) %}
@@ -186,8 +199,9 @@
     <div>
       <div class="who">{{ who }}{% if r.caller_name and r.caller_number %} <small>{{ fmt_phone(r.caller_number) }}</small>{% endif %}</div>
       <div class="peek">{% if r.english or r.rc_text %}{{ (r.english or r.rc_text)|truncate(160) }}{% elif r.tstatus == 'new' %}<i>Transcribing…</i>{% endif %}</div>
-      {% if r.tstatus in ('failed','short','empty','skipped') or r.item_id or r.dh_event_id %}
+      {% if r.tstatus in ('failed','short','empty','skipped') or r.item_id or r.dh_event_id or (r.assignee and q in ('', 'all')) %}
       <div class="tags">
+        {% if r.assignee and q in ('', 'all') %}<span class="tag who" data-who-tag>&rarr; {{ r.assignee_name }}</span>{% endif %}
         {% if r.tstatus == 'failed' %}<span class="tag bad">transcript failed</span>
         {% elif r.tstatus == 'short' %}<span class="tag">short</span>
         {% elif r.tstatus == 'empty' %}<span class="tag">nothing said</span>
@@ -214,6 +228,14 @@
         {% if not r.handled %}<button type="button" class="ib" data-file title="Handled"><svg viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5"/></svg>Handled</button>
         {% else %}<form method="post" action="{{ url_for('vm_handled', vid=r.id) }}" style="margin:0"><input type="hidden" name="show" value="{{ show }}"><input type="hidden" name="undo" value="1"><button type="submit" class="ib quiet"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5"/></svg>Reopen</button></form>{% endif %}
         {% if not r.item_id %}<form method="post" action="{{ url_for('vm_task', vid=r.id) }}" style="margin:0"><button type="submit" class="ib"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M12 8v8M8 12h8"/></svg>Task</button></form>{% endif %}
+        {% if folk|length > 1 and (admin or not r.assignee or r.assignee == me_id) %}
+        <div class="more"><button type="button" class="ib" data-menu><svg viewBox="0 0 24 24"><path d="M4 12h13M13 6l6 6-6 6"/></svg>To</button>
+          <div class="menu" style="right:auto;left:0">
+            {% for f in folk %}{% if f.id != r.assignee %}<button type="button" data-assign="{{ f.id }}">{{ f.display_name }}{% if f.id == me_id %} (me){% endif %}</button>{% endif %}{% endfor %}
+            {% if r.assignee and admin %}<hr><button type="button" data-assign="">Back to the desk</button>{% endif %}
+          </div>
+        </div>
+        {% endif %}
       </div>
       {% if r.stored_name %}<button type="button" class="ib play" data-play aria-label="Play"><svg class="go" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg><svg class="pause" viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg></button>{% else %}<span></span>{% endif %}
       <div class="grp">
@@ -374,6 +396,19 @@
       .then(function(){ btn.disabled = false; });
   }
 
+  function slideAway(c){
+    if (current === c) pause();
+    var g = c.parentElement, day = g.previousElementSibling;
+    c.style.maxHeight = c.offsetHeight + 'px';
+    setTimeout(function(){ c.classList.add('filed'); }, 16);
+    var seg = document.querySelector('.seg a.on'); if (seg) seg.textContent = seg.textContent.replace(/\d+$/, function(n){ return Math.max(0, n - 1); });
+    setTimeout(function(){
+      c.remove(); var k = cards.indexOf(c); if (k >= 0) cards.splice(k, 1);
+      if (!g.querySelector('article')) { g.remove(); if (day && day.classList.contains('day')) day.remove(); }
+      var nx = cards[k] || cards[k - 1]; if (nx && SHOW === 'open') openCard(nx, {autoplay: false});
+    }, 340);
+  }
+
   // ---- Handled: the row folds shut at once and the next message slides up; the
   // server is told in the background, and if that fails the row comes back with a note.
   function fileAway(c){
@@ -402,6 +437,26 @@
       });
   }
 
+  // ---- hand a message to somebody's queue ----
+  var Q = {{ q|tojson }}, ASSIGN_URL = {{ url_for('vm_assign', vid=0)|tojson }};
+  function assign(c, to){
+    var fd = new FormData(); fd.append('to', to); fd.append('ajax', '1'); fd.append('show', SHOW); fd.append('q', Q);
+    note(c, 'Sending\u2026');
+    fetch(ASSIGN_URL.replace('/0/', '/' + c.dataset.id + '/'), {method: 'POST', body: fd, credentials: 'same-origin'})
+      .then(function(r){ if (!r.ok) throw 0; return r.json(); })
+      .then(function(j){
+        c.dataset.assignee = j.assignee || '';
+        var leaves = (Q === 'all') ? false : (String(j.assignee || '') !== String(Q));
+        if (leaves) { note(c, j.name ? 'Sent to ' + j.name : 'Back on the desk'); setTimeout(function(){ fileAway.slide(c); }, 500); return; }
+        var tg = c.querySelector('[data-who-tag]');
+        if (j.name) { if (!tg) { var tags = c.querySelector('.tags'); if (!tags) { tags = document.createElement('div'); tags.className = 'tags'; c.querySelector('.row > div').appendChild(tags); } tg = document.createElement('span'); tg.className = 'tag who'; tg.setAttribute('data-who-tag', ''); tags.prepend(tg); } tg.textContent = '\u2192 ' + j.name; }
+        else if (tg) tg.remove();
+        note(c, j.name ? 'Sent to ' + j.name : 'Back on the desk');
+      }).catch(function(){ note(c, 'Could not send \u2014 try again'); });
+  }
+
+  fileAway.slide = slideAway;
+
   // ---- menus ----
   function closeMenus(){ document.querySelectorAll('.more.open').forEach(function(m){ m.classList.remove('open'); }); }
 
@@ -413,6 +468,7 @@
     if (e.target.closest('[data-play]')) { if (current === c && !audio.paused) pause(); else play(c); return; }
     if (e.target.closest('[data-speed]')) { setSpeed(SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length]); return; }
     if (e.target.closest('[data-file]')) { fileAway(c); return; }
+    var asg = e.target.closest('[data-assign]'); if (asg) { closeMenus(); assign(c, asg.dataset.assign); return; }
     var cp = e.target.closest('[data-copy]'); if (cp) { copy(textOf(c, cp.dataset.copy), c, cp.dataset.copy === 'link' ? 'Link copied' : 'Copied \u2014 ready to paste'); closeMenus(); return; }
     var sh = e.target.closest('[data-share-btn]'); if (sh) { shareFile(c, sh); return; }
     var st = e.target.closest('[data-sheet]'); if (st) { var sheet = document.getElementById(st.dataset.sheet); sheet.classList.toggle('open'); if (sheet.classList.contains('open')) { var f = sheet.querySelector('select,input'); if (f) f.focus(); } return; }
