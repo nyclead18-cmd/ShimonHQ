@@ -1,5 +1,5 @@
-const CACHE = 'hq-v6';   // bumped for the Shimon's HQ mark - clears every old cached icon
-const SHELL = ['/static/style.css', '/static/board.js', '/static/icon-192.png', '/static/icon-512.png'];
+const CACHE = 'hq-v7';   // bumped for per-instance branding (/brand/...) - clears every old cached icon
+const SHELL = ['/static/style.css', '/static/board.js', '/brand/icon-192.png', '/brand/icon-512.png'];
 
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(SHELL); }).catch(function(){}));
@@ -29,8 +29,8 @@ self.addEventListener('push', function (e) {
   catch (err) { if (e.data) { d.body = e.data.text(); } }
   e.waitUntil(self.registration.showNotification(d.title, {
     body: d.body,
-    icon: '/static/icon-192.png',
-    badge: '/static/icon-192.png',
+    icon: '/brand/icon-192.png',
+    badge: '/brand/icon-192.png',
     tag: d.tag || undefined,
     data: {url: d.url || '/'},
     requireInteraction: false
