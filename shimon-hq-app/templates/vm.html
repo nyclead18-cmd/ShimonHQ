@@ -4,7 +4,7 @@
 <div class="wrap">
 <header class="top">
   <div>
-    <div class="eyebrow">Shefa Yoel line · almanos &amp; tzedakah</div>
+    <div class="eyebrow">Shefa Yoel line · almanos &amp; tzedakah{% if show == 'short' %} · short / empty{% endif %}</div>
     <h1>Voicemail</h1>
   </div>
   <div class="right">
@@ -38,7 +38,7 @@
   .acts form{display:inline}
   .acts input[type=text]{min-width:16rem;padding:.35rem .5rem;border-radius:8px;border:1px solid #ccc}
   .pill{font-size:.75rem;padding:.1rem .5rem;border-radius:999px;background:#eee}
-  .pill.new{background:#fff3cd}.pill.failed{background:#f8d7da}.pill.skipped{background:#e2e3e5}
+  .pill.new{background:#fff3cd}.pill.failed{background:#f8d7da}.pill.skipped,.pill.short,.pill.empty{background:#e2e3e5}
   .warn{padding:.6rem .9rem;border-radius:10px;background:#fff3cd;margin-bottom:.8rem;font-size:.9rem}
 </style>
 
@@ -48,7 +48,9 @@
 <div class="vmbar">
   <span>{{ counts.open }} open{% if counts.pending %} · {{ counts.pending }} waiting on transcript{% endif %}</span>
   <span class="sp"></span>
-  {% if show == 'all' %}<a href="{{ url_for('vm_view') }}">Open only</a>{% else %}<a href="{{ url_for('vm_view', show='all') }}">Show handled</a>{% endif %}
+  {% if show != 'open' %}<a href="{{ url_for('vm_view') }}">Open</a>{% endif %}
+  {% if show != 'short' %}<a href="{{ url_for('vm_view', show='short') }}">Short / empty ({{ counts.short }})</a>{% endif %}
+  {% if show != 'all' %}<a href="{{ url_for('vm_view', show='all') }}">Everything</a>{% endif %}
   <form method="post" action="{{ url_for('api_vm_sync', back=1) }}"><button type="submit" class="printbtn">Check now</button></form>
   <form method="post" action="{{ url_for('api_vm_sync', back=1, days=365) }}"><button type="submit" class="printbtn">Backfill 1 yr</button></form>
   {% if busy %}<span class="pill new">working in background — refresh</span>{% endif %}
@@ -64,7 +66,7 @@
     {% if r.caller_name and r.caller_number %}<span class="meta">{{ fmt_phone(r.caller_number) }}</span>{% endif %}
     <span class="meta">{{ (r.ts or '')[:16].replace('T',' ') }}</span>
     {% if r.duration %}<span class="meta">{{ r.duration }}s</span>{% endif %}
-    {% if r.tstatus != 'done' %}<span class="pill {{ r.tstatus }}">{{ {'new':'transcribing…','failed':'transcript failed','skipped':'no recording'}[r.tstatus] }}</span>{% endif %}
+    {% if r.tstatus != 'done' %}<span class="pill {{ r.tstatus }}">{{ {'new':'transcribing…','failed':'transcript failed','skipped':'no recording','short':'short — not transcribed','empty':'nothing said'}[r.tstatus] }}</span>{% endif %}
     {% if r.item_id %}<a class="pill" href="{{ url_for('task_view', item_id=r.item_id) }}">task #{{ r.item_id }}</a>{% endif %}
   </div>
   {% if r.stored_name %}<audio controls preload="none" src="{{ url_for('vm_audio', vid=r.id) }}"></audio>{% endif %}
