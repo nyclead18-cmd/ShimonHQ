@@ -175,7 +175,7 @@ def hq_short():
     return "%s HQ" % nm
 
 
-BRAND = (os.environ.get("HQ_BRAND") or (os.environ.get("HQ_NAME") or "").strip().split(" ")[0]).lower()
+BRAND = (os.environ.get("HQ_BRAND") or (os.environ.get("HQ_NAME") or "Shimon").strip().split(" ")[0]).lower()
 BRAND = re.sub(r"[^a-z0-9_-]", "", BRAND)
 
 
