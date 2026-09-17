@@ -61,6 +61,10 @@
   .vmpage .meta{margin:0;text-align:right;color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap;line-height:1.3;padding-top:2px}
   .vmpage .meta .dur{display:block;font-size:12px;opacity:.85}
   .vmpage .tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  .vmpage .tag.kind{text-transform:none;letter-spacing:0;font-size:11px}
+  .vmpage .tag.k-thank_you{background:var(--pill-done-bg);color:var(--pill-done-tx);border-color:transparent}
+  .vmpage .tag.k-issue{background:var(--pill-open-bg);color:var(--pill-open-tx);border-color:transparent}
+  .vmpage .tag.k-money{background:var(--pill-wait-bg);color:var(--pill-wait-tx);border-color:transparent}
   .vmpage .tag{font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;padding:2px 8px;border-radius:999px;background:var(--row);color:var(--muted);border:1px solid var(--border);text-decoration:none}
   .vmpage .tag.wait{background:var(--pill-wait-bg);color:var(--pill-wait-tx);border-color:transparent}
   .vmpage .tag.bad{background:var(--pill-open-bg);color:var(--pill-open-tx);border-color:transparent}
@@ -208,9 +212,10 @@
     <div>
       <div class="who">{{ who }}{% if fam and r.caller_name %} <small class="famtag">{{ fam.name_en }}{% if fam.area %} · {{ fam.area }}{% endif %}</small>{% elif r.caller_name and r.caller_number %} <small>{{ fmt_phone(r.caller_number) }}</small>{% endif %}</div>
       <div class="peek">{% if r.english or r.rc_text %}{{ (r.english or r.rc_text)|truncate(160) }}{% elif r.tstatus == 'new' %}<i>Transcribing…</i>{% endif %}</div>
-      {% if r.tstatus in ('failed','short','empty','skipped') or r.item_id or r.dh_event_id or (r.assignee and q in ('', 'all')) %}
+      {% if r.tstatus in ('failed','short','empty','skipped') or r.item_id or r.dh_event_id or r.kind or (r.assignee and q in ('', 'all')) %}
       <div class="tags">
         {% if r.assignee and q in ('', 'all') %}<span class="tag who" data-who-tag>&rarr; {{ r.assignee_name }}</span>{% endif %}
+        {% if r.kind and r.kind != 'other' %}<span class="tag kind k-{{ r.kind }}">{{ kind_label.get(r.kind, r.kind) }}</span>{% endif %}
         {% if r.tstatus == 'failed' %}<span class="tag bad">transcript failed</span>
         {% elif r.tstatus == 'short' %}<span class="tag">short</span>
         {% elif r.tstatus == 'empty' %}<span class="tag">nothing said</span>

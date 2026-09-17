@@ -22,9 +22,17 @@
 {% if ok %}<div class="okline">{{ ok }}</div>{% endif %}
 
 <section class="card acct">
-  <div class="sec-head"><h2>Your name and board</h2></div>
+  <div class="sec-head"><h2>You and your board</h2></div>
   <form method="post" action="{{ url_for('set_identity') }}" class="stack">
-    <label>Your name<input name="display_name" value="{{ who.display_name if who else '' }}" maxlength="40"></label>
+    <div class="two">
+      <label>First name<input name="first_name" value="{{ who.first_name or '' }}" maxlength="40" autocomplete="given-name"></label>
+      <label>Last name<input name="last_name" value="{{ who.last_name or '' }}" maxlength="40" autocomplete="family-name"></label>
+    </div>
+    <label>Shown on the board as<input name="display_name" value="{{ who.display_name if who else '' }}" maxlength="40" placeholder="leave empty for first + last"></label>
+    <div class="two">
+      <label>Email<input type="email" name="email" value="{{ who.email or '' }}" maxlength="120" autocomplete="email"></label>
+      <label>Phone<input type="tel" name="phone" value="{{ fmt_phone(who.phone) if who and who.phone else '' }}" maxlength="20" autocomplete="tel"></label>
+    </div>
     <label>What this board is called<input name="board_title" value="{{ my_title }}" placeholder="{{ board_name }}" maxlength="40"></label>
     <label>Small line above it<input name="tagline" value="{{ tagline }}" placeholder="leave empty for none" maxlength="60"></label>
     <label>How it reads
@@ -127,7 +135,15 @@
     {% if session.get('admin') and f.id != session.get('uid') %}
     <form method="post" action="{{ url_for('set_identity') }}" class="stack peoplerow">
       <input type="hidden" name="uid" value="{{ f.id }}">
-      <label>Name<input name="display_name" value="{{ f.display_name }}" maxlength="40"></label>
+      <div class="two">
+        <label>First name<input name="first_name" value="{{ f.first_name or '' }}" maxlength="40"></label>
+        <label>Last name<input name="last_name" value="{{ f.last_name or '' }}" maxlength="40"></label>
+      </div>
+      <label>Shown on the board as<input name="display_name" value="{{ f.display_name }}" maxlength="40" placeholder="leave empty for first + last"></label>
+      <div class="two">
+        <label>Email<input type="email" name="email" value="{{ f.email or '' }}" maxlength="120"></label>
+        <label>Phone<input type="tel" name="phone" value="{{ fmt_phone(f.phone) if f.phone else '' }}" maxlength="20"></label>
+      </div>
       <div class="caveat" style="margin:0">@{{ f.username }} &middot; two-step {% if twofa_status.get(f.id) %}<b style="color:var(--pill-done-tx)">on</b>{% else %}off{% endif %}</div>
       <label>Their board is called<input name="board_title" value="{{ titles.get(f.id, '') }}" maxlength="40"></label>
       <label>Small line above it<input name="tagline" value="{{ taglines.get(f.id, '') }}" placeholder="leave empty for none" maxlength="60"></label>
@@ -136,7 +152,7 @@
     {% else %}
     <ul class="prows"><li class="prow rhythm">
       <span class="pwho">{{ f.display_name }}</span>
-      <span class="ptitle">{{ f.username }}{% if f.is_admin %} &middot; admin{% endif %}</span>
+      <span class="ptitle">@{{ f.username }}{% if f.is_admin %} &middot; admin{% endif %}{% if f.email %} &middot; {{ f.email }}{% endif %}{% if f.phone %} &middot; {{ fmt_phone(f.phone) }}{% endif %}</span>
     </li></ul>
     {% endif %}
   {% endfor %}
@@ -150,8 +166,16 @@
 <section class="card acct">
   <div class="sec-head"><h2>Add someone</h2></div>
   <form method="post" action="{{ url_for('add_person') }}" class="stack">
+    <div class="two">
+      <label>First name<input name="first_name" autocomplete="off" placeholder="Joel" maxlength="40"></label>
+      <label>Last name<input name="last_name" autocomplete="off" placeholder="Landau" maxlength="40"></label>
+    </div>
+    <div class="two">
+      <label>Email<input type="email" name="email" autocomplete="off" placeholder="joel@…" maxlength="120"></label>
+      <label>Phone<input type="tel" name="phone" autocomplete="off" placeholder="(917) 555-0100" maxlength="20"></label>
+    </div>
     <label>Username<input name="username" autocomplete="off" placeholder="joel" required></label>
-    <label>Name<input name="display_name" autocomplete="off" placeholder="Joel"></label>
+    <label>Shown on the board as<input name="display_name" autocomplete="off" placeholder="leave empty for first + last" maxlength="40"></label>
     <label>First password<input name="password" autocomplete="off" minlength="8" required></label>
     <button type="submit">Add</button>
   </form>
