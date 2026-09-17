@@ -40,6 +40,12 @@
   .pill{font-size:.75rem;padding:.1rem .5rem;border-radius:999px;background:#eee}
   .pill.new{background:#fff3cd}.pill.failed{background:#f8d7da}.pill.skipped,.pill.short,.pill.empty{background:#e2e3e5}
   .warn{padding:.6rem .9rem;border-radius:10px;background:#fff3cd;margin-bottom:.8rem;font-size:.9rem}
+  .pill.dh{background:#e8f0e8;color:#1f4d2a}
+  .dhbox{width:100%;margin-top:.3rem}
+  .dhbox summary{cursor:pointer;font-size:.9rem;color:#1F3A5F}
+  .dhform{display:flex;gap:.6rem;flex-wrap:wrap;align-items:end;margin-top:.5rem;padding:.6rem;border-radius:10px;background:rgba(31,58,95,.04)}
+  .dhform label{display:flex;flex-direction:column;font-size:.75rem;opacity:.8;gap:.15rem}
+  .dhform input,.dhform select{padding:.35rem .5rem;border-radius:8px;border:1px solid #ccc;font-size:.9rem;min-width:9rem}
 </style>
 
 {% if not rc_ok %}<div class="warn">RingCentral is not connected yet — set <code>RC_CLIENT_ID</code>, <code>RC_CLIENT_SECRET</code>, <code>RC_JWT</code>, <code>RC_EXTENSION_NAME</code> (or <code>RC_EXTENSION_ID</code>) on Render.</div>{% endif %}
@@ -68,6 +74,7 @@
     {% if r.duration %}<span class="meta">{{ r.duration }}s</span>{% endif %}
     {% if r.tstatus != 'done' %}<span class="pill {{ r.tstatus }}">{{ {'new':'transcribing…','failed':'transcript failed','skipped':'no recording','short':'short — not transcribed','empty':'nothing said'}[r.tstatus] }}</span>{% endif %}
     {% if r.item_id %}<a class="pill" href="{{ url_for('task_view', item_id=r.item_id) }}">task #{{ r.item_id }}</a>{% endif %}
+    {% if r.dh_event_id %}<a class="pill dh" href="{{ r.dh_url or dh_url }}" target="_blank">in Divrei HaYamim · {{ r.dh_project }}</a>{% endif %}
   </div>
   {% if r.stored_name %}<audio controls preload="none" src="{{ url_for('vm_audio', vid=r.id) }}"></audio>{% endif %}
   {% if r.english %}<div class="en">{{ r.english }}</div>{% endif %}
@@ -86,6 +93,19 @@
       {% if r.handled %}<input type="hidden" name="undo" value="1"><button type="submit">Reopen</button>
       {% else %}<button type="submit">Handled</button>{% endif %}
     </form>
+    {% if dh and not r.dh_event_id and r.stored_name %}
+    <details class="dhbox"><summary>→ Divrei HaYamim</summary>
+      <form method="post" action="{{ url_for('vm_to_dh', vid=r.id) }}" class="dhform">
+        <input type="hidden" name="show" value="{{ show }}">
+        <label>Story <select name="project"><option value="">— pick —</option>{% for p in dh.projects %}<option value="{{ p }}">{{ p }}</option>{% endfor %}</select></label>
+        <label>or new <input type="text" name="project_new" placeholder="new story name"></label>
+        <label>Day <input type="date" name="day" value="{{ (r.ts or '')[:10] }}"></label>
+        <label>Type <select name="category"><option value="">—</option>{% for c in dh.categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select></label>
+        <label>Title <input type="text" name="title" placeholder="Voicemail from {{ r.caller_name or fmt_phone(r.caller_number) }}"></label>
+        <button type="submit" class="printbtn">Send</button>
+      </form>
+    </details>
+    {% endif %}
     {% if r.tstatus == 'failed' %}
     <form method="post" action="{{ url_for('api_vm_retry', vid=r.id) }}"><input type="hidden" name="show" value="{{ show }}"><button type="submit">Retry transcript</button></form>
     {% endif %}
