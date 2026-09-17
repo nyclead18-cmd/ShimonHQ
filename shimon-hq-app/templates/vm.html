@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Voicemail · HQ{% endblock %}
 {% block body %}
-<div class="wrap">
+<div class="wrap vmpage">
 <header class="top">
   <div>
-    <div class="eyebrow">Shefa Yoel line · almanos &amp; tzedakah{% if show == 'short' %} · short / empty{% endif %}</div>
+    <div class="eyebrow">Shefa Yoel line</div>
     <h1>Voicemail</h1>
   </div>
   <div class="right">
@@ -21,96 +21,194 @@
 </header>
 
 <style>
-  .vmbar{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin:.4rem 0 1rem;font-size:.9rem;opacity:.85}
-  .vmbar .sp{flex:1}
-  .vm{border-radius:12px;padding:.9rem 1rem;margin-bottom:.8rem;background:var(--card,#fff);box-shadow:0 1px 3px rgba(0,0,0,.08)}
-  .vm.done{opacity:.6}
-  .vmhead{display:flex;gap:.8rem;align-items:baseline;flex-wrap:wrap}
-  .vmhead b{font-size:1.05rem}
-  .vmhead .meta{opacity:.7;font-size:.85rem}
-  .vm audio{width:100%;margin:.5rem 0;height:36px}
-  .yi{direction:rtl;text-align:right;font-size:1.15rem;line-height:1.6;font-family:"Frank Ruhl Libre","Noto Serif Hebrew","David",serif;white-space:pre-wrap;margin:.5rem 0}
-  .en{white-space:pre-wrap;line-height:1.45;margin:.4rem 0;padding:.5rem .7rem;border-left:3px solid #1F3A5F;background:rgba(31,58,95,.05)}
-  .rc{font-size:.85rem;opacity:.7;white-space:pre-wrap}
-  .pend{font-size:.85rem;opacity:.7;font-style:italic}
-  .err{font-size:.8rem;color:#a33}
-  .acts{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.5rem;align-items:center}
-  .acts form{display:inline}
-  .acts input[type=text]{min-width:16rem;padding:.35rem .5rem;border-radius:8px;border:1px solid #ccc}
-  .pill{font-size:.75rem;padding:.1rem .5rem;border-radius:999px;background:#eee}
-  .pill.new{background:#fff3cd}.pill.failed{background:#f8d7da}.pill.skipped,.pill.short,.pill.empty{background:#e2e3e5}
-  .warn{padding:.6rem .9rem;border-radius:10px;background:#fff3cd;margin-bottom:.8rem;font-size:.9rem}
-  .pill.dh{background:#e8f0e8;color:#1f4d2a}
-  .dhbox{width:100%;margin-top:.3rem}
-  .dhbox summary{cursor:pointer;font-size:.9rem;color:#1F3A5F}
-  .dhform{display:flex;gap:.6rem;flex-wrap:wrap;align-items:end;margin-top:.5rem;padding:.6rem;border-radius:10px;background:rgba(31,58,95,.04)}
-  .dhform label{display:flex;flex-direction:column;font-size:.75rem;opacity:.8;gap:.15rem}
-  .dhform input,.dhform select{padding:.35rem .5rem;border-radius:8px;border:1px solid #ccc;font-size:.9rem;min-width:9rem}
+  .vmpage .seg{display:inline-flex;border:1px solid var(--border);border-radius:999px;overflow:hidden;background:var(--card)}
+  .vmpage .seg a{padding:7px 14px;font-size:13px;color:var(--muted);text-decoration:none;border-right:1px solid var(--border)}
+  .vmpage .seg a:last-child{border-right:0}
+  .vmpage .seg a.on{background:var(--btn-bg);color:var(--btn-tx);font-weight:600}
+  .vmpage .bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:6px 0 22px}
+  .vmpage .bar .sp{flex:1}
+  .vmpage .bar .stat{padding:0;border:0;background:none;box-shadow:none;color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+  .vmpage .working{font-size:12px;color:var(--pill-wait-tx);background:var(--pill-wait-bg);border-radius:999px;padding:3px 10px}
+
+  .vmpage .day{margin:26px 0 10px;display:flex;align-items:baseline;gap:10px}
+  .vmpage .day h2{font-family:'Playfair Display','Frank Ruhl Libre',Georgia,serif;font-weight:600;font-size:17px;margin:0}
+  .vmpage .day span{color:var(--muted);font-size:12.5px}
+
+  .vmpage .vm{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px 18px 12px;margin-bottom:10px;box-shadow:var(--shadow)}
+  .vmpage .vm.done{opacity:.55}
+  .vmpage .head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .vmpage .head b{font-size:16px}
+  .vmpage .head .m{color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+  .vmpage .head .sp{flex:1}
+  .vmpage .tag{font-size:11px;letter-spacing:.04em;text-transform:uppercase;padding:2px 9px;border-radius:999px;background:var(--row);color:var(--muted);border:1px solid var(--border)}
+  .vmpage .tag.wait{background:var(--pill-wait-bg);color:var(--pill-wait-tx);border-color:transparent}
+  .vmpage .tag.bad{background:var(--pill-open-bg);color:var(--pill-open-tx);border-color:transparent}
+  .vmpage .tag.ok{background:var(--pill-done-bg);color:var(--pill-done-tx);border-color:transparent;text-decoration:none}
+
+  .vmpage audio{width:100%;height:34px;margin:12px 0 4px;filter:saturate(0) contrast(1.05);opacity:.9}
+  .vmpage .en{font-size:15px;line-height:1.55;margin:10px 0 0;white-space:pre-wrap}
+  .vmpage .yi{direction:rtl;text-align:right;font-family:'Frank Ruhl Libre','Noto Serif Hebrew','David',serif;font-size:17px;line-height:1.75;margin:10px 0 0;padding-top:10px;border-top:1px dashed var(--border);white-space:pre-wrap;color:var(--ink)}
+  .vmpage .rc{margin-top:10px;color:var(--muted);font-size:13px;font-style:italic}
+  .vmpage .err{margin-top:8px;color:var(--danger);font-size:12.5px}
+
+  .vmpage .actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:14px;padding-top:10px;border-top:1px solid var(--border)}
+  .vmpage .actions form{display:inline;margin:0}
+  .vmpage .b{font:inherit;font-size:13px;padding:6px 13px;border-radius:999px;border:1px solid var(--border);background:var(--card);color:var(--ink);cursor:pointer;text-decoration:none;line-height:1.2}
+  .vmpage .b:hover{background:var(--row)}
+  .vmpage .b.primary{background:var(--btn-bg);color:var(--btn-tx);border-color:var(--btn-bg)}
+  .vmpage .b.quiet{color:var(--muted)}
+  .vmpage .actions .sp{flex:1}
+  .vmpage .note{font-size:12px;color:var(--pill-done-tx)}
+
+  .vmpage .more{position:relative}
+  .vmpage .menu{display:none;position:absolute;right:0;top:calc(100% + 6px);z-index:20;min-width:230px;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.12);padding:6px}
+  .vmpage .more.open .menu{display:block}
+  .vmpage .menu button,.vmpage .menu a{display:block;width:100%;text-align:left;font:inherit;font-size:13.5px;padding:8px 10px;border:0;background:none;color:var(--ink);border-radius:8px;cursor:pointer;text-decoration:none}
+  .vmpage .menu button:hover,.vmpage .menu a:hover{background:var(--row)}
+  .vmpage .menu hr{border:0;border-top:1px solid var(--border);margin:6px 0}
+
+  .vmpage .sheet{display:none;margin-top:12px;padding:12px;border-radius:12px;background:var(--row);border:1px solid var(--border)}
+  .vmpage .sheet.open{display:block}
+  .vmpage .sheet form{display:flex;gap:8px;flex-wrap:wrap;align-items:end}
+  .vmpage .sheet label{display:flex;flex-direction:column;gap:3px;font-size:11.5px;color:var(--muted);letter-spacing:.03em;text-transform:uppercase}
+  .vmpage .sheet input,.vmpage .sheet select{font:inherit;font-size:14px;padding:7px 10px;border-radius:9px;border:1px solid var(--border);background:var(--card);color:var(--ink);min-width:150px}
+  .vmpage .hint{color:var(--muted)}
+  @media (max-width:640px){ .vmpage .vm{padding:14px 14px 10px} .vmpage .yi{font-size:18px} }
 </style>
 
-{% if not rc_ok %}<div class="warn">RingCentral is not connected yet — set <code>RC_CLIENT_ID</code>, <code>RC_CLIENT_SECRET</code>, <code>RC_JWT</code>, <code>RC_EXTENSION_NAME</code> (or <code>RC_EXTENSION_ID</code>) on Render.</div>{% endif %}
-{% if rc_ok and not yl_ok %}<div class="warn">Recordings come in, but no transcripts until <code>YL_API_KEY</code> are set.</div>{% endif %}
+{% if not rc_ok %}<p class="hint">RingCentral is not connected — set <code>RC_CLIENT_ID</code>, <code>RC_CLIENT_SECRET</code>, <code>RC_JWT</code>, <code>RC_EXTENSION_ID</code> on Render.</p>{% endif %}
+{% if rc_ok and not yl_ok %}<p class="hint">Recordings come in, but no transcripts until <code>YL_API_KEY</code> is set.</p>{% endif %}
 
-<div class="vmbar">
-  <span>{{ counts.open }} open{% if counts.pending %} · {{ counts.pending }} waiting on transcript{% endif %}</span>
+<div class="bar">
+  <div class="seg">
+    <a class="{% if show == 'open' %}on{% endif %}" href="{{ url_for('vm_view') }}">Open · {{ counts.open }}</a>
+    <a class="{% if show == 'short' %}on{% endif %}" href="{{ url_for('vm_view', show='short') }}">Short / empty · {{ counts.short }}</a>
+    <a class="{% if show == 'all' %}on{% endif %}" href="{{ url_for('vm_view', show='all') }}">Everything</a>
+  </div>
+  {% if counts.pending %}<span class="stat">{{ counts.pending }} transcribing</span>{% endif %}
+  {% if busy %}<span class="working">working in background</span>{% endif %}
   <span class="sp"></span>
-  {% if show != 'open' %}<a href="{{ url_for('vm_view') }}">Open</a>{% endif %}
-  {% if show != 'short' %}<a href="{{ url_for('vm_view', show='short') }}">Short / empty ({{ counts.short }})</a>{% endif %}
-  {% if show != 'all' %}<a href="{{ url_for('vm_view', show='all') }}">Everything</a>{% endif %}
-  <form method="post" action="{{ url_for('api_vm_sync', back=1) }}"><button type="submit" class="printbtn">Check now</button></form>
-  <form method="post" action="{{ url_for('api_vm_sync', back=1, days=365) }}"><button type="submit" class="printbtn">Backfill 1 yr</button></form>
-  {% if busy %}<span class="pill new">working in background — refresh</span>{% endif %}
-  {% if last_sync %}<span class="meta">last check {{ last_sync[:16].replace('T',' ') }}</span>{% endif %}
+  <form method="post" action="{{ url_for('api_vm_sync', back=1) }}"><button type="submit" class="b quiet">Check now</button></form>
+  <div class="more"><button type="button" class="b quiet" data-menu>⋯</button>
+    <div class="menu">
+      <form method="post" action="{{ url_for('api_vm_sync', back=1, days=365) }}"><button type="submit">Backfill 1 year</button></form>
+      {% if last_sync %}<hr><div class="hint" style="padding:6px 10px;font-size:12px">last check {{ last_sync[:16].replace('T',' ') }}</div>{% endif %}
+    </div>
+  </div>
 </div>
 
 {% if not rows %}<p class="hint">Nothing here.</p>{% endif %}
 
+{% set ns = namespace(day=None) %}
 {% for r in rows %}
-<article class="vm {% if r.handled %}done{% endif %}" id="vm-{{ r.id }}">
-  <div class="vmhead">
+{% set d = (r.ts or '')[:10] %}
+{% if d != ns.day %}{% set ns.day = d %}
+<div class="day"><h2>{{ day_label(d) }}</h2><span>{{ d }}</span></div>
+{% endif %}
+<article class="vm {% if r.handled %}done{% endif %}" id="vm-{{ r.id }}"
+  data-who="{{ r.caller_name or fmt_phone(r.caller_number) or 'Unknown caller' }}"
+  data-num="{{ fmt_phone(r.caller_number) }}" data-when="{{ (r.ts or '')[:16].replace('T',' ') }}"
+  {% if r.stored_name %}data-share="{{ url_for('vm_share', vid=r.id, tok=share_token(r.id), _external=True) }}"{% endif %}>
+  <div class="head">
     <b>{{ r.caller_name or fmt_phone(r.caller_number) or 'Unknown caller' }}</b>
-    {% if r.caller_name and r.caller_number %}<span class="meta">{{ fmt_phone(r.caller_number) }}</span>{% endif %}
-    <span class="meta">{{ (r.ts or '')[:16].replace('T',' ') }}</span>
-    {% if r.duration %}<span class="meta">{{ r.duration }}s</span>{% endif %}
-    {% if r.tstatus != 'done' %}<span class="pill {{ r.tstatus }}">{{ {'new':'transcribing…','failed':'transcript failed','skipped':'no recording','short':'short — not transcribed','empty':'nothing said'}[r.tstatus] }}</span>{% endif %}
-    {% if r.item_id %}<a class="pill" href="{{ url_for('task_view', item_id=r.item_id) }}">task #{{ r.item_id }}</a>{% endif %}
-    {% if r.dh_event_id %}<a class="pill dh" href="{{ r.dh_url or dh_url }}" target="_blank">in Divrei HaYamim · {{ r.dh_project }}</a>{% endif %}
+    {% if r.caller_name and r.caller_number %}<span class="m">{{ fmt_phone(r.caller_number) }}</span>{% endif %}
+    <span class="m">{{ (r.ts or '')[11:16] }}{% if r.duration %} · {{ r.duration }}s{% endif %}</span>
+    <span class="sp"></span>
+    {% if r.tstatus == 'new' %}<span class="tag wait">transcribing</span>
+    {% elif r.tstatus == 'failed' %}<span class="tag bad">transcript failed</span>
+    {% elif r.tstatus == 'short' %}<span class="tag">short</span>
+    {% elif r.tstatus == 'empty' %}<span class="tag">nothing said</span>
+    {% elif r.tstatus == 'skipped' %}<span class="tag">no recording</span>{% endif %}
+    {% if r.item_id %}<a class="tag ok" href="{{ url_for('task_view', item_id=r.item_id) }}">task</a>{% endif %}
+    {% if r.dh_event_id %}<a class="tag ok" href="{{ r.dh_url or dh_url }}" target="_blank">{{ r.dh_project }}</a>{% endif %}
   </div>
+
   {% if r.stored_name %}<audio controls preload="none" src="{{ url_for('vm_audio', vid=r.id) }}"></audio>{% endif %}
   {% if r.english %}<div class="en">{{ r.english }}</div>{% endif %}
   {% if r.yiddish %}<div class="yi">{{ r.yiddish }}</div>{% endif %}
-  {% if not r.yiddish and r.rc_text %}<div class="rc">RingCentral (English, rough): {{ r.rc_text }}</div>{% endif %}
+  {% if not r.yiddish and r.rc_text and r.tstatus in ('new','failed') %}<div class="rc">{{ r.rc_text }}</div>{% endif %}
   {% if r.terror %}<div class="err">{{ r.terror }}</div>{% endif %}
-  <div class="acts">
+
+  <div class="actions">
     {% if not r.item_id %}
-    <form method="post" action="{{ url_for('vm_task', vid=r.id) }}">
-      <input type="text" name="title" placeholder="Call back {{ r.caller_name or fmt_phone(r.caller_number) }}">
-      <button type="submit" class="printbtn">Make task</button>
-    </form>
+    <form method="post" action="{{ url_for('vm_task', vid=r.id) }}"><button type="submit" class="b primary">Make task</button></form>
     {% endif %}
     <form method="post" action="{{ url_for('vm_handled', vid=r.id) }}">
       <input type="hidden" name="show" value="{{ show }}">
-      {% if r.handled %}<input type="hidden" name="undo" value="1"><button type="submit">Reopen</button>
-      {% else %}<button type="submit">Handled</button>{% endif %}
+      {% if r.handled %}<input type="hidden" name="undo" value="1"><button type="submit" class="b">Reopen</button>
+      {% else %}<button type="submit" class="b">Handled</button>{% endif %}
     </form>
-    {% if dh and not r.dh_event_id and r.stored_name %}
-    <details class="dhbox"><summary>→ Divrei HaYamim</summary>
-      <form method="post" action="{{ url_for('vm_to_dh', vid=r.id) }}" class="dhform">
-        <input type="hidden" name="show" value="{{ show }}">
-        <label>Story <select name="project"><option value="">— pick —</option>{% for p in dh.projects %}<option value="{{ p }}">{{ p }}</option>{% endfor %}</select></label>
-        <label>or new <input type="text" name="project_new" placeholder="new story name"></label>
-        <label>Day <input type="date" name="day" value="{{ (r.ts or '')[:10] }}"></label>
-        <label>Type <select name="category"><option value="">—</option>{% for c in dh.categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select></label>
-        <label>Title <input type="text" name="title" placeholder="Voicemail from {{ r.caller_name or fmt_phone(r.caller_number) }}"></label>
-        <button type="submit" class="printbtn">Send</button>
-      </form>
-    </details>
-    {% endif %}
-    {% if r.tstatus == 'failed' %}
-    <form method="post" action="{{ url_for('api_vm_retry', vid=r.id) }}"><input type="hidden" name="show" value="{{ show }}"><button type="submit">Retry transcript</button></form>
-    {% endif %}
+    {% if r.stored_name %}<button type="button" class="b" data-share-btn>Share</button>{% endif %}
+    {% if dh and not r.dh_event_id and r.stored_name %}<button type="button" class="b" data-sheet="dh-{{ r.id }}">→ Divrei HaYamim</button>{% endif %}
+    <span class="sp"></span>
+    <span class="note"></span>
+    <div class="more"><button type="button" class="b quiet" data-menu>⋯</button>
+      <div class="menu">
+        {% if r.english %}<button type="button" data-copy="en">Copy English</button>{% endif %}
+        {% if r.yiddish %}<button type="button" data-copy="yi">Copy Yiddish</button>{% endif %}
+        {% if r.english or r.yiddish %}<button type="button" data-copy="all">Copy everything</button>{% endif %}
+        {% if r.stored_name %}<button type="button" data-copy="link">Copy share link</button>
+        <a href="{{ url_for('vm_audio', vid=r.id, dl=1) }}">Download mp3</a>{% endif %}
+        {% if r.tstatus in ('failed','empty','short') and r.stored_name %}<hr>
+        <form method="post" action="{{ url_for('api_vm_retry', vid=r.id) }}"><input type="hidden" name="show" value="{{ show }}"><button type="submit">{% if r.tstatus == 'failed' %}Retry transcript{% else %}Transcribe anyway{% endif %}</button></form>{% endif %}
+      </div>
+    </div>
   </div>
+
+  {% if dh and not r.dh_event_id and r.stored_name %}
+  <div class="sheet" id="dh-{{ r.id }}">
+    <form method="post" action="{{ url_for('vm_to_dh', vid=r.id) }}">
+      <input type="hidden" name="show" value="{{ show }}">
+      <label>Story <select name="project"><option value="">— pick —</option>{% for p in dh.projects %}<option value="{{ p }}">{{ p }}</option>{% endfor %}</select></label>
+      <label>or new story <input type="text" name="project_new" placeholder="name"></label>
+      <label>Day <input type="date" name="day" value="{{ (r.ts or '')[:10] }}"></label>
+      <label>Type <select name="category"><option value="">—</option>{% for c in dh.categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select></label>
+      <label>Title <input type="text" name="title" placeholder="Voicemail from {{ r.caller_name or fmt_phone(r.caller_number) }}"></label>
+      <button type="submit" class="b primary">Send to Divrei HaYamim</button>
+    </form>
+  </div>
+  {% endif %}
 </article>
 {% endfor %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function(){
+  var cardOf = function(el){ return el.closest('article.vm'); };
+  function textOf(c, what){
+    var en = (c.querySelector('.en')||{}).innerText || '', yi = (c.querySelector('.yi')||{}).innerText || '';
+    var head = c.dataset.who + (c.dataset.num && c.dataset.num !== c.dataset.who ? ' · ' + c.dataset.num : '') + ' · ' + c.dataset.when;
+    if (what === 'en') return en.trim();
+    if (what === 'yi') return yi.trim();
+    if (what === 'link') return c.dataset.share || '';
+    return [head, '', en.trim(), '', yi.trim()].join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  }
+  function note(c, msg){ var el = c.querySelector('.note'); if(!el) return; el.textContent = msg; setTimeout(function(){ el.textContent = ''; }, 1800); }
+  function copy(s, c, msg){
+    var p = (navigator.clipboard && navigator.clipboard.writeText) ? navigator.clipboard.writeText(s) : Promise.reject();
+    p.then(function(){ note(c, msg); }, function(){
+      var ta = document.createElement('textarea'); ta.value = s; document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); note(c, msg); } catch(e){ prompt('Copy:', s); } document.body.removeChild(ta);
+    });
+  }
+  function closeMenus(){ document.querySelectorAll('.more.open').forEach(function(m){ m.classList.remove('open'); }); }
+  document.addEventListener('click', function(e){
+    var m = e.target.closest('[data-menu]');
+    if (m) { var wrap = m.parentElement, was = wrap.classList.contains('open'); closeMenus(); if (!was) wrap.classList.add('open'); e.stopPropagation(); return; }
+    if (!e.target.closest('.menu')) closeMenus();
+    var cp = e.target.closest('[data-copy]');
+    if (cp) { var c = cardOf(cp); copy(textOf(c, cp.dataset.copy), c, cp.dataset.copy === 'link' ? 'link copied' : 'copied'); closeMenus(); return; }
+    var sh = e.target.closest('[data-share-btn]');
+    if (sh) { var c2 = cardOf(sh), url = c2.dataset.share, body = textOf(c2, 'all');
+      if (navigator.share) navigator.share({ title: 'Voicemail · ' + c2.dataset.who, text: body, url: url }).catch(function(){});
+      else copy(body + '\n\n' + url, c2, 'text + link copied');
+      return; }
+    var st = e.target.closest('[data-sheet]');
+    if (st) { var sheet = document.getElementById(st.dataset.sheet); sheet.classList.toggle('open'); if (sheet.classList.contains('open')) { var f = sheet.querySelector('select,input'); if (f) f.focus(); } }
+  });
+  document.addEventListener('play', function(e){ document.querySelectorAll('audio').forEach(function(a){ if (a !== e.target) a.pause(); }); }, true);
+})();
+</script>
 {% endblock %}

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Voicemail · {{ r.caller_name or fmt_phone(r.caller_number) }}</title>
+<style>
+  body{margin:0;background:#F6F3EC;font:16px/1.5 'Assistant',-apple-system,'Segoe UI',Arial,sans-serif;color:#1E1B16}
+  .card{max-width:640px;margin:2rem auto;background:#FFFEFB;border:1px solid #E7E2D6;border-radius:14px;padding:18px 20px 14px;box-shadow:0 1px 3px rgba(30,27,22,.06)}
+  .eyebrow{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:#8A8377}
+  h1{font-family:'Playfair Display','Frank Ruhl Libre',Georgia,serif;font-weight:600;font-size:22px;margin:4px 0 2px}
+  .meta{color:#8A8377;font-size:13px;font-variant-numeric:tabular-nums}
+  audio{width:100%;height:34px;margin:14px 0 4px;filter:saturate(0) contrast(1.05);opacity:.9}
+  .en{white-space:pre-wrap;font-size:15px;line-height:1.55;margin-top:10px}
+  .yi{direction:rtl;text-align:right;font-size:18px;line-height:1.75;font-family:"Frank Ruhl Libre","Noto Serif Hebrew","David",serif;white-space:pre-wrap;margin-top:10px;padding-top:10px;border-top:1px dashed #E7E2D6}
+  .row{display:flex;gap:6px;flex-wrap:wrap;margin-top:14px;padding-top:10px;border-top:1px solid #E7E2D6}
+  .tb{font:inherit;font-size:13px;padding:6px 13px;border-radius:999px;border:1px solid #E7E2D6;background:#FFFEFB;color:#1E1B16;cursor:pointer;text-decoration:none}
+  .ok{font-size:12px;color:#3A6B3E;align-self:center}
+  footer{max-width:640px;margin:0 auto 2rem;text-align:center;color:#8A8377;font-size:12px}
+  @media (max-width:640px){ .card{margin:12px;} }
+</style></head>
+<body>
+<div class="card">
+  <div class="eyebrow">Voicemail · Shefa Yoel line</div>
+  <h1>{{ r.caller_name or fmt_phone(r.caller_number) or 'Unknown caller' }}</h1>
+  <div class="meta">{% if r.caller_name %}{{ fmt_phone(r.caller_number) }} · {% endif %}{{ (r.ts or '')[:16].replace('T',' ') }}{% if r.duration %} · {{ r.duration }}s{% endif %}</div>
+  <audio controls preload="metadata" src="{{ url_for('vm_share_audio', vid=r.id, tok=tok) }}"></audio>
+  {% if r.english %}<div class="en" id="en">{{ r.english }}</div>{% endif %}
+  {% if r.yiddish %}<div class="yi" id="yi">{{ r.yiddish }}</div>{% endif %}
+  {% if not r.english and not r.yiddish %}<p class="meta">Transcript not ready yet.</p>{% endif %}
+  <div class="row">
+    {% if r.english %}<button class="tb" data-copy="en">Copy English</button>{% endif %}
+    {% if r.yiddish %}<button class="tb" data-copy="yi">Copy Yiddish</button>{% endif %}
+    <a class="tb" href="{{ url_for('vm_share_audio', vid=r.id, tok=tok, dl=1) }}">Download mp3</a>
+    <span class="ok" id="ok"></span>
+  </div>
+</div>
+<footer>Shimon's HQ</footer>
+<script>
+document.addEventListener('click', function(e){ var b=e.target.closest('[data-copy]'); if(!b) return;
+  var s=(document.getElementById(b.dataset.copy)||{}).innerText||''; var ok=document.getElementById('ok');
+  (navigator.clipboard?navigator.clipboard.writeText(s):Promise.reject()).then(function(){ok.textContent='copied';setTimeout(function(){ok.textContent=''},1500)},function(){prompt('Copy:',s)}); });
+</script>
+</body></html>
