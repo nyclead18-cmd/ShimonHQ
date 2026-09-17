@@ -459,6 +459,15 @@ def ensure_schema(con):
     if "notified" not in cols:
         # everything already on the board was heard about some other way
         con.execute("UPDATE voicemails SET notified=1")
+    # who has filed what: per person, so one inbox never rearranges another's
+    fresh = con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='vm_handled'").fetchone() is None
+    con.execute("CREATE TABLE IF NOT EXISTS vm_handled(vm_id INTEGER NOT NULL, user_id INTEGER NOT NULL,"
+                " at TEXT, PRIMARY KEY(vm_id, user_id))")
+    if fresh:
+        # carry the old shared flag over to everyone, so nothing filed pops back open
+        con.execute("INSERT OR IGNORE INTO vm_handled(vm_id, user_id, at)"
+                    " SELECT v.id, u.id, ? FROM voicemails v, users u WHERE v.handled=1",
+                    (datetime.now().isoformat(timespec="seconds"),))
     # file what is already in: short recordings not yet transcribed, and transcripts with nothing in them
     con.execute("UPDATE voicemails SET tstatus='short' WHERE tstatus IN ('new','failed')"
                 " AND duration IS NOT NULL AND duration <= ?", (SHORT_SEC,))

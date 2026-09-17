@@ -5908,14 +5908,20 @@ start_reminders()
 def vm_view():
     con = db()
     show = request.args.get("show", "open")
+    # "Handled" is mine alone: what I file away stays filed for me and untouched for
+    # everyone else, so two people can work the same line without tripping over each other.
     where = {"all": "",
              "short": "WHERE tstatus IN ('short','empty','skipped')",
-             }.get(show, "WHERE handled=0 AND tstatus NOT IN ('short','empty','skipped')")
-    rows = con.execute("SELECT * FROM voicemails %s ORDER BY ts DESC LIMIT 300" % where).fetchall()
+             }.get(show, "WHERE h.vm_id IS NULL AND tstatus NOT IN ('short','empty','skipped')")
+    rows = con.execute(
+        "SELECT v.*, (h.vm_id IS NOT NULL) AS handled FROM voicemails v"
+        " LEFT JOIN vm_handled h ON h.vm_id=v.id AND h.user_id=? %s ORDER BY v.ts DESC LIMIT 300"
+        % where, (me(),)).fetchall()
     last = con.execute("SELECT v FROM settings WHERE k='vm_last_sync'").fetchone()
     counts = {
-        "open": con.execute("SELECT COUNT(*) FROM voicemails WHERE handled=0"
-                            " AND tstatus NOT IN ('short','empty','skipped')").fetchone()[0],
+        "open": con.execute("SELECT COUNT(*) FROM voicemails v LEFT JOIN vm_handled h"
+                            " ON h.vm_id=v.id AND h.user_id=? WHERE h.vm_id IS NULL"
+                            " AND tstatus NOT IN ('short','empty','skipped')", (me(),)).fetchone()[0],
         "short": con.execute("SELECT COUNT(*) FROM voicemails"
                              " WHERE tstatus IN ('short','empty','skipped')").fetchone()[0],
         "pending": con.execute("SELECT COUNT(*) FROM voicemails WHERE tstatus IN ('new','failed')"
@@ -5997,9 +6003,14 @@ def vm_share_audio(vid, tok):
 @login_required
 def vm_handled(vid):
     con = db()
-    con.execute("UPDATE voicemails SET handled=? WHERE id=?",
-                (0 if request.form.get("undo") else 1, vid))
+    if request.form.get("undo"):
+        con.execute("DELETE FROM vm_handled WHERE vm_id=? AND user_id=?", (vid, me()))
+    else:
+        con.execute("INSERT OR IGNORE INTO vm_handled(vm_id, user_id, at) VALUES(?,?,?)",
+                    (vid, me(), datetime.now().isoformat(timespec="seconds")))
     commit_retry(con)
+    if request.form.get("ajax"):
+        return jsonify(ok=True)
     return redirect(url_for("vm_view", show=request.form.get("show", "open")))
 
 
@@ -6030,7 +6041,9 @@ def vm_task(vid):
         "INSERT INTO items(section_id, title, note, waiting_on, status, pos, due_date,"
         " updated_at, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
         (sid, title, note, "", "open", pos, due, now, now))
-    con.execute("UPDATE voicemails SET item_id=?, handled=1 WHERE id=?", (cur.lastrowid, vid))
+    con.execute("UPDATE voicemails SET item_id=? WHERE id=?", (cur.lastrowid, vid))
+    con.execute("INSERT OR IGNORE INTO vm_handled(vm_id, user_id, at) VALUES(?,?,?)",
+                (vid, me(), datetime.now().isoformat(timespec="seconds")))
     commit_retry(con)
     return redirect(url_for("task_view", item_id=cur.lastrowid))
 
