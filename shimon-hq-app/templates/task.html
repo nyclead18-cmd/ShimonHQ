@@ -4,7 +4,7 @@
 <div class="wrap">
 <header class="top">
   <div class="brandside">
-    {% if has_logo %}<img class="hqlogo" src="{{ url_for('static', filename='logo.png') }}?v={{ css_v }}" alt="">{% endif %}
+    {% if has_logo %}<img class="hqlogo" src="{{ brand_url('logo.png') }}?v={{ css_v }}" alt="">{% endif %}
     <div>
       <div class="eyebrow">{{ pretty }} &middot; {{ it.proj_title or it.sec_title }}</div>
       <h1 dir="auto">{{ it.title }}</h1>

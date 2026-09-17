@@ -3,17 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>{% block title %}Shimon's HQ{% endblock %}</title>
-<meta name="theme-color" content="#1F3A5F">
+<title>{% block title %}{{ hq_title }}{% endblock %}</title>
+<meta name="theme-color" content="{{ theme_color }}">
 <!-- iOS launches the home-screen icon as a real full-screen app only when
      these are present - without them it opens as a Safari bookmark -->
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Shimon HQ">
+<meta name="apple-mobile-web-app-title" content="{{ hq_short }}">
 <link rel="manifest" href="/manifest.webmanifest?v={{ css_v }}">
-<link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}?v={{ css_v }}">
-<link rel="icon" href="{{ url_for('static', filename='favicon.png') }}?v={{ css_v }}">
+<link rel="apple-touch-icon" href="{{ brand_url('apple-touch-icon.png') }}?v={{ css_v }}">
+<link rel="icon" href="{{ brand_url('favicon.png') }}?v={{ css_v }}">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <!-- Our own stylesheet first, and the web fonts without blocking the first paint.

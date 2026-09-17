@@ -32,7 +32,7 @@
     <span class="ok" id="ok"></span>
   </div>
 </div>
-<footer>Shimon's HQ</footer>
+<footer>{{ hq_title }}</footer>
 <script>
 document.addEventListener('click', function(e){ var b=e.target.closest('[data-copy]'); if(!b) return;
   var s=(document.getElementById(b.dataset.copy)||{}).innerText||''; var ok=document.getElementById('ok');

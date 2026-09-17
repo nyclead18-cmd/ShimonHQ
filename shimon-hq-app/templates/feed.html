@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Outlook sync · Shimon's HQ{% endblock %}
+{% block title %}Outlook sync · {{ hq_title }}{% endblock %}
 {% block body %}
 <div class="wrap">
 <header class="top">
@@ -33,7 +33,7 @@
     <ol>
       <li>outlook.office.com &rarr; Calendar</li>
       <li>Add calendar &rarr; <b>Subscribe from web</b></li>
-      <li>Paste the link, name it <b>Shimon's HQ</b>, pick a color &rarr; Import</li>
+      <li>Paste the link, name it <b>{{ hq_title }}</b>, pick a color &rarr; Import</li>
     </ol>
 
     <h3>Outlook on the desktop</h3>

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Account · Pinta HQ{% endblock %}
+{% block title %}Account · {{ hq_title }}{% endblock %}
 {% block body %}
 <div class="wrap">
 <header class="top">
@@ -47,6 +47,21 @@
   </form>
 </section>
 
+<section class="card acct">
+  <div class="sec-head"><h2>Two-step sign-in</h2>
+    <span class="pill {{ 'done' if twofa_on else 'waiting' }}" style="cursor:default">{{ 'On' if twofa_on else 'Off' }}</span></div>
+  {% if twofa_on %}
+  <p class="caveat">Signing in takes your password and a six-digit code from your phone.
+  A phone you tick &ldquo;remember&rdquo; on is trusted for 30 days.</p>
+  <a class="ghostbtn linkbtn" href="{{ url_for('twofa_setup') }}">Recovery codes &amp; settings</a>
+  {% else %}
+  <p class="caveat">Your password alone opens this board. Add a code from your phone
+  (Google Authenticator, Authy, 1Password or the iPhone Passwords app) and a leaked
+  password gets nobody in.</p>
+  <a class="ghostbtn linkbtn" href="{{ url_for('twofa_setup') }}">Turn it on</a>
+  {% endif %}
+</section>
+
 {% if maps_key %}
 <section class="card acct">
   <div class="sec-head"><h2>Your addresses</h2></div>
@@ -71,8 +86,9 @@
     {% endfor %}
     <button type="submit">Save</button>
   </form>
-  <p class="caveat">Only ever about tasks on a <b>shared</b> section. Nothing on a private
-  section can reach anyone else's phone, whatever these are set to.</p>
+  <p class="caveat">Task nudges are only ever about a <b>shared</b> section; nothing private
+  reaches anyone else's phone. Voicemail pings arrive once the transcript is in &mdash; short
+  and empty messages stay quiet.</p>
 </section>
 {% endif %}
 

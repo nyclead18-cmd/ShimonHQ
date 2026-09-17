@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Two-step sign-in · {{ login_title }}{% endblock %}
+{% block body %}
+{% if mode == 'login' %}
+<div class="login-wrap">
+  <form class="login-card" method="post" autocomplete="off">
+    {% if has_logo %}<img class="loginlogo" src="{{ brand_url('logo.png') }}" alt="">{% endif %}
+    <h1>{{ login_title }}</h1>
+    <div class="sub">Second step</div>
+    <p style="margin:0;color:var(--muted);font-size:14px">Enter the six-digit code from your
+    authenticator app, or one of your recovery codes.</p>
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    <input class="code" name="code" inputmode="numeric" autocomplete="one-time-code"
+           placeholder="000 000" autofocus required {% if wait %}disabled{% endif %}>
+    <label class="remember"><input type="checkbox" name="remember" value="1"> Remember this phone for 30 days</label>
+    <button type="submit" {% if wait %}disabled{% endif %}>Continue</button>
+    <a class="back" href="{{ url_for('logout') }}">Start over</a>
+  </form>
+</div>
+
+{% else %}
+<div class="wrap">
+<header class="top">
+  <div>
+    <div class="eyebrow">Account</div>
+    <h1>Two-step sign-in</h1>
+  </div>
+  <div class="right">
+    <nav class="tabs">
+      <a class="tab" href="{{ url_for('account_view') }}">Account</a>
+      {% if not required %}<a class="tab" href="{{ url_for('board') }}">Board</a>{% endif %}
+    </nav>
+    <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
+  </div>
+</header>
+
+{% if request.args.get('error') == 'pw' %}<div class="savewarn">That is not your password.</div>{% endif %}
+{% if request.args.get('error') == 'off' %}<div class="savewarn">Password or code did not match. Two-step sign-in is still on.</div>{% endif %}
+{% if error %}<div class="savewarn">{{ error }}</div>{% endif %}
+
+{% if mode == 'codes' %}
+<section class="card acct twofa">
+  <div class="sec-head"><h2>{% if just_on %}Two-step sign-in is on{% else %}Your new recovery codes{% endif %}</h2></div>
+  <p class="caveat" style="margin-top:6px">These eight codes open the board if you ever lose the phone.
+  Each works <b>once</b>. Save them somewhere safe &mdash; a password manager, or a photo in a locked
+  album. <b>They are shown only this once.</b></p>
+  <div class="codes" id="codes">{% for c in codes %}<div>{{ c }}</div>{% endfor %}</div>
+  <div class="rowbtns">
+    <button type="button" class="linkbtn" style="border:0;background:var(--btn-bg);color:var(--btn-tx);cursor:pointer;margin:0"
+            onclick="navigator.clipboard.writeText([...document.querySelectorAll('#codes div')].map(d=>d.textContent).join('\n')).then(()=>{this.textContent='Copied'})">Copy all</button>
+    <a class="ghostbtn linkbtn" style="margin:0" href="{{ url_for('account_view') }}">Done</a>
+  </div>
+</section>
+
+{% elif on %}
+<section class="card acct twofa">
+  <div class="sec-head"><h2>On</h2><span class="pill done" style="cursor:default">Protected</span></div>
+  <p class="caveat" style="margin-top:6px">Password plus a code from your phone. {{ codes_left }} recovery
+  code{{ '' if codes_left == 1 else 's' }} left.</p>
+
+  <details>
+    <summary>New recovery codes</summary>
+    <form method="post" action="{{ url_for('twofa_new_codes') }}" class="stack">
+      <p class="caveat" style="margin:0">The old codes stop working the moment new ones are made.</p>
+      <label>Your password<input type="password" name="password" autocomplete="current-password" required></label>
+      <button type="submit">Make new codes</button>
+    </form>
+  </details>
+
+  {% if not required %}
+  <details>
+    <summary>Turn two-step sign-in off</summary>
+    <form method="post" action="{{ url_for('twofa_off') }}" class="stack">
+      <p class="caveat" style="margin:0">Takes your password and a current code, so an open session on
+      someone else's screen is not enough to remove the lock.</p>
+      <label>Your password<input type="password" name="password" autocomplete="current-password" required></label>
+      <label>Code from your phone<input name="code" inputmode="numeric" autocomplete="one-time-code" required></label>
+      <button type="submit" class="ghostbtn">Turn off</button>
+    </form>
+  </details>
+  {% endif %}
+</section>
+
+{% else %}
+<section class="card acct twofa">
+  <div class="sec-head"><h2>Set up your phone</h2></div>
+  {% if required %}
+  <p class="caveat" style="margin-top:6px;color:var(--ink)"><b>This board requires two-step sign-in.</b>
+  Two minutes, once, and you are in.</p>
+  {% endif %}
+  <ol class="steps">
+    <li>Open an authenticator app &mdash; <b>Google Authenticator</b>, <b>Authy</b>, <b>1Password</b>,
+        or the iPhone <b>Passwords</b> app all work.</li>
+    <li>Scan this code, or type the key below into the app.</li>
+    <li>Enter the six digits the app shows and press <b>Confirm</b>.</li>
+  </ol>
+  {% if qr %}
+  <div class="qr">{{ qr|safe }}</div>
+  {% endif %}
+  <div class="key" title="Tap to select" onclick="getSelection().selectAllChildren(this)">{{ secret }}</div>
+  <p class="caveat" style="text-align:center;margin-top:6px">On this phone? <a href="{{ uri }}">Open in your authenticator app</a>.</p>
+  <form method="post" action="{{ url_for('twofa_confirm') }}" class="stack" style="margin:16px auto 0;max-width:280px">
+    <input class="code" name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="000 000" required>
+    <button type="submit" style="align-self:center">Confirm</button>
+  </form>
+</section>
+{% endif %}
+</div>
+{% endif %}
+{% endblock %}
