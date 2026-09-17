@@ -44,7 +44,8 @@
   .vmpage .vm.done .who,.vmpage .vm.done .peek{opacity:.5}
   .vmpage .row{position:relative;display:grid;grid-template-columns:14px 1fr auto;column-gap:8px;align-items:start;
     padding:12px 14px 12px 10px;cursor:pointer;background:var(--card);transition:background .15s;
-    transform:translateX(0);will-change:transform;-webkit-tap-highlight-color:transparent;user-select:none}
+    transform:translateX(0);-webkit-tap-highlight-color:transparent;user-select:none}
+  .vmpage .vm.sw .row,.vmpage .vm.swiped .row{will-change:transform}
   .vmpage .row:active{background:var(--row)}
   .vmpage .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);margin-top:7px;justify-self:center;transition:opacity .3s,transform .3s}
   .vmpage .vm.heard .dot,.vmpage .vm.done .dot{opacity:0;transform:scale(.4)}
@@ -368,23 +369,32 @@
       .then(function(){ btn.disabled = false; });
   }
 
-  // ---- Handled: the row folds shut and the next message slides up into its place ----
+  // ---- Handled: the row folds shut at once and the next message slides up; the
+  // server is told in the background, and if that fails the row comes back with a note.
   function fileAway(c){
+    if (c._filing) return; c._filing = true;
+    if (current === c) pause();
+    var g = c.parentElement, day = g.previousElementSibling, h = c.offsetHeight;
+    c.style.maxHeight = h + 'px';
+    setTimeout(function(){ c.classList.add('filed'); }, 16);
+    var seg = document.querySelector('.seg a.on'); if (seg) seg.textContent = seg.textContent.replace(/\d+$/, function(n){ return Math.max(0, n - 1); });
+    var removed = false;
+    var tidy = setTimeout(function(){
+      removed = true; c.remove(); var k = cards.indexOf(c); if (k >= 0) cards.splice(k, 1);
+      if (!g.querySelector('article')) { g.remove(); if (day && day.classList.contains('day')) day.remove(); }
+      var nx = cards[k] || cards[k - 1]; if (nx && SHOW === 'open') openCard(nx, {autoplay: false});
+    }, 340);
     var fd = new FormData(); fd.append('show', SHOW); fd.append('ajax', '1');
-    fetch(HANDLED_URL.replace('/0/', '/' + c.dataset.id + '/'), {method: 'POST', body: fd, credentials: 'same-origin'}).then(function(r){
-      if (!r.ok) throw 0;
-      if (current === c) pause();
-      var i = cards.indexOf(c);
-      c.style.maxHeight = c.offsetHeight + 'px';
-      requestAnimationFrame(function(){ c.classList.add('filed'); });
-      setTimeout(function(){
-        var g = c.parentElement, day = g.previousElementSibling;
-        c.remove(); cards.splice(i, 1);
-        if (!g.querySelector('article')) { g.remove(); if (day && day.classList.contains('day')) day.remove(); }
-        var nx = cards[i] || cards[i - 1]; if (nx && SHOW === 'open') openCard(nx, {autoplay: false});
-      }, 330);
-      var seg = document.querySelector('.seg a.on'); if (seg) seg.textContent = seg.textContent.replace(/\d+$/, function(n){ return Math.max(0, n - 1); });
-    }).catch(function(){ location.reload(); });
+    fetch(HANDLED_URL.replace('/0/', '/' + c.dataset.id + '/'), {method: 'POST', body: fd, credentials: 'same-origin'})
+      .then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); })
+      .catch(function(){
+        // the server never heard about it: bring the row back and say so
+        clearTimeout(tidy); c._filing = false;
+        if (removed) { location.reload(); return; }
+        c.classList.remove('filed'); c.style.maxHeight = '';
+        if (seg) seg.textContent = seg.textContent.replace(/\d+$/, function(n){ return +n + 1; });
+        openCard(c, {autoplay: false}); note(c, 'Could not save \u2014 check the connection');
+      });
   }
 
   // ---- menus ----
