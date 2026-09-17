@@ -95,7 +95,9 @@
   .vmpage .yi{direction:rtl;text-align:right;font-family:'Frank Ruhl Libre','Noto Serif Hebrew','David',serif;font-size:17px;line-height:1.75;margin:10px 0 0;padding-top:10px;border-top:1px dashed var(--border);white-space:pre-wrap}
   .vmpage .rc{margin-top:8px;color:var(--muted);font-size:13px;font-style:italic}
   .vmpage .err{margin-top:8px;color:var(--danger);font-size:12.5px}
-  .vmpage .note{position:absolute;right:16px;bottom:8px;font-size:12px;color:var(--pill-done-tx);pointer-events:none}
+  .vmpage .note{position:absolute;left:50%;top:-30px;transform:translateX(-50%);font-size:12.5px;font-weight:600;color:var(--btn-tx);background:var(--btn-bg);border-radius:999px;padding:5px 12px;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .2s,transform .2s;z-index:5}
+  .vmpage .note.on{opacity:1;transform:translateX(-50%) translateY(-4px)}
+  .vmpage .ctl{position:relative}
 
   /* swipe a row to the left: Task · Handled, like Mail */
   .vmpage .rowwrap{position:relative;overflow:hidden}
@@ -197,7 +199,6 @@
   </div>
 
   <div class="fold"><div><div class="inner">
-    <span class="note"></span>
     {% if r.stored_name %}
     <div class="player">
       <input type="range" class="scrub" min="0" max="1000" value="0" aria-label="Position">
@@ -205,6 +206,7 @@
     </div>
     {% endif %}
     <div class="ctl">
+      <span class="note"></span>
       <div class="grp">
         {% if not r.handled %}<button type="button" class="ib" data-file title="Handled"><svg viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5"/></svg>Handled</button>
         {% else %}<form method="post" action="{{ url_for('vm_handled', vid=r.id) }}" style="margin:0"><input type="hidden" name="show" value="{{ show }}"><input type="hidden" name="undo" value="1"><button type="submit" class="ib quiet"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5"/></svg>Reopen</button></form>{% endif %}
@@ -212,6 +214,7 @@
       </div>
       {% if r.stored_name %}<button type="button" class="ib play" data-play aria-label="Play"><svg class="go" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg><svg class="pause" viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg></button>{% else %}<span></span>{% endif %}
       <div class="grp">
+        {% if r.english or r.yiddish %}<button type="button" class="ib" data-copy="all"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>Copy</button>{% endif %}
         {% if r.stored_name %}<button type="button" class="ib" data-share-btn><svg viewBox="0 0 24 24"><path d="M12 3v13M7 8l5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>Share</button>{% endif %}
         {% if dh and not r.dh_event_id and r.stored_name %}<button type="button" class="ib" data-sheet="dh-{{ r.id }}"><svg viewBox="0 0 24 24"><path d="M4 5h11a3 3 0 0 1 3 3v11H7a3 3 0 0 1-3-3z"/><path d="M8 9h6M8 13h6"/></svg>Chronicle</button>{% endif %}
         <div class="more"><button type="button" class="ib quiet" data-menu><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/></svg>More</button>
@@ -319,15 +322,30 @@
   function next(c, dir){ var i = cards.indexOf(c) + dir; if (i >= 0 && i < cards.length) openCard(cards[i]); }
 
   // ---- copy / share ----
-  function textOf(c, what){
-    var en = (c.querySelector('.en')||{}).innerText || '', yi = (c.querySelector('.yi')||{}).innerText || '';
-    var head = c.dataset.who + (c.dataset.num && c.dataset.num !== c.dataset.who ? ' · ' + c.dataset.num : '') + ' · ' + c.dataset.when;
-    if (what === 'en') return en.trim();
-    if (what === 'yi') return yi.trim();
-    if (what === 'link') return c.dataset.share || '';
-    return [head, '', en.trim(), '', yi.trim()].join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  function niceWhen(w){
+    // "2026-09-16 12:42" -> "Tue, Sep 16 · 12:42 PM"
+    var m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(w || ''); if (!m) return w || '';
+    var d = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+    var day = d.toLocaleDateString('en-US', {weekday: 'short', month: 'short', day: 'numeric'});
+    var h = d.getHours(), ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12;
+    return day + ' \u00b7 ' + h + ':' + m[5] + ' ' + ap;
   }
-  function note(c, msg){ var el = c.querySelector('.note'); if(!el) return; el.textContent = msg; setTimeout(function(){ el.textContent = ''; }, 1800); }
+  function textOf(c, what){
+    // What lands on the clipboard / in the share sheet: a clean note somebody can read
+    // in WhatsApp without seeing the app - who, when, how long, then both transcripts.
+    var en = ((c.querySelector('.en')||{}).innerText || '').trim(), yi = ((c.querySelector('.yi')||{}).innerText || '').trim();
+    if (what === 'en') return en;
+    if (what === 'yi') return yi;
+    if (what === 'link') return c.dataset.share || '';
+    var secs = +c.dataset.dur || 0, len = secs ? Math.floor(secs / 60) + ':' + ('0' + secs % 60).slice(-2) : '';
+    var line2 = [c.dataset.num && c.dataset.num !== c.dataset.who ? c.dataset.num : '', niceWhen(c.dataset.when), len].filter(Boolean).join(' \u00b7 ');
+    var out = ['\uD83D\uDCDE Voicemail \u00b7 ' + c.dataset.who, line2];
+    if (en) out.push('', en);
+    if (yi) out.push('', yi);
+    out.push('', '\u2014 Shefa Yoel line');
+    return out.join('\n');
+  }
+  function note(c, msg){ var el = c.querySelector('.note'); if(!el) return; el.textContent = msg; el.classList.add('on'); clearTimeout(el._t); el._t = setTimeout(function(){ el.classList.remove('on'); }, 1600); }
   function copy(s, c, msg){
     var p = (navigator.clipboard && navigator.clipboard.writeText) ? navigator.clipboard.writeText(s) : Promise.reject();
     p.then(function(){ note(c, msg); }, function(){
@@ -379,7 +397,7 @@
     var c = cardOf(e.target); if (!c) return;
     if (e.target.closest('[data-play]')) { if (current === c && !audio.paused) pause(); else play(c); return; }
     if (e.target.closest('[data-file]')) { fileAway(c); return; }
-    var cp = e.target.closest('[data-copy]'); if (cp) { copy(textOf(c, cp.dataset.copy), c, cp.dataset.copy === 'link' ? 'link copied' : 'copied'); closeMenus(); return; }
+    var cp = e.target.closest('[data-copy]'); if (cp) { copy(textOf(c, cp.dataset.copy), c, cp.dataset.copy === 'link' ? 'Link copied' : 'Copied \u2014 ready to paste'); closeMenus(); return; }
     var sh = e.target.closest('[data-share-btn]'); if (sh) { shareFile(c, sh); return; }
     var st = e.target.closest('[data-sheet]'); if (st) { var sheet = document.getElementById(st.dataset.sheet); sheet.classList.toggle('open'); if (sheet.classList.contains('open')) { var f = sheet.querySelector('select,input'); if (f) f.focus(); } return; }
     if (e.target.closest('.row') && !e.target.closest('a')) {
