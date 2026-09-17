@@ -3,3 +3,4 @@ gunicorn>=21.0
 cryptography>=42.0
 flask-compress>=1.14
 qrcode>=7.4
+openpyxl>=3.1

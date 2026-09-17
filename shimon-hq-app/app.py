@@ -16,6 +16,7 @@ import pulse
 import wa
 import vm
 import twofa
+import families
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(BASE, "hq.db"))
@@ -767,6 +768,7 @@ def init_db():
         " handled INTEGER NOT NULL DEFAULT 0);"
         "CREATE INDEX IF NOT EXISTS wa_inbox_open ON wa_inbox(handled, ts);")
     vm.ensure_schema(con)
+    families.ensure_schema(con)
     if "created_at" not in cols:
         con.execute("ALTER TABLE items ADD COLUMN created_at TEXT")
     # Today is a flag, not a list. Keeping "today" and "this week" as two lists
@@ -5990,6 +5992,15 @@ def vm_view():
                                " AND stored_name IS NOT NULL").fetchone()[0],
     }
     dh = vm.dh_projects() if vm.dh_configured() else None
+    # who is calling: the families directory, by phone
+    fam_of = {}
+    digs = {families.digits10(r["caller_number"]) for r in rows} - {""}
+    if digs:
+        qm = ",".join("?" * len(digs))
+        for f in con.execute("SELECT f.id, f.name_en, f.name_yi, f.area, f.mother_en, f.qbo_payee, f.children, p.digits"
+                             " FROM family_phones p JOIN families f ON f.id=p.family_id WHERE p.digits IN (%s)" % qm,
+                             tuple(digs)):
+            fam_of.setdefault(f["digits"], f)
     today = _now_local().date()
 
     def day_label(iso):
@@ -6009,10 +6020,81 @@ def vm_view():
     return render_template("vm.html", rows=rows, show=show, counts=counts, busy=_vm_lock.locked(),
                            dh=dh, dh_url=vm.DH_URL, share_token=vm_share_token, day_label=day_label,
                            mirror=vm.mirror_configured(), folk=folk, q=q, qcounts=qcounts, admin=admin,
-                           me_id=me(),
+                           me_id=me(), fam_of=fam_of, digits10=families.digits10, fam_label=families.label,
+                           fam_kids=families.children,
                            last_sync=(last["v"] if last else None),
                            rc_ok=vm.configured(), yl_ok=vm.yl_configured(),
                            fmt_phone=vm.fmt_phone)
+
+
+# ---------- families (the almanos / yesomim directory) ----------
+
+@app.route("/families")
+@login_required
+def families_view():
+    con = db()
+    q = request.args.get("q", "")
+    rows = families.search(con, q)
+    n = con.execute("SELECT COUNT(*) FROM families").fetchone()[0]
+    last = con.execute("SELECT MAX(imported_at) FROM families").fetchone()[0]
+    return render_template("families.html", rows=rows, q=q, total=n, last=last,
+                           kids=families.children, fmt_phone=vm.fmt_phone,
+                           msg=request.args.get("msg"))
+
+
+@app.route("/families/import", methods=["POST"])
+@login_required
+def families_import():
+    """Upload the CRM's Global Families Export; families are matched by Die ID and
+    updated in place, HQ notes kept."""
+    if not session.get("admin"):
+        abort(403)
+    f = request.files.get("file")
+    if not f or not f.filename.lower().endswith(".xlsx"):
+        return redirect(url_for("families_view", msg="Pick the .xlsx export from the CRM."))
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+        f.save(tmp.name)
+        path = tmp.name
+    try:
+        total, new, phones = families.import_export(db(), path)
+        msg = "%d families loaded (%d new), %d phone numbers indexed." % (total, new, phones)
+    except Exception as e:
+        app.logger.warning("families import failed: %s", e)
+        msg = "Could not read that file: %s" % e
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    return redirect(url_for("families_view", msg=msg))
+
+
+@app.route("/families/<int:fid>")
+@login_required
+def family_view(fid):
+    con = db()
+    f = con.execute("SELECT * FROM families WHERE id=?", (fid,)).fetchone()
+    if not f:
+        abort(404)
+    phones = [r["digits"] for r in con.execute("SELECT digits FROM family_phones WHERE family_id=?", (fid,))]
+    calls = []
+    if phones:
+        qm = ",".join("?" * len(phones))
+        allv = con.execute("SELECT id, ts, caller_number, duration, english, tstatus, item_id FROM voicemails"
+                           " ORDER BY ts DESC").fetchall()
+        calls = [v for v in allv if families.digits10(v["caller_number"]) in phones][:50]
+    return render_template("family.html", f=f, kids=families.children(f), calls=calls,
+                           fmt_phone=vm.fmt_phone, phones=phones)
+
+
+@app.route("/families/<int:fid>/notes", methods=["POST"])
+@login_required
+def family_notes(fid):
+    con = db()
+    con.execute("UPDATE families SET hq_notes=? WHERE id=?", ((request.form.get("hq_notes") or "").strip(), fid))
+    commit_retry(con)
+    return redirect(url_for("family_view", fid=fid))
 
 
 def vm_share_token(vid):
