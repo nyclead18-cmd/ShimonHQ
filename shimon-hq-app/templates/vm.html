@@ -176,7 +176,7 @@
   </div>
 </div>
 
-{% if admin and line_errors %}{% for ext, err in line_errors.items() %}<p class="hint" style="color:var(--pill-open-tx)">{{ line_labels.get(ext, ext) }}: RingCentral refuses this mailbox ({{ err|truncate(80) }}). {% if '403' in err %}The JWT user needs permission to read it — make that user a Super Admin in the RingCentral admin portal, or give the app account-level Read Messages.{% endif %}</p>{% endfor %}{% endif %}
+{% if admin and line_errors %}{% for ext, err in line_errors.items() %}<p class="hint" style="color:var(--pill-open-tx)">{% if ext.startswith('spec:') %}Cannot look up the extension “{{ ext[5:] }}” — {{ err|truncate(90) }}. {% if '403' in err %}The RingCentral app is missing the <b>ReadAccounts</b> permission (developer console → the app → Permissions), or use the extension ID instead of the name in RC_LINES.{% endif %}{% else %}{{ line_labels.get(ext, ext) }}: RingCentral refuses this mailbox ({{ err|truncate(80) }}). {% if '403' in err %}The JWT user needs permission to read it — make that user a Super Admin in the RingCentral admin portal, or give the app account-level Read Messages.{% endif %}{% endif %}</p>{% endfor %}{% endif %}
 {% if line_labels|length > 1 %}
 <div class="queues lines">
   <a class="qchip {% if line == '' %}on{% endif %}" href="{{ url_for('vm_view', show=show, q=q) }}">All lines</a>
