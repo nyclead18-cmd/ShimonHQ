@@ -19,7 +19,7 @@
 </header>
 
 {% if error %}<div class="savewarn">{{ error }}</div>{% endif %}
-{% if ok %}<div class="okline">{{ ok }}</div>{% endif %}
+{% if ok %}<div class="okline">{{ ok }}{% if reset_pw %} <button type="button" class="ghostbtn copypw" data-pw="{{ reset_pw }}" onclick="navigator.clipboard.writeText(this.dataset.pw).then(()=>{this.textContent='Copied'})">Copy password</button>{% endif %}</div>{% endif %}
 
 <section class="card acct">
   <div class="sec-head"><h2>You and your board</h2></div>
@@ -149,6 +149,10 @@
       <label>Small line above it<input name="tagline" value="{{ taglines.get(f.id, '') }}" placeholder="leave empty for none" maxlength="60"></label>
       <button type="submit">Save {{ f.display_name }}</button>
     </form>
+    <form method="post" action="{{ url_for('reset_person', uid=f.id) }}" class="resetrow" onsubmit="return confirm('Give {{ f.display_name|e }} a new temporary password? The old one stops working at once.')">
+      <button type="submit" class="ghostbtn">Reset password</button>
+      <label class="inl"><input type="checkbox" name="twofa" value="1"> also reset two-step (lost phone)</label>
+    </form>
     {% else %}
     <ul class="prows"><li class="prow rhythm">
       <span class="pwho">{{ f.display_name }}</span>
@@ -176,7 +180,7 @@
     </div>
     <label>Username<input name="username" autocomplete="off" placeholder="joel" required></label>
     <label>Shown on the board as<input name="display_name" autocomplete="off" placeholder="leave empty for first + last" maxlength="40"></label>
-    <label>First password<input name="password" autocomplete="off" minlength="8" required></label>
+    <label>First password<input name="password" autocomplete="off" minlength="8" placeholder="leave empty and one is made for you"></label>
     <button type="submit">Add</button>
   </form>
   <p class="caveat">They get their own tracker section, shared, and a private Inbox.
