@@ -4784,6 +4784,9 @@ def vm_work(date_from=None, budget=240):
     con.execute("PRAGMA busy_timeout = 15000")
     t0 = _time.time()
     try:
+        if vm.mirror_configured():
+            vm.mirror_sync(con, FILES_DIR, log=app.logger.info)
+            return
         vm.sync(con, FILES_DIR, log=app.logger.info, date_from=date_from, transcribe=False)
         while _time.time() - t0 < budget:
             if not vm.transcribe_pending(con, FILES_DIR, log=app.logger.info, max_n=3):
@@ -5648,6 +5651,7 @@ def vm_view():
 
     return render_template("vm.html", rows=rows, show=show, counts=counts, busy=_vm_lock.locked(),
                            dh=dh, dh_url=vm.DH_URL, share_token=vm_share_token, day_label=day_label,
+                           mirror=vm.mirror_configured(),
                            last_sync=(last["v"] if last else None),
                            rc_ok=vm.configured(), yl_ok=vm.yl_configured(),
                            fmt_phone=vm.fmt_phone)
@@ -5769,6 +5773,27 @@ def vm_to_dh(vid):
                 (eid, project, link, vid))
     commit_retry(con)
     return redirect(url_for("vm_view", show=request.form.get("show", "open"), _anchor="vm-%d" % vid))
+
+
+@app.route("/api/vm/export")
+def api_vm_export():
+    """Everything another HQ needs to mirror this voicemail box (Joel's HQ reads this).
+    Bearer = API_TOKEN. Local state (handled, task, Divrei HaYamim) is not exported."""
+    if not _api_auth():
+        return jsonify(error="unauthorized"), 401
+    rows = db().execute("SELECT rc_id, ext, ts, caller_number, caller_name, duration, stored_name,"
+                        " rc_text, yiddish, english, tstatus FROM voicemails ORDER BY ts").fetchall()
+    return jsonify(voicemails=[dict(r) for r in rows])
+
+
+@app.route("/api/vm/<rc_id>/audio")
+def api_vm_audio(rc_id):
+    if not _api_auth():
+        return jsonify(error="unauthorized"), 401
+    row = db().execute("SELECT * FROM voicemails WHERE rc_id=?", (rc_id,)).fetchone()
+    if not row:
+        abort(404)
+    return _vm_send_audio(row)
 
 
 @app.route("/api/vm/sync", methods=["POST"])

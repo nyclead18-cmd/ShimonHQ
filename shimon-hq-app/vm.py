@@ -17,6 +17,10 @@ Env:
   YL_CONTEXT       optional hint text for the transcriber
   VM_SHORT_SEC     voicemails this long or shorter are filed as "short" and not transcribed (default 5)
   ANTHROPIC_API_KEY  optional - English gist of each transcript
+  VM_MIRROR_URL / VM_MIRROR_TOKEN
+                     Mirror mode (Joel's HQ): instead of RingCentral + Yiddish Labs, copy the
+                     voicemails, transcripts and recordings from another HQ (its /api/vm/export,
+                     Bearer = that HQ's API_TOKEN). No second transcription bill.
   DH_URL / DH_TOKEN  Divrei HaYamim app (https://divrei-hayamim.onrender.com) + its APP_TOKEN,
                      for "send to Divrei HaYamim" on a voicemail
 
@@ -58,7 +62,60 @@ _tok = {"access": None, "exp": 0}
 
 
 def configured():
-    return all(os.environ.get(k) for k in ("RC_CLIENT_ID", "RC_CLIENT_SECRET", "RC_JWT"))
+    return all(os.environ.get(k) for k in ("RC_CLIENT_ID", "RC_CLIENT_SECRET", "RC_JWT")) or mirror_configured()
+
+
+MIRROR_URL = (os.environ.get("VM_MIRROR_URL") or "").rstrip("/")
+
+
+def mirror_configured():
+    return bool(MIRROR_URL and os.environ.get("VM_MIRROR_TOKEN"))
+
+
+def mirror_sync(con, files_dir, log=None):
+    """Copy voicemails from the source HQ: rows upserted by rc_id (transcripts arrive
+    later, so text fields are refreshed every pass), recordings fetched once.
+    Handled / task / Divrei HaYamim state stays local to this HQ."""
+    log = log or (lambda *a: None)
+    h = {"Authorization": "Bearer " + os.environ["VM_MIRROR_TOKEN"]}
+    rows = _req(MIRROR_URL + "/api/vm/export", headers=h, timeout=120).get("voicemails", [])
+    vm_dir = os.path.join(files_dir, "vm")
+    os.makedirs(vm_dir, exist_ok=True)
+    have = {r[0]: r for r in con.execute("SELECT rc_id, tstatus, stored_name FROM voicemails")}
+    new = fetched = 0
+    for r in rows:
+        if r["rc_id"] not in have:
+            con.execute(
+                "INSERT INTO voicemails(rc_id, ext, ts, caller_number, caller_name, duration,"
+                " stored_name, rc_text, yiddish, english, tstatus, received_at)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(rc_id) DO NOTHING",
+                (r["rc_id"], r.get("ext"), r.get("ts"), r.get("caller_number"), r.get("caller_name"),
+                 r.get("duration"), None, r.get("rc_text"), r.get("yiddish"), r.get("english"),
+                 r.get("tstatus") or "new", datetime.now().isoformat(timespec="seconds")))
+            new += 1
+        else:
+            con.execute("UPDATE voicemails SET ts=?, caller_number=?, caller_name=?, duration=?, rc_text=?,"
+                        " yiddish=?, english=?, tstatus=CASE WHEN tstatus='failed' THEN ? ELSE ? END WHERE rc_id=?",
+                        (r.get("ts"), r.get("caller_number"), r.get("caller_name"), r.get("duration"), r.get("rc_text"),
+                         r.get("yiddish"), r.get("english"), r.get("tstatus") or "new", r.get("tstatus") or "new", r["rc_id"]))
+        # the recording, once
+        local = have.get(r["rc_id"])
+        if r.get("stored_name") and not (local and local[2]):
+            try:
+                blob, ctype = _req("%s/api/vm/%s/audio" % (MIRROR_URL, r["rc_id"]), headers=h, raw=True, timeout=120)
+                with open(os.path.join(vm_dir, r["stored_name"]), "wb") as f:
+                    f.write(blob)
+                con.execute("UPDATE voicemails SET stored_name=? WHERE rc_id=?", (r["stored_name"], r["rc_id"]))
+                fetched += 1
+            except Exception as e:
+                log("vm mirror: audio %s failed: %s", r["rc_id"], e)
+        con.commit()
+    con.execute("INSERT INTO settings(k, v) VALUES('vm_last_sync', ?)"
+                " ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+                (datetime.now().isoformat(timespec="seconds"),))
+    con.commit()
+    log("vm mirror: %d new, %d recordings", new, fetched)
+    return new, fetched
 
 
 # ---------- http ----------
