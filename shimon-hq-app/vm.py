@@ -87,17 +87,20 @@ def mirror_sync(con, files_dir, log=None):
         if r["rc_id"] not in have:
             con.execute(
                 "INSERT INTO voicemails(rc_id, ext, ts, caller_number, caller_name, duration,"
-                " stored_name, rc_text, yiddish, english, tstatus, received_at)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(rc_id) DO NOTHING",
+                " stored_name, rc_text, yiddish, english, tstatus, received_at, read_json, kind)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(rc_id) DO NOTHING",
                 (r["rc_id"], r.get("ext"), r.get("ts"), r.get("caller_number"), r.get("caller_name"),
                  r.get("duration"), None, r.get("rc_text"), r.get("yiddish"), r.get("english"),
-                 r.get("tstatus") or "new", datetime.now().isoformat(timespec="seconds")))
+                 r.get("tstatus") or "new", datetime.now().isoformat(timespec="seconds"),
+                 r.get("read_json"), r.get("kind")))
             new += 1
         else:
             con.execute("UPDATE voicemails SET ts=?, caller_number=?, caller_name=?, duration=?, rc_text=?,"
-                        " yiddish=?, english=?, tstatus=CASE WHEN tstatus='failed' THEN ? ELSE ? END WHERE rc_id=?",
+                        " yiddish=?, english=?, tstatus=CASE WHEN tstatus='failed' THEN ? ELSE ? END,"
+                        " read_json=COALESCE(read_json, ?), kind=COALESCE(kind, ?) WHERE rc_id=?",
                         (r.get("ts"), r.get("caller_number"), r.get("caller_name"), r.get("duration"), r.get("rc_text"),
-                         r.get("yiddish"), r.get("english"), r.get("tstatus") or "new", r.get("tstatus") or "new", r["rc_id"]))
+                         r.get("yiddish"), r.get("english"), r.get("tstatus") or "new", r.get("tstatus") or "new",
+                         r.get("read_json"), r.get("kind"), r["rc_id"]))
         # the recording, once
         local = have.get(r["rc_id"])
         if r.get("stored_name") and not (local and local[2]):
@@ -388,6 +391,153 @@ def gist(yiddish, caller=""):
         return ""
 
 
+# ---------- the read step: what does this message ask us to do? ----------
+#
+# One pass per transcript, once the English is in. Produces a short task title, a
+# checklist of concrete steps, and a kind (family_case / charity / issue / thank_you /
+# money / other) that decides whose queue it lands in. With ANTHROPIC_API_KEY it is
+# Claude; without, a keyword pass that still yields a usable to-do.
+
+KINDS = ("family_case", "charity", "issue", "thank_you", "money", "other")
+KIND_LABEL = {"family_case": "Family case", "charity": "Charity", "issue": "Issue",
+              "thank_you": "Thank you", "money": "Money", "other": "Other"}
+
+_THANKS = ("thank you", "thanks", "yasher koach", "yashar koach", "shkoyach", "tizku", "a dank",
+           "יישר כח", "ישר כח", "שכח", "דאנק", "טיזכו", "תזכו")
+_MONEY = ("check", "payment", "invoice", "bill", "deposit", "wire", "zelle", "quickpay", "paid", "owe",
+          "reimburs", "receipt", "צעק", "טשעק", "געלט", "באצאלט", "רעכענונג")
+_ISSUE = ("problem", "mistake", "wrong", "didn't get", "did not get", "never got", "not received", "missing",
+          "broken", "complain", "error", "פראבלעם", "נישט באקומען", "פעלט", "טעות")
+_CHARITY = ("donation", "donate", "pledge", "tzedakah", "tzedaka", "help with", "need help", "afford", "rent",
+            "tuition", "wedding", "chasunah", "simcha", "yom tov", "pesach", "succos", "sukkos", "purim",
+            "matanos", "voucher", "card", "package", "נדבה", "צדקה", "הילף", "חתונה", "יום טוב", "פסח", "פעקל")
+
+
+def _kind_by_words(text):
+    t = (text or "").lower()
+    score = {k: 0 for k in KINDS}
+    for w in _MONEY:
+        score["money"] += t.count(w)
+    for w in _ISSUE:
+        score["issue"] += t.count(w) * 2
+    for w in _CHARITY:
+        score["charity"] += t.count(w)
+    for w in _THANKS:
+        score["thank_you"] += t.count(w)
+    # a thank-you that also mentions a check is still a thank-you, unless something is wrong
+    if score["issue"]:
+        return "issue"
+    if score["thank_you"] and score["thank_you"] >= score["charity"]:
+        return "thank_you"
+    if score["charity"]:
+        return "charity"
+    if score["money"]:
+        return "money"
+    return "other"
+
+
+def _read_plain(row):
+    en = (row["english"] or row["rc_text"] or "").strip()
+    who = row["caller_name"] or fmt_phone(row["caller_number"]) or "unknown caller"
+    kind = _kind_by_words(en + "\n" + (row["yiddish"] or ""))
+    cb = fmt_phone(row["caller_number"]) if row["caller_number"] else ""
+    if kind == "thank_you":
+        title = "Thank-you from %s" % who
+        todos = ["Note the thank-you for the record"]
+        if cb:
+            todos.append("Optional: call %s back to acknowledge" % cb)
+    else:
+        title = "Call back %s" % who
+        todos = ["Call back %s" % (cb or who)]
+        if kind in ("charity", "family_case"):
+            todos.append("Find out what is needed and by when")
+        if kind == "money":
+            todos.append("Check the payment status in QuickBooks")
+        if kind == "issue":
+            todos.append("Find out what went wrong and fix it")
+    gist = " ".join(en.split())[:220]
+    return {"title": title, "todos": todos, "kind": kind, "gist": gist,
+            "callback": cb, "amount": "", "who": who, "by": "plain"}
+
+
+def read(row, families_label=""):
+    """Return {title, todos[], kind, gist, callback, amount, who}. Never raises."""
+    plain = _read_plain(row)
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    text = (row["english"] or "").strip()
+    yid = (row["yiddish"] or "").strip()
+    if not key or not (text or yid):
+        return plain
+    who = row["caller_name"] or families_label or fmt_phone(row["caller_number"]) or "unknown"
+    prompt = (
+        "You read voicemails left on the Shefa Yoel line - a charity line that supports almanos and "
+        "yesomim (widows and orphans) with checks, yom tov packages, family help. The office turns each "
+        "message into a task on the board.\n\n"
+        "Caller (as known): %s\nCallback number on the line: %s\n\n"
+        "English transcript:\n%s\n\nYiddish transcript:\n%s\n\n"
+        "Return ONLY a JSON object with these keys:\n"
+        "  title: one line, imperative, under 60 characters, what the office should do "
+        "(e.g. \"Call Mrs. Reich back re: check for Yom Tov\", \"Thank-you from Mrs. Reich\"). Use the caller's "
+        "family name if said.\n"
+        "  todos: 1 to 5 short imperative steps, each under 90 characters, in the order to do them. For a "
+        "pure thank-you with no request, one step: note it, no callback needed.\n"
+        "  kind: one of family_case | charity | issue | thank_you | money | other. family_case = a family's "
+        "situation or a case to handle; charity = asking for help/money/packages; issue = something went "
+        "wrong (missing check, wrong amount, not received); thank_you = gratitude with no request; money = "
+        "payment/check/invoice logistics with no complaint; other = anything else.\n"
+        "  gist: one or two plain English sentences, what they said.\n"
+        "  callback: the phone number to call back if the caller said one, else \"\".\n"
+        "  amount: any dollar amount mentioned, as text, else \"\".\n"
+        "  who: the caller's name as best you can tell (e.g. \"Mrs. Reich\"), else \"\".\n"
+        "No markdown, no preamble." % (who, fmt_phone(row["caller_number"]) or "unknown", text[:6000] or "(none)",
+                                       yid[:6000] or "(none)"))
+    body = json.dumps({"model": os.environ.get("HQ_SUMMARY_MODEL", "claude-haiku-4-5"),
+                       "max_tokens": 500,
+                       "messages": [{"role": "user", "content": prompt}]}).encode()
+    try:
+        j = _req("https://api.anthropic.com/v1/messages", data=body, method="POST", timeout=60,
+                 headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                          "Content-Type": "application/json"})
+        out = "".join(p.get("text", "") for p in j.get("content", [])).strip()
+        s, e = out.find("{"), out.rfind("}")
+        d = json.loads(out[s:e + 1])
+        todos = [str(x).strip()[:90] for x in (d.get("todos") or []) if str(x).strip()][:5] or plain["todos"]
+        kind = d.get("kind") if d.get("kind") in KINDS else plain["kind"]
+        return {"title": (str(d.get("title") or "").strip()[:80] or plain["title"]),
+                "todos": todos, "kind": kind,
+                "gist": str(d.get("gist") or "").strip()[:400] or plain["gist"],
+                "callback": str(d.get("callback") or "").strip()[:30] or plain["callback"],
+                "amount": str(d.get("amount") or "").strip()[:30],
+                "who": str(d.get("who") or "").strip()[:60] or plain["who"], "by": "claude"}
+    except Exception:
+        return plain
+
+
+def read_pending(con, max_n=5, label_for=None):
+    """Run the read step on transcribed voicemails that have not been read yet."""
+    rows = con.execute("SELECT * FROM voicemails WHERE tstatus='done' AND read_json IS NULL"
+                       " ORDER BY ts DESC LIMIT ?", (max_n,)).fetchall()
+    n = 0
+    for r in rows:
+        d = read(r, label_for(r) if label_for else "")
+        con.execute("UPDATE voicemails SET read_json=?, kind=? WHERE id=?",
+                    (json.dumps(d, ensure_ascii=False), d["kind"], r["id"]))
+        con.commit()
+        n += 1
+    return n
+
+
+def reading(row):
+    """The stored read, or a plain one on the fly."""
+    try:
+        d = json.loads(row["read_json"] or "")
+        if d and d.get("title"):
+            return d
+    except (ValueError, TypeError, KeyError, IndexError):
+        pass
+    return _read_plain(row)
+
+
 # ---------- Divrei HaYamim ----------
 
 DH_URL = (os.environ.get("DH_URL") or "").rstrip("/")
@@ -453,9 +603,13 @@ def ensure_schema(con):
     con.execute("CREATE INDEX IF NOT EXISTS vm_open ON voicemails(handled, ts)")
     cols = [r[1] for r in con.execute("PRAGMA table_info(voicemails)")]
     for c in ("dh_event_id TEXT", "dh_project TEXT", "dh_url TEXT",
-              "notified INTEGER NOT NULL DEFAULT 0", "assignee INTEGER"):
+              "notified INTEGER NOT NULL DEFAULT 0", "assignee INTEGER",
+              "read_json TEXT", "kind TEXT", "routed INTEGER NOT NULL DEFAULT 0"):
         if c.split()[0] not in cols:
             con.execute("ALTER TABLE voicemails ADD COLUMN " + c)
+    if "routed" not in cols:
+        # the backlog stays where it is; only messages from here on get routed
+        con.execute("UPDATE voicemails SET routed=1")
     if "notified" not in cols:
         # everything already on the board was heard about some other way
         con.execute("UPDATE voicemails SET notified=1")

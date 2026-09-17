@@ -853,6 +853,16 @@ def init_db():
         "CREATE TABLE IF NOT EXISTS checks ("
         " id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER NOT NULL,"
         " body TEXT NOT NULL, done INTEGER NOT NULL DEFAULT 0, pos INTEGER NOT NULL DEFAULT 0);")
+    # a person is more than a login: first and last name, email, phone
+    ucols = [r[1] for r in con.execute("PRAGMA table_info(users)")]
+    for c in ("first_name TEXT", "last_name TEXT", "email TEXT", "phone TEXT"):
+        if ucols and c.split()[0] not in ucols:
+            con.execute("ALTER TABLE users ADD COLUMN " + c)
+    if ucols and "first_name" not in ucols:
+        # split what we have: "Simon Sebbagh" -> Simon / Sebbagh; "Mrs. Hartman" -> "" / Hartman (Mrs.)
+        for u in con.execute("SELECT id, display_name FROM users").fetchall():
+            fn, ln = split_name(u["display_name"])
+            con.execute("UPDATE users SET first_name=?, last_name=? WHERE id=?", (fn, ln, u["id"]))
     _seed_history(con)
     ecols = [r[1] for r in con.execute("PRAGMA table_info(events)")]
     if ecols and "source" not in ecols:
@@ -943,8 +953,8 @@ def user_row(con, uid=None):
 
 
 def people_list(con):
-    return con.execute("SELECT id, username, display_name, is_admin FROM users"
-                       " ORDER BY id").fetchall()
+    return con.execute("SELECT id, username, display_name, is_admin, first_name, last_name,"
+                       " email, phone FROM users ORDER BY id").fetchall()
 
 
 def counterpart(con, uid=None):
@@ -2460,17 +2470,48 @@ def _unread_count(con):
     return row["c"] if row else 0
 
 
+HONORIFICS = ("mr", "mrs", "ms", "miss", "rabbi", "reb", "r", "dr", "rebbetzin", "hrh")
+
+
+def split_name(display):
+    """'Joel Landau' -> ('Joel', 'Landau'); 'Mrs. Hartman' -> ('', 'Hartman'); 'Toby' -> ('Toby', '')."""
+    parts = (display or "").strip().split()
+    if not parts:
+        return "", ""
+    if parts[0].rstrip(".'’").lower() in HONORIFICS:
+        parts = parts[1:]
+        return "", " ".join(parts)
+    if len(parts) == 1:
+        return parts[0], ""
+    return parts[0], " ".join(parts[1:])
+
+
+def full_name(row):
+    """First + last when we have them, else whatever the display name is."""
+    fn = (row["first_name"] if "first_name" in row.keys() else "") or ""
+    ln = (row["last_name"] if "last_name" in row.keys() else "") or ""
+    return (" ".join(x for x in (fn.strip(), ln.strip()) if x)) or (row["display_name"] or "").strip()
+
+
 def board_title(con, uid=None):
     """What this person's board calls itself. Theirs to name."""
     uid = uid if uid is not None else me()
     t = uset(con, "board_title", uid)
     if t:
         return t
-    row = con.execute("SELECT display_name FROM users WHERE id=?", (uid,)).fetchone()
-    name = (row["display_name"] if row else "").strip()
-    if not name:
+    row = con.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    if not row:
         return "HQ"
-    name = name.split()[0]   # "Joel Landau" signs his board "Joel's HQ"
+    fn = (row["first_name"] or "").strip() if "first_name" in row.keys() else ""
+    disp = (row["display_name"] or "").strip()
+    if fn:
+        name = fn                       # "Joel Landau" signs his board "Joel's HQ"
+    elif disp and disp.split()[0].rstrip(".'’").lower() in HONORIFICS:
+        name = disp                     # "Mrs. Hartman's HQ", never "Mrs.'s HQ"
+    elif disp:
+        name = disp.split()[0]
+    else:
+        return "HQ"
     return "%s' HQ" % name if name.endswith("s") else "%s's HQ" % name
 
 
@@ -3257,7 +3298,7 @@ def _account_page(con, **extra):
     folk = people_list(con)
     home, work = _origins(con)
     ctx = dict(home=home, work=work, maps_key=bool(maps.KEY),
-               who=user_row(con), folk=folk,
+               who=user_row(con), folk=folk, fmt_phone=vm.fmt_phone,
                titles={r["id"]: board_title(con, r["id"]) for r in folk},
                taglines={r["id"]: uset(con, "tagline", r["id"]) for r in folk},
                my_title=uset(con, "board_title"),
@@ -3296,6 +3337,52 @@ def change_password():
     return _account_page(con, ok="Password changed.")
 
 
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _clean_phone(p):
+    d = re.sub(r"\D", "", p or "")
+    if len(d) == 11 and d.startswith("1"):
+        d = d[1:]
+    return d
+
+
+def _save_profile(con, target):
+    """First/last name, email, phone and what the name reads as, from the form.
+    Returns an error string or None. Fields not in the form are left alone."""
+    f = request.form
+    sets, vals = [], []
+    if "first_name" in f or "last_name" in f:
+        fn = (f.get("first_name") or "").strip()[:40]
+        ln = (f.get("last_name") or "").strip()[:40]
+        sets += ["first_name=?", "last_name=?"]; vals += [fn, ln]
+    else:
+        fn = ln = None
+    if "email" in f:
+        em = (f.get("email") or "").strip().lower()[:120]
+        if em and not _EMAIL_RE.match(em):
+            return "That email does not look right."
+        dup = con.execute("SELECT id FROM users WHERE lower(email)=? AND id!=?", (em, target)).fetchone() if em else None
+        if dup:
+            return "Somebody else here already uses that email."
+        sets.append("email=?"); vals.append(em)
+    if "phone" in f:
+        ph = _clean_phone(f.get("phone"))
+        if (f.get("phone") or "").strip() and len(ph) != 10:
+            return "Phone: ten digits, US number."
+        sets.append("phone=?"); vals.append(ph)
+    disp = (f.get("display_name") or "").strip()[:40]
+    if not disp and fn is not None:
+        disp = " ".join(x for x in (fn, ln) if x)
+    if disp:
+        sets.append("display_name=?"); vals.append(disp)
+        if target == me():
+            session["name"] = disp
+    if sets:
+        con.execute("UPDATE users SET %s WHERE id=?" % ", ".join(sets), vals + [target])
+    return None
+
+
 @app.route("/account/identity", methods=["POST"])
 @login_required
 def set_identity():
@@ -3307,11 +3394,9 @@ def set_identity():
         abort(403)
     if not con.execute("SELECT 1 FROM users WHERE id=?", (target,)).fetchone():
         abort(404)
-    name = (request.form.get("display_name") or "").strip()[:40]
-    if name:
-        con.execute("UPDATE users SET display_name=? WHERE id=?", (name, target))
-        if target == me():
-            session["name"] = name
+    err = _save_profile(con, target)
+    if err:
+        return _account_page(con, error=err)
     title = (request.form.get("board_title") or "").strip()[:40]
     uset_put(con, "board_title", title, target)      # empty falls back to "<Name>'s HQ"
     if "tagline" in request.form:
@@ -3352,7 +3437,12 @@ def add_person():
     if not session.get("admin"):
         abort(403)
     username = (request.form.get("username") or "").strip().lower()
-    display = (request.form.get("display_name") or "").strip() or username.title()
+    fn = (request.form.get("first_name") or "").strip()[:40]
+    ln = (request.form.get("last_name") or "").strip()[:40]
+    display = ((request.form.get("display_name") or "").strip()
+               or " ".join(x for x in (fn, ln) if x) or username.title())
+    email = (request.form.get("email") or "").strip().lower()[:120]
+    phone = _clean_phone(request.form.get("phone"))
     pw = request.form.get("password") or ""
     err = None
     if not re.match(r"^[a-z0-9_.-]{2,32}$", username):
@@ -3361,12 +3451,18 @@ def add_person():
         err = "Give them a password of at least 8 characters."
     elif con.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone():
         err = "That username is taken."
+    elif email and not _EMAIL_RE.match(email):
+        err = "That email does not look right."
+    elif email and con.execute("SELECT 1 FROM users WHERE lower(email)=?", (email,)).fetchone():
+        err = "Somebody else here already uses that email."
+    elif (request.form.get("phone") or "").strip() and len(phone) != 10:
+        err = "Phone: ten digits, US number."
     if err:
         return _account_page(con, error=err)
     uid = con.execute(
-        "INSERT INTO users(username, display_name, pw_hash, is_admin, created_at)"
-        " VALUES(?,?,?,0,?)",
-        (username, display, generate_password_hash(pw),
+        "INSERT INTO users(username, display_name, first_name, last_name, email, phone, pw_hash,"
+        " is_admin, created_at) VALUES(?,?,?,?,?,?,?,0,?)",
+        (username, display, fn, ln, email, phone, generate_password_hash(pw),
          datetime.now().isoformat(timespec="seconds"))).lastrowid
     # everyone starts with the same three boxes, private until they share
     ensure_buckets(con, uid)
@@ -5080,12 +5176,105 @@ def vm_work(date_from=None, budget=240):
             while _time.time() - t0 < budget:
                 if not vm.transcribe_pending(con, FILES_DIR, log=app.logger.info, max_n=3):
                     break
+        # the read step: title, to-do steps and kind for each new transcript
+        while _time.time() - t0 < budget:
+            if not vm.read_pending(con, max_n=5, label_for=_fam_label_for(con)):
+                break
         vm_notify(con)
+        with app.test_request_context(base_url=_base_url()):
+            vm_route(con)
+            vm_backfill_tasks(con)
     except Exception as e:
         app.logger.warning("vm work failed: %s", e)
     finally:
         con.close()
         _vm_lock.release()
+
+
+def _base_url():
+    """Where this HQ lives, for links made off the request thread. Render sets
+    RENDER_EXTERNAL_URL; HQ_BASE_URL overrides."""
+    return (os.environ.get("HQ_BASE_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "http://localhost:5000").rstrip("/") + "/"
+
+
+def _fam_label_for(con):
+    """A function row -> 'Weiss / Jungreisz · Monroe' (or '') from the families directory."""
+    def f(r):
+        try:
+            hits = families.lookup_phone(con, r["caller_number"])
+            return families.label(hits[0]) if hits else ""
+        except Exception:
+            return ""
+    return f
+
+
+def _vm_task_note(r, rd):
+    """The task note: what they said in a line or two, the facts, then the transcript
+    underneath for whoever wants the words."""
+    facts = [x for x in (
+        ("Callback " + rd["callback"]) if rd.get("callback") else "",
+        ("Amount " + rd["amount"]) if rd.get("amount") else "",
+        vm.KIND_LABEL.get(rd.get("kind") or "", "")) if x]
+    head = "\n".join(x for x in (rd.get("gist", ""), " · ".join(facts)) if x)
+    body = "\n\n".join(x for x in ((r["english"] or "").strip(), (r["yiddish"] or "").strip()) if x)
+    tail = "Voicemail %s · %s · %ss\n%s" % (
+        (r["ts"] or "")[:16].replace("T", " "), vm.fmt_phone(r["caller_number"]),
+        r["duration"] or "?", url_for("vm_audio", vid=r["id"], _external=True))
+    return "\n\n".join(x for x in (head, ("— transcript —\n" + body) if body else "", tail) if x)
+
+
+# Who each kind of message goes to. settings 'route:<kind>' holds a user id; unset
+# falls back to the account named for the job (hartman / toby), else the desk.
+ROUTE_DEFAULT_USER = {"family_case": "hartman", "charity": "hartman", "issue": "hartman",
+                      "thank_you": "hartman", "money": "toby", "other": ""}
+
+
+def _route_target(con, kind):
+    v = _setting(con, "route:%s" % kind)
+    if v is not None:
+        return int(v) if v.strip().isdigit() else None
+    uname = ROUTE_DEFAULT_USER.get(kind) or ""
+    if not uname:
+        return None
+    row = con.execute("SELECT id FROM users WHERE lower(username)=?", (uname,)).fetchone()
+    return row["id"] if row else None
+
+
+def vm_route(con):
+    """Put each freshly read, still-unassigned message in the right queue - once. A
+    message somebody already moved by hand is left alone."""
+    rows = con.execute("SELECT id, kind FROM voicemails WHERE read_json IS NOT NULL AND routed=0"
+                       " AND assignee IS NULL AND tstatus='done'"
+                       " AND id NOT IN (SELECT vm_id FROM vm_handled)").fetchall()
+    for r in rows:
+        to = _route_target(con, r["kind"] or "other")
+        con.execute("UPDATE voicemails SET routed=1, assignee=COALESCE(?, assignee) WHERE id=?", (to, r["id"]))
+        if to:
+            try:
+                rd = vm.reading(con.execute("SELECT * FROM voicemails WHERE id=?", (r["id"],)).fetchone())
+                send_push("Voicemail for you · %s" % rd.get("who", ""), _short(rd.get("gist", ""), 140),
+                          "/vm#vm-%d" % r["id"], uid=to)
+            except Exception as e:
+                app.logger.warning("route push failed: %s", e)
+    if rows:
+        con.commit()
+
+
+def vm_backfill_tasks(con):
+    """Tasks made from voicemails before the read step: give each its checklist and,
+    where the title is still the stock 'Call back … (voicemail)', the read title."""
+    rows = con.execute("SELECT v.*, i.title AS ititle FROM voicemails v JOIN items i ON i.id=v.item_id"
+                       " WHERE v.read_json IS NOT NULL AND i.status='open'"
+                       " AND NOT EXISTS (SELECT 1 FROM checks c WHERE c.item_id=v.item_id)").fetchall()
+    for r in rows:
+        rd = vm.reading(r)
+        for i, step in enumerate(rd["todos"], 1):
+            con.execute("INSERT INTO checks(item_id, body, pos) VALUES(?,?,?)", (r["item_id"], step[:200], i))
+        if (r["ititle"] or "").startswith("Call back ") and (r["ititle"] or "").endswith("(voicemail)"):
+            con.execute("UPDATE items SET title=?, note=? WHERE id=?",
+                        (rd["title"], _vm_task_note(r, rd), r["item_id"]))
+    if rows:
+        con.commit()
 
 
 def vm_notify(con):
@@ -6021,7 +6210,7 @@ def vm_view():
                            dh=dh, dh_url=vm.DH_URL, share_token=vm_share_token, day_label=day_label,
                            mirror=vm.mirror_configured(), folk=folk, q=q, qcounts=qcounts, admin=admin,
                            me_id=me(), fam_of=fam_of, digits10=families.digits10, fam_label=families.label,
-                           fam_kids=families.children,
+                           fam_kids=families.children, kind_label=vm.KIND_LABEL,
                            last_sync=(last["v"] if last else None),
                            rc_ok=vm.configured(), yl_ok=vm.yl_configured(),
                            fmt_phone=vm.fmt_phone)
@@ -6222,14 +6411,15 @@ def vm_task(vid):
     owner = _board_owner(con)
     sid = ensure_buckets(con, owner)["Community/Charity"]
     tag_to = r["assignee"] or (me() if me() != owner else None)
-    who = r["caller_name"] or vm.fmt_phone(r["caller_number"]) or "unknown caller"
-    title = (request.form.get("title") or "").strip() or ("Call back %s (voicemail)" % who)
-    note = "\n\n".join(x for x in (
-        (r["english"] or "").strip(),
-        (r["yiddish"] or "").strip(),
-        "Voicemail %s · %s · %ss\n%s" % (
-            (r["ts"] or "")[:16].replace("T", " "), vm.fmt_phone(r["caller_number"]),
-            r["duration"] or "?", url_for("vm_audio", vid=vid, _external=True))) if x)
+    # what the message asks for: read once by the read step, or on the spot
+    if not r["read_json"]:
+        d = vm.read(r, _fam_label_for(con)(r))
+        con.execute("UPDATE voicemails SET read_json=?, kind=? WHERE id=?",
+                    (json.dumps(d, ensure_ascii=False), d["kind"], vid))
+        r = con.execute("SELECT * FROM voicemails WHERE id=?", (vid,)).fetchone()
+    rd = vm.reading(r)
+    title = (request.form.get("title") or "").strip() or rd["title"]
+    note = _vm_task_note(r, rd)
     pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM items WHERE section_id=?",
                       (sid,)).fetchone()[0]
     now = datetime.now().isoformat(timespec="seconds")
@@ -6238,6 +6428,8 @@ def vm_task(vid):
         "INSERT INTO items(section_id, title, note, waiting_on, status, pos, due_date,"
         " updated_at, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
         (sid, title, note, "", "open", pos, due, now, now))
+    for i, step in enumerate(rd["todos"], 1):
+        con.execute("INSERT INTO checks(item_id, body, pos) VALUES(?,?,?)", (cur.lastrowid, step[:200], i))
     con.execute("UPDATE voicemails SET item_id=? WHERE id=?", (cur.lastrowid, vid))
     con.execute("INSERT OR IGNORE INTO vm_handled(vm_id, user_id, at) VALUES(?,?,?)",
                 (vid, me(), datetime.now().isoformat(timespec="seconds")))
@@ -6284,7 +6476,7 @@ def api_vm_export():
     if not _api_auth():
         return jsonify(error="unauthorized"), 401
     rows = db().execute("SELECT rc_id, ext, ts, caller_number, caller_name, duration, stored_name,"
-                        " rc_text, yiddish, english, tstatus FROM voicemails ORDER BY ts").fetchall()
+                        " rc_text, yiddish, english, tstatus, read_json, kind FROM voicemails ORDER BY ts").fetchall()
     return jsonify(voicemails=[dict(r) for r in rows])
 
 
