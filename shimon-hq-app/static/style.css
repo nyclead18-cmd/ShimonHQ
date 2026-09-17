@@ -624,6 +624,9 @@ li.prow .ptitle + .psec{justify-self:end;}
 /* ---------- account ---------- */
 .acct{margin-bottom:20px;}
 .stack{display:flex; flex-direction:column; gap:12px; padding:6px 2px 2px; max-width:420px;}
+.stack .two{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+.stack .two label{min-width:0;}
+@media (max-width:480px){ .stack .two{grid-template-columns:1fr;} }
 .stack label{display:flex; flex-direction:column; gap:5px; color:var(--muted);
   font-size:11.5px; letter-spacing:.07em; text-transform:uppercase; font-weight:700;}
 .stack input{background:var(--bg); border:1px solid var(--border); border-radius:10px;
