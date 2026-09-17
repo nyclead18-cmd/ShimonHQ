@@ -4,7 +4,7 @@
 <div class="wrap vmpage">
 <header class="top">
   <div>
-    <div class="eyebrow">Shefa Yoel line</div>
+    <div class="eyebrow">{{ line_name }}</div>
     <h1>Voicemail</h1>
   </div>
   <div class="right">
@@ -61,7 +61,8 @@
   .vmpage .meta{margin:0;text-align:right;color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap;line-height:1.3;padding-top:2px}
   .vmpage .meta .dur{display:block;font-size:12px;opacity:.85}
   .vmpage .tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
-  .vmpage .tag.kind{text-transform:none;letter-spacing:0;font-size:11px}
+  .vmpage .tag.kind,.vmpage .tag.line{text-transform:none;letter-spacing:0;font-size:11px}
+  .vmpage .queues.lines{margin-bottom:8px}
   .vmpage .tag.k-thank_you{background:var(--pill-done-bg);color:var(--pill-done-tx);border-color:transparent}
   .vmpage .tag.k-issue{background:var(--pill-open-bg);color:var(--pill-open-tx);border-color:transparent}
   .vmpage .tag.k-money{background:var(--pill-wait-bg);color:var(--pill-wait-tx);border-color:transparent}
@@ -175,11 +176,18 @@
   </div>
 </div>
 
+{% if line_labels|length > 1 %}
+<div class="queues lines">
+  <a class="qchip {% if line == '' %}on{% endif %}" href="{{ url_for('vm_view', show=show, q=q) }}">All lines</a>
+  {% for ext, lab in line_labels.items() %}<a class="qchip {% if line == ext %}on{% endif %}" href="{{ url_for('vm_view', show=show, q=q, line=ext) }}">{{ lab }}<b>{{ lcounts.get(ext, 0) }}</b></a>{% endfor %}
+</div>
+{% endif %}
+
 {% if admin and folk|length > 1 %}
 <div class="queues">
-  <a class="qchip {% if q == '' %}on{% endif %}" href="{{ url_for('vm_view', show=show) }}">Desk<b>{{ qcounts[''] }}</b></a>
-  {% for f in folk %}{% if not f.is_admin %}<a class="qchip {% if q == f.id|string %}on{% endif %}" href="{{ url_for('vm_view', show=show, q=f.id) }}">{{ f.display_name }}<b>{{ qcounts[f.id] }}</b></a>{% endif %}{% endfor %}
-  <a class="qchip {% if q == 'all' %}on{% endif %}" href="{{ url_for('vm_view', show=show, q='all') }}">Everyone</a>
+  <a class="qchip {% if q == '' %}on{% endif %}" href="{{ url_for('vm_view', show=show, line=line) }}">Desk<b>{{ qcounts[''] }}</b></a>
+  {% for f in folk %}{% if not f.is_admin %}<a class="qchip {% if q == f.id|string %}on{% endif %}" href="{{ url_for('vm_view', show=show, q=f.id, line=line) }}">{{ f.display_name }}<b>{{ qcounts[f.id] }}</b></a>{% endif %}{% endfor %}
+  <a class="qchip {% if q == 'all' %}on{% endif %}" href="{{ url_for('vm_view', show=show, q='all', line=line) }}">Everyone</a>
 </div>
 {% endif %}
 
@@ -197,7 +205,7 @@
 {% set nunder = (0 if r.handled else 1) + (0 if (r.handled or r.item_id) else 1) %}
 <article class="vm {% if r.handled %}done{% endif %}" id="vm-{{ r.id }}" data-id="{{ r.id }}"
   data-who="{{ who }}" data-num="{{ fmt_phone(r.caller_number) }}" data-when="{{ (r.ts or '')[:16].replace('T',' ') }}"
-  data-dur="{{ r.duration or 0 }}" style="--uw:{{ nunder * 84 }}px"
+  data-dur="{{ r.duration or 0 }}" data-line="{{ line_of(r) }}" style="--uw:{{ nunder * 84 }}px"
   {% if r.stored_name %}data-audio="{{ url_for('vm_audio', vid=r.id) }}" data-share="{{ url_for('vm_share', vid=r.id, tok=share_token(r.id), _external=True) }}"
   data-fname="Voicemail_{{ (r.ts or '')[:10] }}_{{ who|replace(' ','_')|replace('(','')|replace(')','')|replace('-','') }}.mp3"{% endif %}>
   <div class="rowwrap">
@@ -212,9 +220,10 @@
     <div>
       <div class="who">{{ who }}{% if fam and r.caller_name %} <small class="famtag">{{ fam.name_en }}{% if fam.area %} · {{ fam.area }}{% endif %}</small>{% elif r.caller_name and r.caller_number %} <small>{{ fmt_phone(r.caller_number) }}</small>{% endif %}</div>
       <div class="peek">{% if r.english or r.rc_text %}{{ (r.english or r.rc_text)|truncate(160) }}{% elif r.tstatus == 'new' %}<i>Transcribing…</i>{% endif %}</div>
-      {% if r.tstatus in ('failed','short','empty','skipped') or r.item_id or r.dh_event_id or r.kind or (r.assignee and q in ('', 'all')) %}
+      {% if r.tstatus in ('failed','short','empty','skipped') or r.item_id or r.dh_event_id or r.kind or (line_labels|length > 1 and not line) or (r.assignee and q in ('', 'all')) %}
       <div class="tags">
         {% if r.assignee and q in ('', 'all') %}<span class="tag who" data-who-tag>&rarr; {{ r.assignee_name }}</span>{% endif %}
+        {% if line_labels|length > 1 and not line %}<span class="tag line">{{ line_of(r).replace(' line', '') }}</span>{% endif %}
         {% if r.kind and r.kind != 'other' %}<span class="tag kind k-{{ r.kind }}">{{ kind_label.get(r.kind, r.kind) }}</span>{% endif %}
         {% if r.tstatus == 'failed' %}<span class="tag bad">transcript failed</span>
         {% elif r.tstatus == 'short' %}<span class="tag">short</span>
@@ -391,7 +400,7 @@
     var out = ['\uD83D\uDCDE Voicemail \u00b7 ' + c.dataset.who, line2];
     if (en) out.push('', en);
     if (yi) out.push('', yi);
-    out.push('', '\u2014 Shefa Yoel line');
+    out.push('', '\u2014 ' + (c.dataset.line || 'Shefa Yoel line'));
     return out.join('\n');
   }
   function note(c, msg){ var el = c.querySelector('.note'); if(!el) return; el.textContent = msg; el.classList.add('on'); clearTimeout(el._t); el._t = setTimeout(function(){ el.classList.remove('on'); }, 1600); }
