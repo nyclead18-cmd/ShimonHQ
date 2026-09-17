@@ -99,6 +99,13 @@
   .vmpage .ib.quiet{color:var(--muted)}
   .vmpage .ib[disabled]{opacity:.35;pointer-events:none}
 
+  .vmpage .famtag{color:var(--accent)!important}
+  .vmpage .famline{display:grid;grid-template-columns:1fr auto;gap:0 10px;align-items:center;padding:9px 12px;margin:0 0 10px;border-radius:10px;background:var(--row);border:1px solid var(--border);text-decoration:none;color:var(--ink)}
+  .vmpage .famline.none{display:block;color:var(--muted);font-size:12.5px}
+  .vmpage .fl-name{font-weight:600;font-size:14px}
+  .vmpage .fl-yi{font-family:'Frank Ruhl Libre','Noto Serif Hebrew',serif;font-weight:400;color:var(--muted);margin-left:6px}
+  .vmpage .fl-sub{grid-column:1;color:var(--muted);font-size:12.5px}
+  .vmpage .fl-go{grid-column:2;grid-row:1/3;color:var(--accent);font-size:12.5px;font-weight:600;white-space:nowrap}
   .vmpage .en{font-size:15px;line-height:1.55;margin:4px 0 0;white-space:pre-wrap}
   .vmpage .yi{direction:rtl;text-align:right;font-family:'Frank Ruhl Libre','Noto Serif Hebrew','David',serif;font-size:17px;line-height:1.75;margin:10px 0 0;padding-top:10px;border-top:1px dashed var(--border);white-space:pre-wrap}
   .vmpage .rc{margin-top:8px;color:var(--muted);font-size:13px;font-style:italic}
@@ -154,6 +161,7 @@
   {% if counts.pending %}<span class="stat">{{ counts.pending }} transcribing</span>{% endif %}
   {% if busy %}<span class="working">working in background</span>{% endif %}
   <span class="sp"></span>
+  <a class="b quiet" href="{{ url_for('families_view') }}">Families</a>
   <form method="post" action="{{ url_for('api_vm_sync', back=1) }}" style="margin:0"><button type="submit" class="b quiet">Check now</button></form>
   <div class="more"><button type="button" class="b quiet" data-menu>⋯</button>
     <div class="menu" style="top:calc(100% + 6px);bottom:auto">
@@ -180,7 +188,8 @@
 <div class="day">{{ day_label(d) }}</div>
 <div class="group">
 {% endif %}
-{% set who = r.caller_name or fmt_phone(r.caller_number) or 'Unknown caller' %}
+{% set fam = fam_of.get(digits10(r.caller_number)) %}
+{% set who = r.caller_name or (fam and fam_label(fam)) or fmt_phone(r.caller_number) or 'Unknown caller' %}
 {% set nunder = (0 if r.handled else 1) + (0 if (r.handled or r.item_id) else 1) %}
 <article class="vm {% if r.handled %}done{% endif %}" id="vm-{{ r.id }}" data-id="{{ r.id }}"
   data-who="{{ who }}" data-num="{{ fmt_phone(r.caller_number) }}" data-when="{{ (r.ts or '')[:16].replace('T',' ') }}"
@@ -197,7 +206,7 @@
   <div class="row">
     <span class="dot"></span>
     <div>
-      <div class="who">{{ who }}{% if r.caller_name and r.caller_number %} <small>{{ fmt_phone(r.caller_number) }}</small>{% endif %}</div>
+      <div class="who">{{ who }}{% if fam and r.caller_name %} <small class="famtag">{{ fam.name_en }}{% if fam.area %} · {{ fam.area }}{% endif %}</small>{% elif r.caller_name and r.caller_number %} <small>{{ fmt_phone(r.caller_number) }}</small>{% endif %}</div>
       <div class="peek">{% if r.english or r.rc_text %}{{ (r.english or r.rc_text)|truncate(160) }}{% elif r.tstatus == 'new' %}<i>Transcribing…</i>{% endif %}</div>
       {% if r.tstatus in ('failed','short','empty','skipped') or r.item_id or r.dh_event_id or (r.assignee and q in ('', 'all')) %}
       <div class="tags">
@@ -267,6 +276,13 @@
     </div>
     {% endif %}
 
+    {% if fam %}{% set ks = fam_kids(fam) %}
+    <a class="famline" href="{{ url_for('family_view', fid=fam.id) }}">
+      <span class="fl-name">{{ fam.name_en }}{% if fam.name_yi %} <span class="fl-yi">{{ fam.name_yi }}</span>{% endif %}</span>
+      <span class="fl-sub">{% if fam.mother_en %}{{ fam.mother_en }} · {% endif %}{{ fam.area }}{% if ks %} · {{ ks|length }} {{ 'child' if ks|length == 1 else 'children' }}{% endif %}{% if fam.qbo_payee %} · {{ fam.qbo_payee }}{% endif %}</span>
+      <span class="fl-go">Family &rsaquo;</span>
+    </a>
+    {% elif r.caller_number %}<div class="famline none">{{ fmt_phone(r.caller_number) }} · not in the families list</div>{% endif %}
     {% if r.english %}<div class="en">{{ r.english }}</div>{% endif %}
     {% if r.yiddish %}<div class="yi">{{ r.yiddish }}</div>{% endif %}
     {% if not r.yiddish and r.rc_text and r.tstatus in ('new','failed') %}<div class="rc">{{ r.rc_text }}</div>{% endif %}

@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}{{ f.name_en }} · {{ hq_title }}{% endblock %}
+{% block body %}
+<div class="wrap fampage">
+<header class="top">
+  <div>
+    <div class="eyebrow"><a href="{{ url_for('families_view') }}" style="color:inherit;text-decoration:none">Families</a> · {{ f.area or f.city }}</div>
+    <h1>{{ f.name_en }} <span class="yi">{{ f.name_yi }}</span></h1>
+  </div>
+  <div class="right">
+    <nav class="tabs">
+      <a class="tab" href="{{ url_for('vm_view') }}">Voicemail</a>
+      <a class="tab on" href="{{ url_for('families_view') }}">Families</a>
+      <a class="tab" href="{{ url_for('board') }}">Board</a>
+    </nav>
+    <a class="logout" href="{{ url_for('account_view') }}">{{ session.get('name') or 'Account' }}</a>
+  </div>
+</header>
+
+<style>
+  .fampage h1 .yi{font-family:'Frank Ruhl Libre','Noto Serif Hebrew',serif;font-weight:400;color:var(--muted);font-size:.75em;margin-left:10px}
+  .fampage .cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media (max-width:700px){ .fampage .cols{grid-template-columns:1fr} }
+  .fampage .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px 18px;box-shadow:var(--shadow);margin-bottom:14px}
+  .fampage .card h2{font-family:'Playfair Display','Frank Ruhl Libre',Georgia,serif;font-size:16px;margin:0 0 10px}
+  .fampage dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0;font-size:14.5px}
+  .fampage dt{color:var(--muted);font-size:12px;letter-spacing:.05em;text-transform:uppercase;padding-top:3px}
+  .fampage dd{margin:0}
+  .fampage .heb{font-family:'Frank Ruhl Libre','Noto Serif Hebrew',serif;direction:rtl;unicode-bidi:plaintext}
+  .fampage table{width:100%;border-collapse:collapse;font-size:14px}
+  .fampage td,.fampage th{padding:6px 8px;border-top:1px solid var(--border);text-align:left;vertical-align:top}
+  .fampage th{color:var(--muted);font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;border-top:0}
+  .fampage .muted{color:var(--muted)}
+  .fampage .call{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:9px 0;border-top:1px solid var(--border);text-decoration:none;color:var(--ink)}
+  .fampage .call:first-of-type{border-top:0}
+  .fampage .call .t{color:var(--muted);font-size:12.5px;white-space:nowrap}
+  .fampage .call .p{grid-column:1/3;color:var(--muted);font-size:13.5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .fampage textarea{width:100%;min-height:90px;font:inherit;font-size:14.5px;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--ink);box-sizing:border-box}
+  .fampage .b{font:inherit;font-size:13px;padding:7px 14px;border-radius:999px;border:1px solid var(--border);background:var(--card);color:var(--ink);cursor:pointer;text-decoration:none}
+  .fampage .b.primary{background:var(--btn-bg);color:var(--btn-tx);border-color:var(--btn-bg)}
+  .fampage a.tel{color:inherit;text-decoration:none;border-bottom:1px dotted var(--muted)}
+</style>
+
+<div class="cols">
+<div>
+  <section class="card">
+    <h2>Household</h2>
+    <dl>
+      {% if f.mother_en or f.mother_yi %}<dt>Mother</dt><dd>{{ f.mother_en }}{% if f.mother_yi %} <span class="heb">{{ f.mother_yi }}</span>{% endif %}{% if f.mother_deceased %} <span class="muted">ז״ל{% if f.mother_yurtzeit %} · יארצייט {{ f.mother_yurtzeit }}{% endif %}</span>{% endif %}</dd>{% endif %}
+      {% if f.father_en or f.father_yi %}<dt>Father</dt><dd>{{ f.father_en }}{% if f.father_yi %} <span class="heb">{{ f.father_yi }}</span>{% endif %}{% if f.father_deceased %} <span class="muted">ז״ל{% if f.father_yurtzeit %} · יארצייט {{ f.father_yurtzeit }}{% endif %}</span>{% endif %}</dd>{% endif %}
+      <dt>Address</dt><dd>{{ f.street }}{% if f.unit %}, {{ f.unit }}{% endif %}<br>{{ f.city }}{% if f.state %}, {{ f.state }}{% endif %} {{ f.zip }}</dd>
+      {% if f.home_phone %}<dt>Home</dt><dd><a class="tel" href="tel:{{ f.home_phone }}">{{ fmt_phone(f.home_phone) }}</a></dd>{% endif %}
+      {% if f.mobile_phone and f.mobile_phone != f.home_phone %}<dt>Mobile</dt><dd><a class="tel" href="tel:{{ f.mobile_phone }}">{{ fmt_phone(f.mobile_phone) }}</a></dd>{% endif %}
+      {% if f.chasidus %}<dt>Chasidus</dt><dd class="heb" style="text-align:left">{{ f.chasidus }}</dd>{% endif %}
+      {% if f.qbo_payee %}<dt>QBO payee</dt><dd>{{ f.qbo_payee }}</dd>{% endif %}
+      <dt>CRM id</dt><dd class="muted">{{ f.die_id }}{% if f.source %} · {{ f.source }}{% endif %}</dd>
+      {% if f.crm_notes %}<dt>CRM notes</dt><dd>{{ f.crm_notes }}</dd>{% endif %}
+      {% if f.mayer_comments %}<dt>Mrs. Mayer</dt><dd>{{ f.mayer_comments }}</dd>{% endif %}
+      {% if f.status_changes %}<dt>2025</dt><dd>{{ f.status_changes }}</dd>{% endif %}
+    </dl>
+  </section>
+
+  <section class="card">
+    <h2>HQ notes</h2>
+    <form method="post" action="{{ url_for('family_notes', fid=f.id) }}">
+      <textarea name="hq_notes" placeholder="Anything we learn on the line that the CRM doesn't hold yet…">{{ f.hq_notes or '' }}</textarea>
+      <div style="margin-top:8px"><button type="submit" class="b primary">Save</button></div>
+    </form>
+  </section>
+</div>
+
+<div>
+  <section class="card">
+    <h2>Children{% if kids %} · {{ kids|length }}{% endif %}</h2>
+    {% if kids %}
+    <table>
+      <tr><th>Name</th><th>Age</th><th>Bar/Bas Mitzvah</th><th></th></tr>
+      {% for k in kids %}
+      <tr>
+        <td>{{ k.name_en }}{% if k.name_yi %} <span class="heb muted">{{ k.name_yi }}</span>{% endif %}{% if k.married %} <span class="muted">· married{% if k.spouse %} ({{ k.spouse }}){% endif %}</span>{% endif %}</td>
+        <td>{{ k.age or '' }}</td>
+        <td class="muted">{{ k.bm or '' }}{% if k.bm_heb %} <span class="heb">{{ k.bm_heb }}</span>{% endif %}</td>
+        <td class="muted">{{ k.school or '' }}{% if k.grade %} · {{ k.grade }}{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}<p class="muted">None on file.</p>{% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Calls on the line{% if calls %} · {{ calls|length }}{% endif %}</h2>
+    {% for c in calls %}
+    <a class="call" href="{{ url_for('vm_view', show='all', q='all') }}#vm-{{ c.id }}">
+      <span>{{ fmt_phone(c.caller_number) }}{% if c.item_id %} <span class="muted">· task</span>{% endif %}</span>
+      <span class="t">{{ (c.ts or '')[:16].replace('T',' ') }}{% if c.duration %} · {{ c.duration }}s{% endif %}</span>
+      {% if c.english %}<span class="p">{{ c.english }}</span>{% endif %}
+    </a>
+    {% else %}<p class="muted">No voicemails from this family's numbers.</p>{% endfor %}
+  </section>
+</div>
+</div>
+</div>
+{% endblock %}
