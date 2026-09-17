@@ -452,9 +452,13 @@ def ensure_schema(con):
         " received_at TEXT)")
     con.execute("CREATE INDEX IF NOT EXISTS vm_open ON voicemails(handled, ts)")
     cols = [r[1] for r in con.execute("PRAGMA table_info(voicemails)")]
-    for c in ("dh_event_id TEXT", "dh_project TEXT", "dh_url TEXT"):
+    for c in ("dh_event_id TEXT", "dh_project TEXT", "dh_url TEXT",
+              "notified INTEGER NOT NULL DEFAULT 0"):
         if c.split()[0] not in cols:
             con.execute("ALTER TABLE voicemails ADD COLUMN " + c)
+    if "notified" not in cols:
+        # everything already on the board was heard about some other way
+        con.execute("UPDATE voicemails SET notified=1")
     # file what is already in: short recordings not yet transcribed, and transcripts with nothing in them
     con.execute("UPDATE voicemails SET tstatus='short' WHERE tstatus IN ('new','failed')"
                 " AND duration IS NOT NULL AND duration <= ?", (SHORT_SEC,))

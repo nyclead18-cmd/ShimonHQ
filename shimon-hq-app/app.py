@@ -15,6 +15,7 @@ import maps
 import pulse
 import wa
 import vm
+import twofa
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(BASE, "hq.db"))
@@ -149,6 +150,63 @@ def _hrs(mins):
 
 HQ_USER = os.environ.get("HQ_USER", "shimon")
 HQ_PASSWORD = os.environ.get("HQ_PASSWORD", "changeme")
+
+
+# ---------- whose HQ is this ----------
+# One codebase, several boards. Each instance is named for its owner (HQ_NAME) and
+# may carry its own mark: static/brand/<slug>/ holds a logo, icons and manifest, and
+# anything missing there falls back to the house files in static/. The slug is
+# HQ_BRAND, else the owner's first name in lower case ("Joel Landau" -> joel).
+
+def hq_title():
+    lt = (os.environ.get("HQ_LOGIN_TITLE") or "").strip()
+    if lt:
+        return lt
+    nm = (os.environ.get("HQ_NAME") or "").strip()
+    if nm:
+        first = nm.split()[0]
+        return ("%s' HQ" % first) if first.endswith("s") else ("%s's HQ" % first)
+    return "Shimon's HQ"
+
+
+def hq_short():
+    """Home-screen label: short and unpossessive."""
+    nm = (os.environ.get("HQ_NAME") or "Shimon").strip().split()[0]
+    return "%s HQ" % nm
+
+
+BRAND = (os.environ.get("HQ_BRAND") or (os.environ.get("HQ_NAME") or "").strip().split(" ")[0]).lower()
+BRAND = re.sub(r"[^a-z0-9_-]", "", BRAND)
+
+
+def brand_path(name):
+    """Absolute path of a branded static file, or the house one."""
+    if BRAND:
+        p = os.path.join(BASE, "static", "brand", BRAND, name)
+        if os.path.exists(p):
+            return p
+    return os.path.join(BASE, "static", name)
+
+
+def brand_url(name):
+    return "/brand/%s" % name
+
+
+def _theme_color():
+    try:
+        with open(brand_path("manifest.webmanifest")) as f:
+            return json.load(f).get("theme_color") or "#1F3A5F"
+    except Exception:
+        return "#1F3A5F"
+
+
+THEME_COLOR = _theme_color()
+
+
+@app.context_processor
+def inject_brand():
+    return {"brand_url": brand_url, "hq_title": hq_title(), "hq_short": hq_short(),
+            "theme_color": THEME_COLOR}
 
 STATUSES = ("open", "waiting", "done")
 
@@ -1036,8 +1094,35 @@ def login_required(f):
             if request.method == "POST" or request.path.startswith("/api/"):
                 return jsonify(error="login required"), 401
             return redirect(url_for("login"))
+        if session.get("needs_2fa") and not request.path.startswith(("/account/2fa", "/api/")):
+            return redirect(url_for("twofa_setup"))
         return f(*a, **k)
     return wrapped
+
+
+REQUIRE_2FA = (os.environ.get("HQ_REQUIRE_2FA") or "").lower() in ("1", "true", "yes")
+
+
+def _finish_login(con, row, remember_device=False):
+    """Everything that happens once the person is proven: the session, and the
+    trusted-device cookie if they asked for one."""
+    session.clear()
+    session["user"] = row["username"]
+    session["uid"] = row["id"]
+    session["name"] = row["display_name"]
+    session["admin"] = bool(row["is_admin"])
+    session.permanent = True
+    g.api_uid = 0
+    if REQUIRE_2FA and uset(con, "totp_on", row["id"]) != "1":
+        session["needs_2fa"] = True
+    resp = redirect(url_for(
+        "today_view" if display_mode(con, row["id"]) == "simple" else "board"))
+    if remember_device and uset(con, "totp_on", row["id"]) == "1":
+        resp.set_cookie("hq_trust", twofa.trust_token(app.secret_key, row["id"],
+                                                      uset(con, "totp_secret", row["id"])),
+                        max_age=30 * 86400, httponly=True, secure=request.is_secure,
+                        samesite="Lax")
+    return resp
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -1049,28 +1134,20 @@ def login():
         con = db()
         row = con.execute("SELECT * FROM users WHERE username=?", (name,)).fetchone()
         if row and check_password_hash(row["pw_hash"], request.form.get("password", "")):
-            session.clear()
-            session["user"] = row["username"]
-            session["uid"] = row["id"]
-            session["name"] = row["display_name"]
-            session["admin"] = bool(row["is_admin"])
-            session.permanent = True
-            g.api_uid = 0
-            return redirect(url_for(
-                "today_view" if display_mode(con, row["id"]) == "simple" else "board"))
+            if uset(con, "totp_on", row["id"]) == "1":
+                # a remembered phone skips the code; anyone else proves the second step
+                if twofa.trust_ok(app.secret_key, request.cookies.get("hq_trust", ""),
+                                  row["id"], uset(con, "totp_secret", row["id"])):
+                    return _finish_login(con, row)
+                session.clear()
+                session["pre_uid"] = row["id"]
+                session["pre_at"] = int(_time.time())
+                return redirect(url_for("login_2fa"))
+            return _finish_login(con, row)
         # one message for both cases - never reveal which usernames exist
         error = "Wrong username or password."
-    # The sign-in card is named for whoever owns the instance: HQ_LOGIN_TITLE
-    # wins outright, else the first name from HQ_NAME ("Joel Landau" signs in
-    # at "Joel's HQ"), else the house default.
-    lt = (os.environ.get("HQ_LOGIN_TITLE") or "").strip()
-    if not lt:
-        nm = (os.environ.get("HQ_NAME") or "").strip()
-        if nm:
-            first = nm.split()[0]
-            lt = ("%s' HQ" % first) if first.endswith("s") else ("%s's HQ" % first)
-        else:
-            lt = "Shimon's HQ"
+    # The sign-in card is named for whoever owns the instance (see hq_title).
+    lt = hq_title()
     sub = os.environ.get("HQ_TAGLINE") or \
         ("Pinta · Ohr Chaim · Personal" if lt == "Shimon's HQ" else "")
     return render_template("login.html", error=error,
@@ -1081,6 +1158,167 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for("login"))
+
+
+# ---------- two-step sign-in ----------
+# Password first, then a six-digit code from the phone. The half-signed-in state
+# lives in the session as pre_uid for five minutes and grants nothing else. Wrong
+# codes back off: five misses and the next try waits, doubling each time, so a
+# guessed six digits is not a realistic attack even from a script.
+
+def _pre_row(con):
+    uid, at = session.get("pre_uid"), session.get("pre_at", 0)
+    if not uid or _time.time() - at > 300:
+        return None
+    return con.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+
+
+def _fail_wait(con, uid):
+    fails = int(uset(con, "totp_fails", uid, "0") or 0)
+    last = int(uset(con, "totp_fail_at", uid, "0") or 0)
+    if fails < 5:
+        return 0
+    wait = min(60 * 2 ** (fails - 5), 3600)
+    return max(0, last + wait - int(_time.time()))
+
+
+def _note_fail(con, uid):
+    uset_put(con, "totp_fails", str(int(uset(con, "totp_fails", uid, "0") or 0) + 1), uid)
+    uset_put(con, "totp_fail_at", str(int(_time.time())), uid)
+    commit_retry(con)
+
+
+def _clear_fails(con, uid):
+    uset_del(con, ("totp_fails", "totp_fail_at"), uid)
+
+
+def _check_second_factor(con, uid, code):
+    """A TOTP code or a recovery code. Returns True and consumes what it used."""
+    code = (code or "").strip()
+    secret = uset(con, "totp_secret", uid)
+    if secret:
+        last = int(uset(con, "totp_last", uid, "-1") or -1)
+        ctr = twofa.verify(secret, code, last_counter=last)
+        if ctr is not None:
+            uset_put(con, "totp_last", str(ctr), uid)
+            return True
+    if "-" in code or len(code.replace(" ", "")) == 8:
+        try:
+            hashes = json.loads(uset(con, "totp_recovery", uid, "[]") or "[]")
+        except ValueError:
+            hashes = []
+        left = twofa.use_recovery(hashes, code)
+        if left is not None:
+            uset_put(con, "totp_recovery", json.dumps(left), uid)
+            return True
+    return False
+
+
+@app.route("/login/2fa", methods=["GET", "POST"])
+def login_2fa():
+    con = db()
+    row = _pre_row(con)
+    if not row:
+        return redirect(url_for("login"))
+    error = None
+    if request.method == "POST":
+        wait = _fail_wait(con, row["id"])
+        if wait:
+            error = "Too many tries. Wait %d seconds." % wait
+        elif _check_second_factor(con, row["id"], request.form.get("code")):
+            _clear_fails(con, row["id"])
+            commit_retry(con)
+            return _finish_login(con, row, remember_device=bool(request.form.get("remember")))
+        else:
+            _note_fail(con, row["id"])
+            error = "That code did not work."
+    return render_template("twofa.html", mode="login", error=error,
+                           login_title=hq_title(), wait=_fail_wait(con, row["id"]))
+
+
+@app.route("/account/2fa")
+@login_required
+def twofa_setup():
+    """Set up, or look at, two-step sign-in. A fresh secret is minted here and held
+    as pending until a code from the phone proves the scan worked."""
+    con = db()
+    on = uset(con, "totp_on") == "1"
+    ctx = dict(mode="setup", on=on, required=REQUIRE_2FA and not on,
+               codes_left=len(json.loads(uset(con, "totp_recovery", default="[]") or "[]")),
+               login_title=hq_title())
+    if not on:
+        secret = uset(con, "totp_pending")
+        if not secret:
+            secret = twofa.new_secret()
+            uset_put(con, "totp_pending", secret)
+            commit_retry(con)
+        uri = twofa.otpauth_uri(secret, session.get("user", ""), hq_title())
+        ctx.update(secret=twofa.pretty_secret(secret), qr=twofa.qr_svg(uri), uri=uri)
+    return render_template("twofa.html", **ctx)
+
+
+@app.route("/account/2fa/confirm", methods=["POST"])
+@login_required
+def twofa_confirm():
+    con = db()
+    secret = uset(con, "totp_pending")
+    if not secret:
+        return redirect(url_for("twofa_setup"))
+    ctr = twofa.verify(secret, request.form.get("code"))
+    if ctr is None:
+        uri = twofa.otpauth_uri(secret, session.get("user", ""), hq_title())
+        return render_template("twofa.html", mode="setup", on=False, required=REQUIRE_2FA,
+                               secret=twofa.pretty_secret(secret), qr=twofa.qr_svg(uri), uri=uri,
+                               login_title=hq_title(), codes_left=0,
+                               error="That code did not match. Check the phone's clock and try the next one.")
+    codes = twofa.new_recovery_codes()
+    uset_put(con, "totp_secret", secret)
+    uset_put(con, "totp_on", "1")
+    uset_put(con, "totp_last", str(ctr))
+    uset_put(con, "totp_recovery", json.dumps([twofa.hash_code(c) for c in codes]))
+    uset_del(con, ("totp_pending", "totp_fails", "totp_fail_at"))
+    commit_retry(con)
+    session.pop("needs_2fa", None)
+    return render_template("twofa.html", mode="codes", codes=codes, login_title=hq_title(),
+                           just_on=True)
+
+
+@app.route("/account/2fa/codes", methods=["POST"])
+@login_required
+def twofa_new_codes():
+    """Fresh recovery codes; the old ones stop working. Password required."""
+    from werkzeug.security import check_password_hash
+    con = db()
+    row = user_row(con)
+    if not row or not check_password_hash(row["pw_hash"], request.form.get("password", "")):
+        return redirect(url_for("twofa_setup", error="pw"))
+    codes = twofa.new_recovery_codes()
+    uset_put(con, "totp_recovery", json.dumps([twofa.hash_code(c) for c in codes]))
+    commit_retry(con)
+    return render_template("twofa.html", mode="codes", codes=codes, login_title=hq_title())
+
+
+@app.route("/account/2fa/off", methods=["POST"])
+@login_required
+def twofa_off():
+    """Turning it off takes the password and a current code - a stolen open session
+    must not be enough to strip the lock."""
+    from werkzeug.security import check_password_hash
+    con = db()
+    row = user_row(con)
+    if REQUIRE_2FA:
+        abort(403)
+    ok = row and check_password_hash(row["pw_hash"], request.form.get("password", ""))
+    if ok and not _check_second_factor(con, row["id"], request.form.get("code")):
+        ok = False
+    if not ok:
+        return redirect(url_for("twofa_setup", error="off"))
+    uset_del(con, ("totp_secret", "totp_on", "totp_last", "totp_recovery", "totp_pending",
+                   "totp_fails", "totp_fail_at"))
+    commit_retry(con)
+    resp = redirect(url_for("account_view"))
+    resp.delete_cookie("hq_trust")
+    return resp
 
 
 # ---------- pages ----------
@@ -2258,9 +2496,9 @@ def inject_identity():
 
 @app.context_processor
 def inject_logo():
-    """A board wears its owner's mark when one is installed beside the code -
-    Joel's carries the L311; a board without a logo file simply goes without."""
-    return {"has_logo": os.path.exists(os.path.join(BASE, "static", "logo.png"))}
+    """A board wears its owner's mark when one is installed beside the code
+    (static/brand/<slug>/logo.png, else static/logo.png); without either it goes bare."""
+    return {"has_logo": os.path.exists(brand_path("logo.png"))}
 
 
 @app.context_processor
@@ -2919,7 +3157,8 @@ def _int_or_none(v):
 # describing work somebody was not allowed to read.
 
 NOTIFY_KINDS = {"notes": "Someone responds on a shared task",
-                "done": "Someone closes a shared task"}
+                "done": "Someone closes a shared task",
+                "vm": "A new voicemail comes in on the Shefa Yoel line"}
 
 
 def wants(con, uid, kind):
@@ -2992,6 +3231,7 @@ def account_view():
                            api_token=api_token_for(con),
                            notify_kinds=NOTIFY_KINDS,
                            notify_on={k: wants(con, me(), k) for k in NOTIFY_KINDS},
+                           twofa_on=uset(con, "totp_on") == "1",
                            feed_url=request.url_root.rstrip("/")
                            + url_for("ics_feed", token=_feed_token(con)))
 
@@ -4503,8 +4743,21 @@ def share_section(sec_id):
 
 @app.route("/manifest.webmanifest")
 def manifest():
-    return send_from_directory(os.path.join(BASE, "static"), "manifest.webmanifest",
+    p = brand_path("manifest.webmanifest")
+    return send_from_directory(os.path.dirname(p), os.path.basename(p),
                                mimetype="application/manifest+json")
+
+
+@app.route("/brand/<path:name>")
+def brand_file(name):
+    """Logo, icons, favicon: this instance's own if it has one, the house set if not."""
+    if "/" in name or name.startswith("."):
+        abort(404)
+    p = brand_path(name)
+    if not os.path.exists(p):
+        abort(404)
+    return send_from_directory(os.path.dirname(p), os.path.basename(p), conditional=True,
+                               max_age=86400)
 
 
 @app.route("/sw.js")
@@ -4786,16 +5039,52 @@ def vm_work(date_from=None, budget=240):
     try:
         if vm.mirror_configured():
             vm.mirror_sync(con, FILES_DIR, log=app.logger.info)
-            return
-        vm.sync(con, FILES_DIR, log=app.logger.info, date_from=date_from, transcribe=False)
-        while _time.time() - t0 < budget:
-            if not vm.transcribe_pending(con, FILES_DIR, log=app.logger.info, max_n=3):
-                break
+        else:
+            vm.sync(con, FILES_DIR, log=app.logger.info, date_from=date_from, transcribe=False)
+            while _time.time() - t0 < budget:
+                if not vm.transcribe_pending(con, FILES_DIR, log=app.logger.info, max_n=3):
+                    break
+        vm_notify(con)
     except Exception as e:
         app.logger.warning("vm work failed: %s", e)
     finally:
         con.close()
         _vm_lock.release()
+
+
+def vm_notify(con):
+    """One push per real voicemail, once its transcript is in, to everyone who keeps
+    the voicemail preference on. Short and empty messages do not buzz anybody, and
+    anything older than half a day (a backfill) is marked seen without a sound.
+    The UPDATE is the claim, so two gunicorn workers cannot both send."""
+    cutoff = (datetime.now() - timedelta(hours=12)).isoformat(timespec="seconds")
+    con.execute("UPDATE voicemails SET notified=1 WHERE notified=0 AND tstatus<>'new'"
+                " AND (received_at IS NULL OR received_at < ? OR tstatus IN ('short','empty','skipped'))",
+                (cutoff,))
+    commit_retry(con)
+    rows = con.execute("SELECT * FROM voicemails WHERE notified=0 AND tstatus IN ('done','failed')"
+                       " ORDER BY ts").fetchall()
+    if not rows:
+        return
+    who = [r[0] for r in con.execute("SELECT id FROM users")]
+    who = [u for u in who if wants(con, u, "vm")]
+    for r in rows:
+        cur = con.execute("UPDATE voicemails SET notified=1 WHERE id=? AND notified=0", (r["id"],))
+        commit_retry(con)
+        if not cur.rowcount or not who:
+            continue
+        name = r["caller_name"] or vm.fmt_phone(r["caller_number"]) or "Unknown caller"
+        secs = int(r["duration"] or 0)
+        title = "Voicemail \u00b7 %s" % name
+        if r["english"]:
+            body = _short(r["english"], 140)
+        else:
+            body = "%d:%02d \u00b7 transcript not available" % (secs // 60, secs % 60)
+        for uid in who:
+            try:
+                send_push(title, body, "/vm#vm-%d" % r["id"], uid=uid)
+            except Exception as e:
+                app.logger.warning("vm push to %s failed: %s", uid, e)
 
 
 def vm_tick():
