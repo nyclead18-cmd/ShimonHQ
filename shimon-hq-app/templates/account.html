@@ -121,6 +121,20 @@
 </section>
 {% endif %}
 
+{% if who and who.is_admin %}
+<section class="card acct">
+  <div class="sec-head"><h2>Voicemail routing</h2>
+    <span class="pill {{ 'done' if autoroute else 'waiting' }}" style="cursor:default">{{ 'On' if autoroute else 'Off' }}</span></div>
+  <form method="post" action="{{ url_for('set_autoroute') }}" class="stack">
+    <label class="checkrow"><input type="checkbox" name="on" {% if autoroute %}checked{% endif %} onchange="this.form.submit()">
+      Hand new voicemails to people automatically by what they are about</label>
+  </form>
+  <p class="caveat">Off: everything lands on the Desk and you pass messages on with the <b>To</b> menu.
+  On: family cases, charity, issues and thank-yous go to Mrs. Hartman's queue, money to Toby's; the rest stays on the Desk.
+  Either way the read step still titles each message and builds its checklist.</p>
+</section>
+{% endif %}
+
 {% if feed_url %}
 <section class="card acct">
   <div class="sec-head"><h2>Your calendar feed</h2></div>
