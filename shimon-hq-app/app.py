@@ -1281,6 +1281,19 @@ def set_require_2fa():
     return redirect(url_for("account_view"))
 
 
+@app.route("/account/autoroute", methods=["POST"])
+@login_required
+def set_autoroute():
+    """Admin switch: route new voicemails to people by kind, or leave them all on the desk."""
+    if not session.get("admin"):
+        abort(403)
+    con = db()
+    con.execute("INSERT INTO settings(k, v) VALUES('vm_autoroute', ?)"
+                " ON CONFLICT(k) DO UPDATE SET v=excluded.v", ("1" if request.form.get("on") else "0",))
+    commit_retry(con)
+    return redirect(url_for("account_view"))
+
+
 @app.route("/account/2fa")
 @login_required
 def twofa_setup():
@@ -3308,6 +3321,7 @@ def _account_page(con, **extra):
                twofa_on=uset(con, "totp_on") == "1",
                require_2fa=require_2fa(con), require_2fa_env=_REQUIRE_2FA_ENV,
                twofa_status={r["id"]: uset(con, "totp_on", r["id"]) == "1" for r in folk},
+               autoroute=autoroute_on(con), route_default=ROUTE_DEFAULT_USER, kind_label=vm.KIND_LABEL,
                feed_url=request.url_root.rstrip("/") + url_for("ics_feed", token=_feed_token(con)))
     ctx.update(extra)
     return render_template("account.html", **ctx)
@@ -5280,9 +5294,20 @@ def _route_target(con, kind):
     return row["id"] if row else None
 
 
+def autoroute_on(con):
+    """Admin switch: hand new voicemails to people by kind. Off by default - the desk
+    sees everything and Shimon delegates by hand with the To menu."""
+    return _setting(con, "vm_autoroute", "0") == "1"
+
+
 def vm_route(con):
     """Put each freshly read, still-unassigned message in the right queue - once. A
     message somebody already moved by hand is left alone."""
+    if not autoroute_on(con):
+        # mark as seen so a later switch-on does not dump the backlog on anyone
+        con.execute("UPDATE voicemails SET routed=1 WHERE routed=0 AND read_json IS NOT NULL")
+        con.commit()
+        return
     rows = con.execute("SELECT id, kind FROM voicemails WHERE read_json IS NOT NULL AND routed=0"
                        " AND assignee IS NULL AND tstatus='done'"
                        " AND id NOT IN (SELECT vm_id FROM vm_handled)").fetchall()
