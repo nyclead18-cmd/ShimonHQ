@@ -72,6 +72,10 @@
   .vmup .row-b{display:flex;justify-content:flex-end;gap:8px;margin-top:6px}
   .vmup .b{font:inherit;font-size:14px;padding:8px 16px;border-radius:999px;border:1px solid var(--ink);background:var(--ink);color:var(--card);cursor:pointer}
   .vmup .b.quiet{background:transparent;color:var(--ink);border-color:var(--border)}
+  .vmdraft{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:-6px 0 14px;padding:10px 14px;border-radius:12px;background:color-mix(in srgb,var(--accent) 10%,var(--card));border:1px solid color-mix(in srgb,var(--accent) 35%,var(--border));font-size:14px}
+  .vmdraft span{flex:1;min-width:160px}
+  .vmdraft .b{font:inherit;font-size:13px;padding:6px 14px;border-radius:999px;border:1px solid var(--ink);background:var(--ink);color:var(--card);cursor:pointer}
+  .vmdraft .b.quiet{background:transparent;color:var(--ink);border-color:var(--border)}
   .vmpage .queues.lines{margin-bottom:8px}
   .vmpage .tag.k-thank_you{background:var(--pill-done-bg);color:var(--pill-done-tx);border-color:transparent}
   .vmpage .tag.k-issue{background:var(--pill-open-bg);color:var(--pill-open-tx);border-color:transparent}
@@ -203,9 +207,15 @@
 </div>
 {% endif %}
 
+<div id="vmdraft" class="vmdraft" hidden>
+  <span>Recording not added yet: <b id="vmdraft-name"></b></span>
+  <button type="button" class="b" onclick="document.getElementById('vmup').showModal()">Continue</button>
+  <button type="button" class="b quiet" id="vmdraft-drop">Discard</button>
+</div>
 <dialog id="vmup" class="vmup">
-  <form method="post" action="{{ url_for('vm_upload') }}" enctype="multipart/form-data">
+  <form method="post" action="{{ url_for('vm_upload') }}" enctype="multipart/form-data" id="vmup-form">
     <h3>Add a recording</h3>
+    <p class="hint" id="vmup-kept" hidden>Picked earlier and kept for you: <b></b></p>
     <p class="hint">A voicemail forwarded by email, a voice note — it gets transcribed and read like the rest, with the file kept for reference.</p>
     <label>Audio file<input type="file" name="file" accept="audio/*,.mp3,.m4a,.wav,.ogg,.opus,.amr" required></label>
     <div class="two">
@@ -515,6 +525,34 @@
   }
 
   fileAway.slide = slideAway;
+
+  // ---- Add recording: what you picked survives a refresh or a walk away. The file
+  // and the fields sit in IndexedDB on this phone until the upload actually lands.
+  (function(){
+    var form = document.getElementById('vmup-form'); if (!form) return;
+    var fileIn = form.querySelector('input[type=file]'), fields = ['who', 'number', 'line', 'when'];
+    var banner = document.getElementById('vmdraft'), kept = document.getElementById('vmup-kept');
+    function idb(){ return new Promise(function(res, rej){ var o = indexedDB.open('hq-vm', 1); o.onupgradeneeded = function(){ o.result.createObjectStore('draft'); }; o.onsuccess = function(){ res(o.result); }; o.onerror = function(){ rej(o.error); }; }); }
+    function put(v){ return idb().then(function(db){ return new Promise(function(res){ var tx = db.transaction('draft', 'readwrite'); tx.objectStore('draft').put(v, 'rec'); tx.oncomplete = res; tx.onerror = res; }); }).catch(function(){}); }
+    function get(){ return idb().then(function(db){ return new Promise(function(res){ var r = db.transaction('draft').objectStore('draft').get('rec'); r.onsuccess = function(){ res(r.result); }; r.onerror = function(){ res(null); }; }); }).catch(function(){ return null; }); }
+    function drop(){ return idb().then(function(db){ return new Promise(function(res){ var tx = db.transaction('draft', 'readwrite'); tx.objectStore('draft').delete('rec'); tx.oncomplete = res; tx.onerror = res; }); }).catch(function(){}); }
+    function snapshot(){ var d = {file: fileIn.files[0] || null, name: fileIn.files[0] ? fileIn.files[0].name : ''}; fields.forEach(function(k){ d[k] = form.elements[k].value; }); if (!d.file && !d.who && !d.number) { drop(); return; } put(d); }
+    fileIn.addEventListener('change', snapshot);
+    fields.forEach(function(k){ form.elements[k].addEventListener('input', snapshot); });
+    form.addEventListener('submit', function(){ sessionStorage.setItem('vm_uploading', '1'); });
+    if (new URLSearchParams(location.search).get('added')) { drop(); sessionStorage.removeItem('vm_uploading'); }
+    get().then(function(d){
+      if (!d) return;
+      fields.forEach(function(k){ if (d[k]) form.elements[k].value = d[k]; });
+      if (d.file) {
+        try { var dt = new DataTransfer(); dt.items.add(d.file); fileIn.files = dt.files; } catch (e) {}
+        kept.querySelector('b').textContent = d.name; kept.hidden = false;
+      }
+      document.getElementById('vmdraft-name').textContent = d.name || (d.who || 'details filled in');
+      banner.hidden = false;
+    });
+    document.getElementById('vmdraft-drop').addEventListener('click', function(){ drop().then(function(){ banner.hidden = true; form.reset(); kept.hidden = true; }); });
+  })();
 
   // ---- menus ----
   function closeMenus(){ document.querySelectorAll('.more.open').forEach(function(m){ m.classList.remove('open'); }); }
