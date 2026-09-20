@@ -5209,7 +5209,13 @@ def reminder_tick():
 
 
 _vm_last = [0.0]
+# how often the line is checked. RingCentral allows this call ten times a minute per
+# user, so once a minute is comfortable; VM_EVERY_SEC overrides.
+VM_EVERY = int(os.environ.get("VM_EVERY_SEC") or 60)
 _vm_lock = threading.Lock()
+
+
+app.logger.setLevel("INFO")
 
 
 def vm_work(date_from=None, budget=240):
@@ -5384,9 +5390,9 @@ def vm_notify(con):
 
 
 def vm_tick():
-    """Every five minutes: anything new on the voicemail line comes in and goes
+    """Every minute (VM_EVERY_SEC): anything new on the voicemail line comes in and goes
     to Yiddish Labs. Own connection - this runs off the request thread."""
-    if not vm.configured() or _time.time() - _vm_last[0] < 300:
+    if not vm.configured() or _time.time() - _vm_last[0] < VM_EVERY:
         return
     _vm_last[0] = _time.time()
     vm_work()
