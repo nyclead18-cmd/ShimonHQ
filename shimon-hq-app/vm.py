@@ -270,22 +270,32 @@ def lines():
 
 def line_labels(con=None):
     """{extension id: label}. On a mirror (Joel's HQ) the labels come from the source
-    HQ, kept in settings; here they come from the env."""
+    HQ, kept in settings; here they come from the env. Recordings dropped in by hand
+    ('manual') get their own label once any exist."""
+    out = {}
     if con is not None:
         try:
             row = con.execute("SELECT v FROM settings WHERE k='vm_lines'").fetchone()
             if row and row[0]:
-                d = json.loads(row[0])
-                if d:
-                    return d
+                out = json.loads(row[0]) or {}
+        except Exception:
+            out = {}
+    if not out and not mirror_configured() and configured():
+        try:
+            out = {l["id"]: l["label"] for l in lines()}
+        except Exception:
+            out = {}
+    if con is not None:
+        try:
+            if con.execute("SELECT 1 FROM voicemails WHERE ext='manual' LIMIT 1").fetchone():
+                row = con.execute("SELECT v FROM settings WHERE k='vm_manual_label'").fetchone()
+                if not out:
+                    out = {"~": DEFAULT_LINE}
+                out = dict(out)
+                out["manual"] = (row[0] if row and row[0] else "Forwarded")
         except Exception:
             pass
-    if mirror_configured() or not configured():
-        return {}
-    try:
-        return {l["id"]: l["label"] for l in lines()}
-    except Exception:
-        return {}
+    return out
 
 
 def line_label(ext, labels):

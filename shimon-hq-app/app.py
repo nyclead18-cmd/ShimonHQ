@@ -6399,6 +6399,45 @@ def _vm_send_audio(row, download=False):
                                as_attachment=download, download_name=nice)
 
 
+@app.route("/vm/upload", methods=["POST"])
+@login_required
+def vm_upload():
+    """A recording that did not come through RingCentral - a voicemail somebody
+    forwarded by email, a WhatsApp voice note - dropped into the same inbox. It gets
+    transcribed, read and titled like the rest; the file is kept as the reference."""
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return redirect(url_for("vm_view"))
+    ext = (f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else "mp3")
+    if ext not in ("mp3", "wav", "m4a", "ogg", "opus", "aac", "mp4", "amr"):
+        ext = "mp3"
+    who = (request.form.get("who") or "").strip()[:60]
+    num = re.sub(r"[^\d+]", "", request.form.get("number") or "")[:20]
+    label = (request.form.get("line") or "").strip()[:40] or "Forwarded"
+    when = (request.form.get("when") or "").strip()
+    try:
+        ts = (datetime.fromisoformat(when) if when else _now_local()).replace(tzinfo=None).isoformat(timespec="seconds")
+    except ValueError:
+        ts = _now_local().replace(tzinfo=None).isoformat(timespec="seconds")
+    uid = uuid.uuid4().hex[:10]
+    vm_dir = os.path.join(FILES_DIR, "vm")
+    os.makedirs(vm_dir, exist_ok=True)
+    stored = "%s_%s_up%s.%s" % (ts.replace("-", "").replace(":", "")[:13].replace("T", "_"),
+                                vm._safe(who or num or "forwarded"), uid, ext)
+    f.save(os.path.join(vm_dir, stored))
+    con = db()
+    con.execute("INSERT INTO settings(k, v) VALUES('vm_manual_label', ?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", (label,))
+    cur = con.execute(
+        "INSERT INTO voicemails(rc_id, ext, ts, caller_number, caller_name, stored_name, tstatus,"
+        " received_at, notified, routed) VALUES(?,?,?,?,?,?,'new',?,1,1)",
+        ("up_" + uid, "manual", ts, num, who, stored, datetime.now().isoformat(timespec="seconds")))
+    commit_retry(con)
+    vid = cur.lastrowid
+    # transcribe now rather than at the next tick
+    threading.Thread(target=vm_work, kwargs={"budget": 240}, daemon=True).start()
+    return redirect(url_for("vm_view", show="all", q="all", _anchor="vm-%d" % vid))
+
+
 @app.route("/vm/<int:vid>/audio")
 @login_required
 def vm_audio(vid):
