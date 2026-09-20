@@ -155,6 +155,20 @@
   .vmpage .sheet{display:none;margin:10px 0 4px;padding:12px;border-radius:12px;background:var(--row);border:1px solid var(--border)}
   .vmpage .sheet.open{display:block}
   .vmpage .sheet form{display:flex;gap:8px;flex-wrap:wrap;align-items:end}
+  .vmpage .sheet.tx .tpls{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+  .vmpage .sheet.tx .tpl{font:inherit;font-size:12.5px;padding:5px 11px;border-radius:999px;border:1px solid var(--border);background:var(--card);color:var(--ink);cursor:pointer}
+  .vmpage .sheet.tx .tpl.on{border-color:var(--ink)}
+  .vmpage .sheet.tx .tpl.lang{background:var(--ink);color:var(--card);border-color:var(--ink)}
+  .vmpage .sheet.tx textarea{width:100%;box-sizing:border-box;font:inherit;font-size:15px;line-height:1.5;padding:9px 11px;border-radius:10px;border:1px solid var(--border);background:var(--card);color:var(--ink)}
+  .vmpage .sheet.tx .txrow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px}
+  .vmpage .sheet.tx .txrow .hint{font-size:12px;margin:0}
+  .vmpage .sheet.tx .send{background:var(--ink);color:var(--card);border-color:var(--ink);border-radius:999px;padding:6px 16px}
+  .vmpage .touches:empty{display:none}
+  .vmpage .touches{margin:8px 0 2px;display:flex;flex-direction:column;gap:6px}
+  .vmpage .touch{font-size:13px;color:var(--muted);padding:8px 12px;border-left:3px solid var(--accent);background:var(--row);border-radius:0 10px 10px 0}
+  .vmpage .touch b{color:var(--ink);font-weight:600}
+  .vmpage .touch .tb{color:var(--ink);margin-top:3px;white-space:pre-wrap}
+  .vmpage .touch.bad{border-left-color:var(--pill-open-tx)}
   .vmpage .sheet label{display:flex;flex-direction:column;gap:3px;font-size:11.5px;color:var(--muted);letter-spacing:.03em;text-transform:uppercase}
   .vmpage .sheet input,.vmpage .sheet select{font:inherit;font-size:14px;padding:7px 10px;border-radius:9px;border:1px solid var(--border);background:var(--card);color:var(--ink);min-width:150px}
   .vmpage .b{font:inherit;font-size:13px;padding:6px 13px;border-radius:999px;border:1px solid var(--border);background:var(--card);color:var(--ink);cursor:pointer;text-decoration:none;line-height:1.2}
@@ -303,6 +317,8 @@
       <div class="grp">
         {% if r.english or r.yiddish %}<button type="button" class="ib" data-copy="all"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>Copy</button>{% endif %}
         {% if r.stored_name %}<button type="button" class="ib" data-share-btn><svg viewBox="0 0 24 24"><path d="M12 3v13M7 8l5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>Share</button>{% endif %}
+        {% if outbound and r.caller_number %}<button type="button" class="ib" data-sheet="tx-{{ r.id }}"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg>Text</button>
+        <button type="button" class="ib" data-callback><svg viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg>Call</button>{% endif %}
         {% if dh and not r.dh_event_id and r.stored_name %}<button type="button" class="ib" data-sheet="dh-{{ r.id }}"><svg viewBox="0 0 24 24"><path d="M4 5h11a3 3 0 0 1 3 3v11H7a3 3 0 0 1-3-3z"/><path d="M8 9h6M8 13h6"/></svg>Chronicle</button>{% endif %}
         <div class="more"><button type="button" class="ib quiet" data-menu><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/></svg>More</button>
           <div class="menu">
@@ -315,6 +331,14 @@
       </div>
     </div>
 
+    {% if outbound and r.caller_number %}
+    <div class="sheet tx" id="tx-{{ r.id }}">
+      <div class="tpls">{% for name, en, yi in sms_templates %}<button type="button" class="tpl" data-en="{{ en }}" data-yi="{{ yi }}">{{ name }}</button>{% endfor %}</div>
+      <textarea class="txbody" rows="3" dir="auto" placeholder="Text to {{ who }} at {{ fmt_phone(r.caller_number) }} — from the line's number"></textarea>
+      <div class="txrow"><span class="hint">Tap a reply above, then English or Yiddish; edit as you like.</span><button type="button" class="ib send" data-send-sms>Send</button></div>
+    </div>
+    {% endif %}
+    <div class="touches" data-touches>{% for t in touches.get(r.id, []) %}<div class="touch {{ 'bad' if (t.status or '').startswith('failed') else '' }}">{% if t.kind == 'sms' %}<b>{{ t.who or 'Someone' }} texted</b> · {{ (t.at or '')[5:16].replace('T',' ') }}{% if (t.status or '').startswith('failed') %} · {{ t.status }}{% endif %}<div class="tb" dir="auto">{{ t.body }}</div>{% else %}<b>{{ t.who or 'Someone' }} called</b> · {{ (t.at or '')[5:16].replace('T',' ') }}{% if t.status %} · {{ t.status }}{% endif %}{% endif %}</div>{% endfor %}</div>
     {% if dh and not r.dh_event_id and r.stored_name %}
     <div class="sheet" id="dh-{{ r.id }}">
       <form method="post" action="{{ url_for('vm_to_dh', vid=r.id) }}">
@@ -553,6 +577,52 @@
     });
     document.getElementById('vmdraft-drop').addEventListener('click', function(){ drop().then(function(){ banner.hidden = true; form.reset(); kept.hidden = true; }); });
   })();
+
+  // ---- text back / call back ----
+  var SMS_URL = {{ url_for('vm_sms', vid=0)|tojson }}, CALL_URL = {{ url_for('vm_call', vid=0)|tojson }}, MY_PHONE = {{ my_phone|tojson }};
+  function addTouch(c, html, bad){ var box = c.querySelector('[data-touches]'); if (!box) return; var d = document.createElement('div'); d.className = 'touch' + (bad ? ' bad' : ''); d.innerHTML = html; box.appendChild(d); }
+  function esc(s){ return String(s).replace(/[&<>"]/g, function(ch){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]; }); }
+  document.addEventListener('click', function(e){
+    var tpl = e.target.closest('.sheet.tx .tpl'); if (tpl) {
+      var sheet = tpl.closest('.sheet.tx'), ta = sheet.querySelector('.txbody');
+      if (tpl.classList.contains('lang')) { var cur = sheet.querySelector('.tpl.on'); if (cur) ta.value = tpl.dataset.lang === 'yi' ? cur.dataset.yi : cur.dataset.en; return; }
+      sheet.querySelectorAll('.tpl.on').forEach(function(x){ x.classList.remove('on'); }); tpl.classList.add('on');
+      if (!sheet.querySelector('.tpl.lang')) { ['en','yi'].forEach(function(l){ var b = document.createElement('button'); b.type = 'button'; b.className = 'tpl lang'; b.dataset.lang = l; b.textContent = l === 'en' ? 'English' : 'יידיש'; sheet.querySelector('.tpls').appendChild(b); }); }
+      ta.value = tpl.dataset.en; ta.focus(); return;
+    }
+    var snd = e.target.closest('[data-send-sms]'); if (snd) {
+      var c = cardOf(snd), sheet = snd.closest('.sheet.tx'), text = sheet.querySelector('.txbody').value.trim();
+      if (!text) { note(c, 'Write something first'); return; }
+      snd.disabled = true; snd.textContent = 'Sending\u2026';
+      var fd = new FormData(); fd.append('text', text);
+      fetch(SMS_URL.replace('/0/', '/' + c.dataset.id + '/'), {method: 'POST', body: fd, credentials: 'same-origin'})
+        .then(function(r){ return r.json().then(function(j){ return {ok: r.ok, j: j}; }); })
+        .then(function(x){
+          snd.disabled = false; snd.textContent = 'Send';
+          if (!x.ok) { note(c, x.j.error || 'Could not send'); addTouch(c, '<b>Text failed</b> \u00b7 ' + esc(x.j.error || ''), true); return; }
+          sheet.classList.remove('open'); sheet.querySelector('.txbody').value = '';
+          addTouch(c, '<b>' + esc(x.j.who) + ' texted</b> \u00b7 ' + esc(x.j.at) + '<div class="tb" dir="auto">' + esc(x.j.text) + '</div>');
+          note(c, 'Sent');
+        }).catch(function(){ snd.disabled = false; snd.textContent = 'Send'; note(c, 'Could not send \u2014 try again'); });
+      return;
+    }
+    var cb = e.target.closest('[data-callback]'); if (cb) {
+      var c2 = cardOf(cb), mine = MY_PHONE;
+      if (!mine) { mine = prompt('Your phone number \u2014 RingCentral rings it first, then dials ' + (c2.dataset.num || 'the caller') + '. Saved to your Account.'); if (!mine) return; }
+      else if (!confirm('Ring ' + mine + ' and connect to ' + (c2.dataset.num || 'the caller') + '? They see the line\u2019s number.')) return;
+      var fd2 = new FormData(); if (mine !== MY_PHONE) fd2.append('from', mine);
+      note(c2, 'Calling\u2026');
+      fetch(CALL_URL.replace('/0/', '/' + c2.dataset.id + '/'), {method: 'POST', body: fd2, credentials: 'same-origin'})
+        .then(function(r){ return r.json().then(function(j){ return {ok: r.ok, j: j}; }); })
+        .then(function(x){
+          if (!x.ok) { note(c2, x.j.error || 'Could not call'); addTouch(c2, '<b>Call failed</b> \u00b7 ' + esc(x.j.error || ''), true); return; }
+          if (x.j.mine) MY_PHONE = x.j.mine;
+          addTouch(c2, '<b>' + esc(x.j.who) + ' called</b> \u00b7 ' + esc(x.j.at) + ' \u00b7 ' + esc(x.j.status));
+          note(c2, 'Your phone is ringing');
+        }).catch(function(){ note(c2, 'Could not call \u2014 try again'); });
+      return;
+    }
+  });
 
   // ---- menus ----
   function closeMenus(){ document.querySelectorAll('.more.open').forEach(function(m){ m.classList.remove('open'); }); }
