@@ -6282,6 +6282,13 @@ def vm_view():
             return d.strftime("%A")
         return d.strftime("%A, %B %-d") if d.year == today.year else d.strftime("%B %-d, %Y")
 
+    touches = {}
+    if rows:
+        ids = [r["id"] for r in rows]
+        for t in con.execute("SELECT t.*, u.display_name AS who FROM vm_touch t LEFT JOIN users u ON u.id=t.user_id"
+                             " WHERE t.vm_id IN (%s) ORDER BY t.at" % ",".join("?" * len(ids)), ids):
+            touches.setdefault(t["vm_id"], []).append(t)
+    me_row = user_row(con)
     lcounts = {}
     if len(line_labels) > 1:
         for ext in line_labels:
@@ -6292,6 +6299,8 @@ def vm_view():
                 (me(), ext) + (() if q in ("", "all") else (int(q),))).fetchone()[0]
     return render_template("vm.html", rows=rows, show=show, counts=counts, busy=_vm_lock.locked(),
                            line=line, line_labels=line_labels, lcounts=lcounts, line_errors=vm.line_errors(),
+                           touches=touches, my_phone=vm.fmt_phone(me_row["phone"]) if me_row and me_row["phone"] else "",
+                           sms_templates=vm.SMS_TEMPLATES, outbound=(vm.configured() and not vm.mirror_configured()),
                            line_name=(line_labels.get(line) if line else
                                       (vm.DEFAULT_LINE if len(line_labels) <= 1 else " · ".join(line_labels.values()))),
                            line_of=lambda r: vm.line_label(r["ext"], line_labels),
@@ -6397,6 +6406,63 @@ def _vm_send_audio(row, download=False):
     nice = "Voicemail_%s_%s.%s" % ((row["ts"] or "")[:10], who, row["stored_name"].rsplit(".", 1)[-1])
     return send_from_directory(os.path.join(FILES_DIR, "vm"), row["stored_name"], conditional=True,
                                as_attachment=download, download_name=nice)
+
+
+def _touch(con, vid, kind, to, body, status, rc_id=""):
+    con.execute("INSERT INTO vm_touch(vm_id, user_id, kind, to_number, body, status, rc_id, at)"
+                " VALUES(?,?,?,?,?,?,?,?)", (vid, me(), kind, to, body, status, rc_id,
+                                              datetime.now().isoformat(timespec="seconds")))
+    commit_retry(con)
+
+
+@app.route("/vm/<int:vid>/sms", methods=["POST"])
+@login_required
+def vm_sms(vid):
+    """Text the caller back from the line's number; the text is kept on the voicemail."""
+    con = db()
+    r = con.execute("SELECT * FROM voicemails WHERE id=?", (vid,)).fetchone()
+    if not r:
+        abort(404)
+    text = (request.form.get("text") or "").strip()
+    if not r["caller_number"] or not text:
+        return jsonify(error="Nothing to send."), 400
+    if vm.mirror_configured() or not vm.configured():
+        return jsonify(error="Texting goes out from the HQ that owns the line."), 400
+    try:
+        rc_id = vm.send_sms(r["caller_number"], text)
+        _touch(con, vid, "sms", r["caller_number"], text, "sent", rc_id)
+        return jsonify(ok=True, who=_actor_name(con), at=_now_local().strftime("%-m/%-d %-I:%M %p"), text=text)
+    except Exception as e:
+        _touch(con, vid, "sms", r["caller_number"], text, "failed: %s" % str(e)[:200])
+        return jsonify(error=str(e)[:300]), 502
+
+
+@app.route("/vm/<int:vid>/call", methods=["POST"])
+@login_required
+def vm_call(vid):
+    """Call the caller back: RingCentral rings my phone first, then dials them, with the
+    line's number as caller ID."""
+    con = db()
+    r = con.execute("SELECT * FROM voicemails WHERE id=?", (vid,)).fetchone()
+    if not r:
+        abort(404)
+    if not r["caller_number"]:
+        return jsonify(error="No number to call."), 400
+    if vm.mirror_configured() or not vm.configured():
+        return jsonify(error="Calls go out from the HQ that owns the line."), 400
+    mine = (request.form.get("from") or "").strip() or (user_row(con)["phone"] or "")
+    if len(re.sub(r"\D", "", mine)) < 10:
+        return jsonify(error="Put your phone number on Account first - that is the phone RingCentral rings."), 400
+    if request.form.get("from"):
+        con.execute("UPDATE users SET phone=? WHERE id=?", (_clean_phone(mine), me()))
+    try:
+        rc_id, status = vm.ring_out(mine, r["caller_number"])
+        _touch(con, vid, "call", r["caller_number"], "", status or "ringing", rc_id)
+        return jsonify(ok=True, who=_actor_name(con), at=_now_local().strftime("%-m/%-d %-I:%M %p"),
+                       status=status or "ringing", mine=vm.fmt_phone(mine))
+    except Exception as e:
+        _touch(con, vid, "call", r["caller_number"], "", "failed: %s" % str(e)[:200])
+        return jsonify(error=str(e)[:300]), 502
 
 
 @app.route("/vm/upload", methods=["POST"])

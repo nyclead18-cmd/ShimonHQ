@@ -181,6 +181,121 @@ def _rc_get(path, params=None, raw=False):
     return _retry(lambda: _req(url, headers=h, raw=raw, timeout=120))
 
 
+def _rc_post(path, body):
+    url = path if path.startswith("http") else RC_SERVER + path
+    h = {"Authorization": "Bearer " + rc_token(), "Accept": "application/json",
+         "Content-Type": "application/json"}
+    return _retry(lambda: _req(url, data=json.dumps(body).encode(), headers=h, method="POST", timeout=60))
+
+
+def _rc_err(e):
+    """A RingCentral error in one readable line, with the permission named when that is it."""
+    try:
+        body = e.read().decode("utf-8", "replace") if hasattr(e, "read") else ""
+        j = json.loads(body) if body.strip().startswith("{") else {}
+        msg = j.get("message") or (j.get("errors") or [{}])[0].get("message") or body[:160]
+    except Exception:
+        msg = ""
+    code = getattr(e, "code", None)
+    if code == 403:
+        return "RingCentral refused (403): %s - the app needs the SMS / RingOut permission, or this line may not send." % (msg or "forbidden")
+    if code == 401:
+        return "RingCentral sign-in expired (401) - it renews on the next try."
+    return "RingCentral: %s%s" % (("%s " % code) if code else "", msg or str(e)[:160])
+
+
+# ---------- outbound: text back, call back ----------
+#
+# Everything goes out through the line's own extension (the JWT user): an SMS from the
+# line's number, a RingOut that rings the HQ person's own phone first and then dials
+# the caller, showing the line's number as caller ID.
+
+_num_cache = {"at": 0, "sms": None, "voice": None}
+
+
+def line_numbers():
+    """{'sms': number that can send SMS, 'voice': number to show as caller ID} for the
+    line's extension. RC_LINE_NUMBER overrides both; otherwise looked up once an hour."""
+    env = (os.environ.get("RC_LINE_NUMBER") or "").strip()
+    if env:
+        return {"sms": env, "voice": env}
+    if _num_cache["sms"] and time.time() - _num_cache["at"] < 3600:
+        return {"sms": _num_cache["sms"], "voice": _num_cache["voice"]}
+    sms = voice = None
+    try:
+        j = _rc_get("/restapi/v1.0/account/~/extension/~/phone-number", {"perPage": 100})
+        for r in j.get("records", []):
+            feats = r.get("features") or []
+            n = r.get("phoneNumber")
+            if not n:
+                continue
+            if "SmsSender" in feats and not sms:
+                sms = n
+            if "CallerId" in feats and not voice:
+                voice = n
+        voice = voice or sms
+        sms = sms or voice
+    except Exception:
+        pass
+    if sms or voice:
+        _num_cache.update(at=time.time(), sms=sms, voice=voice)
+    return {"sms": sms, "voice": voice}
+
+
+def _e164(n):
+    d = re.sub(r"\D", "", n or "")
+    if len(d) == 10:
+        return "+1" + d
+    if len(d) == 11 and d.startswith("1"):
+        return "+" + d
+    return ("+" + d) if d else ""
+
+
+def send_sms(to, text):
+    """Text the caller from the line's number. Returns the RC message id."""
+    frm = line_numbers()["sms"]
+    if not frm:
+        raise RuntimeError("The line has no SMS-capable number on RingCentral (or RC_LINE_NUMBER is not set).")
+    try:
+        j = _rc_post("/restapi/v1.0/account/~/extension/~/sms",
+                     {"from": {"phoneNumber": _e164(frm)}, "to": [{"phoneNumber": _e164(to)}], "text": text[:1000]})
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(_rc_err(e))
+    return str(j.get("id") or "")
+
+
+def ring_out(my_phone, to):
+    """Ring `my_phone` first, then connect to the caller, caller ID = the line."""
+    cid = line_numbers()["voice"]
+    body = {"from": {"phoneNumber": _e164(my_phone)}, "to": {"phoneNumber": _e164(to)}, "playPrompt": False}
+    if cid:
+        body["callerId"] = {"phoneNumber": _e164(cid)}
+    try:
+        j = _rc_post("/restapi/v1.0/account/~/extension/~/ring-out", body)
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(_rc_err(e))
+    return str(j.get("id") or ""), ((j.get("status") or {}).get("callStatus") or "")
+
+
+SMS_TEMPLATES = [
+    ("Received", "We received your message. Someone will call you back, b'ezras Hashem.",
+     "מיר האבן באקומען אייער מעסעדזש. מען וועט אייך צוריק רופן, בעזהשי\"ת."),
+    ("Check on the way", "Your check is on its way. Tizku l'mitzvos.",
+     "אייער טשעק איז אונטערוועגנס. תזכו למצוות."),
+    ("Call back tomorrow", "We got your message; expect a call back tomorrow.",
+     "מיר האבן באקומען אייער מעסעדזש; מען וועט אייך מארגן צוריק רופן."),
+    ("Thank you", "Thank you for your call and your kind words.",
+     "א דאנק פאר אייער רוף און אייערע ווארעמע ווערטער."),
+]
+
+
+def ensure_touch_schema(con):
+    con.execute("CREATE TABLE IF NOT EXISTS vm_touch ("
+                " id INTEGER PRIMARY KEY AUTOINCREMENT, vm_id INTEGER NOT NULL, user_id INTEGER,"
+                " kind TEXT NOT NULL, to_number TEXT, body TEXT, status TEXT, rc_id TEXT, at TEXT)")
+    con.execute("CREATE INDEX IF NOT EXISTS vm_touch_vm ON vm_touch(vm_id)")
+
+
 _ext_cache = {}
 
 DEFAULT_LINE = "Shefa Yoel line"
@@ -700,6 +815,7 @@ def ensure_schema(con):
         " terror TEXT, item_id INTEGER, handled INTEGER NOT NULL DEFAULT 0,"
         " received_at TEXT)")
     con.execute("CREATE INDEX IF NOT EXISTS vm_open ON voicemails(handled, ts)")
+    ensure_touch_schema(con)
     cols = [r[1] for r in con.execute("PRAGMA table_info(voicemails)")]
     for c in ("dh_event_id TEXT", "dh_project TEXT", "dh_url TEXT",
               "notified INTEGER NOT NULL DEFAULT 0", "assignee INTEGER",
