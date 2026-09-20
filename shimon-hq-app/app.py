@@ -6435,7 +6435,7 @@ def vm_upload():
     vid = cur.lastrowid
     # transcribe now rather than at the next tick
     threading.Thread(target=vm_work, kwargs={"budget": 240}, daemon=True).start()
-    return redirect(url_for("vm_view", show="all", q="all", _anchor="vm-%d" % vid))
+    return redirect(url_for("vm_view", show="all", q="all", added=1, _anchor="vm-%d" % vid))
 
 
 @app.route("/vm/<int:vid>/audio")
