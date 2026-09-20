@@ -536,19 +536,19 @@
     function put(v){ return idb().then(function(db){ return new Promise(function(res){ var tx = db.transaction('draft', 'readwrite'); tx.objectStore('draft').put(v, 'rec'); tx.oncomplete = res; tx.onerror = res; }); }).catch(function(){}); }
     function get(){ return idb().then(function(db){ return new Promise(function(res){ var r = db.transaction('draft').objectStore('draft').get('rec'); r.onsuccess = function(){ res(r.result); }; r.onerror = function(){ res(null); }; }); }).catch(function(){ return null; }); }
     function drop(){ return idb().then(function(db){ return new Promise(function(res){ var tx = db.transaction('draft', 'readwrite'); tx.objectStore('draft').delete('rec'); tx.oncomplete = res; tx.onerror = res; }); }).catch(function(){}); }
-    function snapshot(){ var d = {file: fileIn.files[0] || null, name: fileIn.files[0] ? fileIn.files[0].name : ''}; fields.forEach(function(k){ d[k] = form.elements[k].value; }); if (!d.file && !d.who && !d.number) { drop(); return; } put(d); }
+    function snapshot(){ var d = {file: fileIn.files[0] || null, name: fileIn.files[0] ? fileIn.files[0].name : ''}; fields.forEach(function(k){ d[k] = form.elements[k].value; }); if (!d.file) { drop(); return; } put(d); }
     fileIn.addEventListener('change', snapshot);
     fields.forEach(function(k){ form.elements[k].addEventListener('input', snapshot); });
     form.addEventListener('submit', function(){ sessionStorage.setItem('vm_uploading', '1'); });
     if (new URLSearchParams(location.search).get('added')) { drop(); sessionStorage.removeItem('vm_uploading'); }
     get().then(function(d){
-      if (!d) return;
+      if (!d || !d.file) { if (d) drop(); return; }
       fields.forEach(function(k){ if (d[k]) form.elements[k].value = d[k]; });
       if (d.file) {
         try { var dt = new DataTransfer(); dt.items.add(d.file); fileIn.files = dt.files; } catch (e) {}
         kept.querySelector('b').textContent = d.name; kept.hidden = false;
       }
-      document.getElementById('vmdraft-name').textContent = d.name || (d.who || 'details filled in');
+      document.getElementById('vmdraft-name').textContent = d.name || 'audio file';
       banner.hidden = false;
     });
     document.getElementById('vmdraft-drop').addEventListener('click', function(){ drop().then(function(){ banner.hidden = true; form.reset(); kept.hidden = true; }); });
