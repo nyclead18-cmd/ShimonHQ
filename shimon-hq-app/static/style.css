@@ -1364,3 +1364,8 @@ a.stat:hover{border-color:var(--ink);}
   font-size:13px; color:var(--muted);}
 .login-card .remember input{width:16px; height:16px; accent-color:var(--accent); padding:0; margin:0;}
 .login-card .back{font-size:13px; color:var(--muted); text-decoration:none;}
+
+/* drafts.js: text kept on the device until the form is submitted */
+.draft-note{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--muted);padding:6px 10px;border-radius:10px;background:var(--row);margin:0 0 8px;}
+.draft-note button{font:inherit;font-size:12px;padding:3px 10px;border-radius:999px;border:1px solid var(--border);background:transparent;color:var(--ink);cursor:pointer;}
+.draft-restored{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 60%,transparent);}
