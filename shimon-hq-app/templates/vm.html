@@ -62,6 +62,16 @@
   .vmpage .meta .dur{display:block;font-size:12px;opacity:.85}
   .vmpage .tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
   .vmpage .tag.kind,.vmpage .tag.line{text-transform:none;letter-spacing:0;font-size:11px}
+  .vmup{border:1px solid var(--border);border-radius:16px;background:var(--card);color:var(--ink);padding:18px 20px;width:min(440px,92vw);box-shadow:var(--shadow)}
+  .vmup::backdrop{background:rgba(0,0,0,.35)}
+  .vmup h3{margin:0 0 4px;font-family:'Playfair Display',Georgia,serif;font-size:18px}
+  .vmup form{display:flex;flex-direction:column;gap:10px}
+  .vmup label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .vmup input{font:inherit;font-size:15px;text-transform:none;letter-spacing:0;color:var(--ink);padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:var(--bg)}
+  .vmup .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .vmup .row-b{display:flex;justify-content:flex-end;gap:8px;margin-top:6px}
+  .vmup .b{font:inherit;font-size:14px;padding:8px 16px;border-radius:999px;border:1px solid var(--ink);background:var(--ink);color:var(--card);cursor:pointer}
+  .vmup .b.quiet{background:transparent;color:var(--ink);border-color:var(--border)}
   .vmpage .queues.lines{margin-bottom:8px}
   .vmpage .tag.k-thank_you{background:var(--pill-done-bg);color:var(--pill-done-tx);border-color:transparent}
   .vmpage .tag.k-issue{background:var(--pill-open-bg);color:var(--pill-open-tx);border-color:transparent}
@@ -167,6 +177,7 @@
   {% if busy %}<span class="working">working in background</span>{% endif %}
   <span class="sp"></span>
   <a class="b quiet" href="{{ url_for('families_view') }}">Families</a>
+  <button type="button" class="b quiet" onclick="document.getElementById('vmup').showModal()">Add recording</button>
   <form method="post" action="{{ url_for('api_vm_sync', back=1) }}" style="margin:0"><button type="submit" class="b quiet">Check now</button></form>
   <div class="more"><button type="button" class="b quiet" data-menu>⋯</button>
     <div class="menu" style="top:calc(100% + 6px);bottom:auto">
@@ -191,6 +202,23 @@
   <a class="qchip {% if q == 'all' %}on{% endif %}" href="{{ url_for('vm_view', show=show, q='all', line=line) }}">Everyone</a>
 </div>
 {% endif %}
+
+<dialog id="vmup" class="vmup">
+  <form method="post" action="{{ url_for('vm_upload') }}" enctype="multipart/form-data">
+    <h3>Add a recording</h3>
+    <p class="hint">A voicemail forwarded by email, a voice note — it gets transcribed and read like the rest, with the file kept for reference.</p>
+    <label>Audio file<input type="file" name="file" accept="audio/*,.mp3,.m4a,.wav,.ogg,.opus,.amr" required></label>
+    <div class="two">
+      <label>Caller<input name="who" placeholder="Mrs. Reich" maxlength="60"></label>
+      <label>Number<input name="number" type="tel" placeholder="(917) 555-0100" maxlength="20"></label>
+    </div>
+    <div class="two">
+      <label>Line / source<input name="line" value="{{ line_labels.get('manual', "Mrs. Mayer's line") }}" maxlength="40"></label>
+      <label>When<input name="when" type="datetime-local"></label>
+    </div>
+    <div class="row-b"><button type="button" class="b quiet" onclick="document.getElementById('vmup').close()">Cancel</button><button type="submit" class="b">Add</button></div>
+  </form>
+</dialog>
 
 {% if not rows %}<p class="hint">Nothing here.</p>{% endif %}
 
