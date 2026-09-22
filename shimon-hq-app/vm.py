@@ -873,7 +873,8 @@ def ensure_schema(con):
     cols = [r[1] for r in con.execute("PRAGMA table_info(voicemails)")]
     for c in ("dh_event_id TEXT", "dh_project TEXT", "dh_url TEXT",
               "notified INTEGER NOT NULL DEFAULT 0", "assignee INTEGER",
-              "read_json TEXT", "kind TEXT", "routed INTEGER NOT NULL DEFAULT 0"):
+              "read_json TEXT", "kind TEXT", "routed INTEGER NOT NULL DEFAULT 0",
+              "closed_at TEXT", "closed_by INTEGER"):
         if c.split()[0] not in cols:
             con.execute("ALTER TABLE voicemails ADD COLUMN " + c)
     if "routed" not in cols:

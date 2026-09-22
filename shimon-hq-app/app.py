@@ -2056,8 +2056,26 @@ def set_item_status(item_id):
     return jsonify(status=st)
 
 
+def _sync_vm_done(con, item_id, status):
+    """A task made from a voicemail and the voicemail are one thing: close the task and the
+    message is finished for everybody (off every queue, into Finished this week); reopen
+    the task and the message comes back."""
+    v = con.execute("SELECT id, closed_at FROM voicemails WHERE item_id=?", (item_id,)).fetchone()
+    if not v:
+        return
+    now = _now_local().replace(tzinfo=None).isoformat(timespec="seconds")
+    if status == "done" and not v["closed_at"]:
+        con.execute("UPDATE voicemails SET closed_at=?, closed_by=? WHERE id=?", (now, me(), v["id"]))
+        con.execute("INSERT OR IGNORE INTO vm_handled(vm_id, user_id, at) SELECT ?, id, ? FROM users", (v["id"], now))
+    elif status != "done" and v["closed_at"]:
+        con.execute("UPDATE voicemails SET closed_at=NULL, closed_by=NULL WHERE id=?", (v["id"],))
+        con.execute("DELETE FROM vm_handled WHERE vm_id=?", (v["id"],))
+
+
 def _tell_status(con, item_id, was, now_status):
     """Only the transitions worth a buzz: finished, or handed back."""
+    _sync_vm_done(con, item_id, now_status)
+    commit_retry(con)
     if not was or was["status"] == now_status:
         return
     who = _actor_name(con)
@@ -6143,6 +6161,7 @@ def item_debrief(item_id):
         if line.lower() in ("done", "v", "x") or line == "✓":
             con.execute("UPDATE items SET status='done', done_at=?, updated_at=?"
                         " WHERE id=?", (now, now, item_id))
+            _sync_vm_done(con, item_id, "done")
             continue
         m = re.match(r"^w(?:aiting)?\s+([^:]{1,40}):\s*(.+)$", line, re.I)
         if m:
@@ -7027,7 +7046,7 @@ def desk_view():
         " LEFT JOIN vm_handled h ON h.vm_id=v.id AND h.user_id=?"
         " LEFT JOIN items i ON i.id=v.item_id"
         " WHERE v.assignee=? AND h.vm_id IS NULL AND v.tstatus NOT IN ('short','empty','skipped')"
-        " AND COALESCE(i.status,'') != 'done' ORDER BY v.ts DESC LIMIT 200", (who, who)).fetchall()
+        " AND v.closed_at IS NULL AND COALESCE(i.status,'') != 'done' ORDER BY v.ts DESC LIMIT 200", (who, who)).fetchall()
     ids = [r["id"] for r in queue]
     touches = {}
     if ids:
@@ -7055,9 +7074,9 @@ def desk_view():
         "SELECT v.*, h.at AS handled_at, i.done_at, i.title AS ititle FROM voicemails v"
         " LEFT JOIN vm_handled h ON h.vm_id=v.id AND h.user_id=?"
         " LEFT JOIN items i ON i.id=v.item_id"
-        " WHERE v.assignee=? AND (substr(COALESCE(h.at,''),1,10) >= ? OR"
+        " WHERE v.assignee=? AND (substr(COALESCE(h.at,''),1,10) >= ? OR substr(COALESCE(v.closed_at,''),1,10) >= ? OR"
         "   (i.status='done' AND substr(COALESCE(i.done_at,''),1,10) >= ?))"
-        " ORDER BY COALESCE(i.done_at, h.at) DESC LIMIT 100", (who, who, monday, monday)).fetchall()
+        " ORDER BY COALESCE(v.closed_at, i.done_at, h.at) DESC LIMIT 100", (who, who, monday, monday, monday)).fetchall()
     # passed to them by hand: tasks on other people's boards that sit on their list
     # (voicemail tasks already shown above are left out)
     vm_items = {r[0] for r in con.execute("SELECT item_id FROM voicemails WHERE item_id IS NOT NULL")}
@@ -7125,6 +7144,47 @@ def desk_view():
                            sec_kind={}, today_iso=iso, soon_iso=iso, monday=monday,
                            full_name=full_name,
                            pretty=_now_local().strftime("%A, %B %-d"))
+
+
+@app.route("/vm/<int:vid>/close", methods=["POST"])
+@login_required
+def vm_close(vid):
+    """Done, for everybody: the message leaves every queue, its task closes, the person
+    who passed it on hears it is finished. undo=1 brings it all back."""
+    con = db()
+    r = con.execute("SELECT * FROM voicemails WHERE id=?", (vid,)).fetchone()
+    if not r:
+        abort(404)
+    if not session.get("admin") and r["assignee"] not in (None, me()):
+        abort(403)
+    undo = bool(request.form.get("undo"))
+    now = datetime.now().isoformat(timespec="seconds")
+    if r["item_id"]:
+        was = con.execute("SELECT status, title FROM items WHERE id=?", (r["item_id"],)).fetchone()
+        st = "open" if undo else "done"
+        con.execute("UPDATE items SET status=?, updated_at=?, done_at=? WHERE id=?",
+                    (st, now, None if undo else now, r["item_id"]))
+        _tell_status(con, r["item_id"], was, st)       # syncs the message and buzzes the other side
+    else:
+        loc = _now_local().replace(tzinfo=None).isoformat(timespec="seconds")
+        if undo:
+            con.execute("UPDATE voicemails SET closed_at=NULL, closed_by=NULL WHERE id=?", (vid,))
+            con.execute("DELETE FROM vm_handled WHERE vm_id=?", (vid,))
+        else:
+            con.execute("UPDATE voicemails SET closed_at=?, closed_by=? WHERE id=?", (loc, me(), vid))
+            con.execute("INSERT OR IGNORE INTO vm_handled(vm_id, user_id, at) SELECT ?, id, ? FROM users", (vid, loc))
+            who = r["caller_name"] or vm.fmt_phone(r["caller_number"]) or "a caller"
+            for uid in [u[0] for u in con.execute("SELECT id FROM users WHERE is_admin=1 AND id<>?", (me(),))]:
+                if wants(con, uid, "done"):
+                    try:
+                        send_push("%s finished a message" % _actor_name(con), who, "/desk", uid=uid)
+                    except Exception as e:
+                        app.logger.warning("close push failed: %s", e)
+    commit_retry(con)
+    if request.form.get("ajax"):
+        return jsonify(ok=True, closed=not undo)
+    back = request.form.get("back") or ""
+    return redirect(back if back.startswith("/desk") else url_for("vm_view"))
 
 
 @app.route("/calls/<int:cid>/audio")
