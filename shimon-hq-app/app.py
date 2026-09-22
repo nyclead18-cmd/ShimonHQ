@@ -5342,6 +5342,7 @@ def vm_work(date_from=None, budget=240):
             vm_backfill_desks(con)
             vm_backfill_notes(con)
             vm_reread(con)
+            vm_refresh_tasks(con)
             vm_pull_calls(con)
             vm_transcribe_calls(con)
     except Exception as e:
@@ -5395,6 +5396,50 @@ def vm_backfill_notes(con):
     con.commit()
 
 
+def _apply_read(con, r, old, d):
+    """Store a fresh read and carry it onto the open task: the title if it was still the
+    stock one, the note, and the checklist unless somebody already ticked a step."""
+    con.execute("UPDATE voicemails SET read_json=?, kind=?, refresh_task=0 WHERE id=?",
+                (json.dumps(d, ensure_ascii=False), d["kind"], r["id"]))
+    if not r["item_id"]:
+        return
+    it = con.execute("SELECT id, title, status FROM items WHERE id=?", (r["item_id"],)).fetchone()
+    if not it or it["status"] == "done":
+        return
+    r2 = con.execute("SELECT * FROM voicemails WHERE id=?", (r["id"],)).fetchone()
+    title = d["title"] if it["title"] == (old or {}).get("title") else it["title"]
+    con.execute("UPDATE items SET title=?, note=? WHERE id=?", (title, _vm_task_note(r2, d), it["id"]))
+    ticked = con.execute("SELECT COUNT(*) FROM checks WHERE item_id=? AND done=1", (it["id"],)).fetchone()[0]
+    if not ticked:
+        con.execute("DELETE FROM checks WHERE item_id=?", (it["id"],))
+        for i, step in enumerate(d["todos"], 1):
+            con.execute("INSERT INTO checks(item_id, body, pos) VALUES(?,?,?)", (it["id"], step[:200], i))
+
+
+def _reread_one(con, vid):
+    """Read one message again right now (after an edit, a tidy-up or a new transcript) and
+    bring its task along."""
+    r = con.execute("SELECT * FROM voicemails WHERE id=?", (vid,)).fetchone()
+    if not r or r["tstatus"] != "done":
+        return
+    old = vm.reading(r)
+    d = vm.read(r, _fam_label_for(con)(r), vm.line_label(r["ext"], vm.line_labels(con)))
+    _apply_read(con, r, old, d)
+
+
+def vm_refresh_tasks(con):
+    """Messages transcribed again: once the new words are in, read them again and refresh
+    the task (flag set by Re-transcribe)."""
+    rows = con.execute("SELECT id FROM voicemails WHERE refresh_task=1 AND tstatus='done'").fetchall()
+    for r in rows:
+        try:
+            _reread_one(con, r["id"])
+        except Exception as e:
+            app.logger.warning("vm refresh %s failed: %s", r["id"], e)
+    if rows:
+        con.commit()
+
+
 def vm_reread(con, max_n=5):
     """Messages read by the keyword fallback (no API key at the time) get a proper read
     once the key is there - a few per tick, newest first. Their open task follows:
@@ -5413,19 +5458,7 @@ def vm_reread(con, max_n=5):
         if d.get("by") != "claude":
             # still no luck (key rejected, network) - stop, try again next tick
             break
-        con.execute("UPDATE voicemails SET read_json=?, kind=? WHERE id=?",
-                    (json.dumps(d, ensure_ascii=False), d["kind"], r["id"]))
-        if r["item_id"]:
-            it = con.execute("SELECT id, title, status FROM items WHERE id=?", (r["item_id"],)).fetchone()
-            if it and it["status"] != "done":
-                r2 = con.execute("SELECT * FROM voicemails WHERE id=?", (r["id"],)).fetchone()
-                title = d["title"] if it["title"] == old.get("title") else it["title"]
-                con.execute("UPDATE items SET title=?, note=? WHERE id=?", (title, _vm_task_note(r2, d), it["id"]))
-                ticked = con.execute("SELECT COUNT(*) FROM checks WHERE item_id=? AND done=1", (it["id"],)).fetchone()[0]
-                if not ticked:
-                    con.execute("DELETE FROM checks WHERE item_id=?", (it["id"],))
-                    for i, step in enumerate(d["todos"], 1):
-                        con.execute("INSERT INTO checks(item_id, body, pos) VALUES(?,?,?)", (it["id"], step[:200], i))
+        _apply_read(con, r, old, d)
         con.commit()
         n += 1
     if n:
@@ -6550,9 +6583,10 @@ def vm_view():
     # everyone else, so two people can work the same line without tripping over each other.
     where = {"all": "WHERE 1=1" + qwhere,
              "short": "WHERE tstatus IN ('short','empty','skipped')" + qwhere,
+             "handled": "WHERE h.vm_id IS NOT NULL AND tstatus NOT IN ('short','empty','skipped')" + qwhere,
              }.get(show, "WHERE h.vm_id IS NULL AND tstatus NOT IN ('short','empty','skipped')" + qwhere)
     rows = con.execute(
-        "SELECT v.*, (h.vm_id IS NOT NULL) AS handled, u.display_name AS assignee_name FROM voicemails v"
+        "SELECT (h.vm_id IS NOT NULL) AS handled, u.display_name AS assignee_name, v.* FROM voicemails v"
         " LEFT JOIN vm_handled h ON h.vm_id=v.id AND h.user_id=?"
         " LEFT JOIN users u ON u.id=v.assignee %s ORDER BY v.ts DESC LIMIT 300"
         % where, (me(),) + qargs).fetchall()
@@ -6572,6 +6606,9 @@ def vm_view():
         "open": con.execute("SELECT COUNT(*) FROM voicemails v LEFT JOIN vm_handled h"
                             " ON h.vm_id=v.id AND h.user_id=? WHERE h.vm_id IS NULL"
                             " AND tstatus NOT IN ('short','empty','skipped')" + qwhere, (me(),) + qargs).fetchone()[0],
+        "handled": con.execute("SELECT COUNT(*) FROM voicemails v JOIN vm_handled h"
+                               " ON h.vm_id=v.id AND h.user_id=? WHERE tstatus NOT IN ('short','empty','skipped')" + qwhere,
+                               (me(),) + qargs).fetchone()[0],
         "short": con.execute("SELECT COUNT(*) FROM voicemails"
                              " WHERE tstatus IN ('short','empty','skipped')").fetchone()[0],
         "pending": con.execute("SELECT COUNT(*) FROM voicemails WHERE tstatus IN ('new','failed')"
@@ -7159,6 +7196,61 @@ def desk_view():
                            pretty=_now_local().strftime("%A, %B %-d"))
 
 
+@app.route("/vm/<int:vid>/text", methods=["POST"])
+@login_required
+def vm_text(vid):
+    """Fix the words by hand. The old English is kept underneath; the read step runs again
+    and the task's title, note and untouched checklist follow."""
+    con = db()
+    r = con.execute("SELECT * FROM voicemails WHERE id=?", (vid,)).fetchone()
+    if not r:
+        abort(404)
+    en = (request.form.get("english") or "").strip()
+    yi = (request.form.get("yiddish") or "").strip()
+    if en != (r["english"] or "").strip() or yi != (r["yiddish"] or "").strip():
+        con.execute("UPDATE voicemails SET english=?, yiddish=?, english_prev=COALESCE(english_prev, english), terror=NULL WHERE id=?",
+                    (en, yi, vid))
+        try:
+            _reread_one(con, vid)
+        except Exception as e:
+            app.logger.warning("vm %s reread after edit failed: %s", vid, e)
+        commit_retry(con)
+    back = request.form.get("back") or ""
+    if back.startswith("/desk"):
+        return redirect(back)
+    return redirect(url_for("vm_view", show=request.form.get("show", "open"), _anchor="vm-%d" % vid))
+
+
+@app.route("/vm/<int:vid>/tidy", methods=["POST"])
+@login_required
+def vm_tidy(vid):
+    """Let the AI clean the English - grammar, punctuation, mis-hearings - names and numbers
+    kept as said. The previous text is kept; Undo puts it back."""
+    con = db()
+    r = con.execute("SELECT * FROM voicemails WHERE id=?", (vid,)).fetchone()
+    if not r:
+        abort(404)
+    if request.form.get("undo"):
+        if r["english_prev"]:
+            con.execute("UPDATE voicemails SET english=english_prev, english_prev=NULL WHERE id=?", (vid,))
+    else:
+        who = r["caller_name"] or _fam_label_for(con)(r) or vm.fmt_phone(r["caller_number"])
+        clean = vm.tidy_english(r["english"] or "", r["yiddish"] or "", who)
+        if clean and clean != (r["english"] or "").strip():
+            con.execute("UPDATE voicemails SET english_prev=COALESCE(english_prev, english), english=?, terror=NULL WHERE id=?", (clean, vid))
+        elif not clean:
+            con.execute("UPDATE voicemails SET terror=? WHERE id=?", ("Tidy-up not available (no AI key or the call failed).", vid))
+    try:
+        _reread_one(con, vid)
+    except Exception as e:
+        app.logger.warning("vm %s reread after tidy failed: %s", vid, e)
+    commit_retry(con)
+    back = request.form.get("back") or ""
+    if back.startswith("/desk"):
+        return redirect(back)
+    return redirect(url_for("vm_view", show=request.form.get("show", "open"), _anchor="vm-%d" % vid))
+
+
 @app.route("/vm/<int:vid>/close", methods=["POST"])
 @login_required
 def vm_close(vid):
@@ -7315,8 +7407,9 @@ def api_vm_sync():
 @app.route("/api/vm/<int:vid>/retry", methods=["POST"])
 @login_required
 def api_vm_retry(vid):
+    """Transcribe again from the recording; the read step and the task follow."""
     con = db()
-    con.execute("UPDATE voicemails SET tstatus='new' WHERE id=?", (vid,))
+    con.execute("UPDATE voicemails SET tstatus='new', refresh_task=1, terror=NULL WHERE id=? AND stored_name IS NOT NULL", (vid,))
     commit_retry(con)
     threading.Thread(target=vm_work, kwargs={"budget": 600}, daemon=True).start()
     return redirect(url_for("vm_view", show=request.form.get("show", "open")))

@@ -332,6 +332,31 @@ def call_summary(english, yiddish, who=""):
         return ""
 
 
+def tidy_english(english, yiddish="", who=""):
+    """A clean English transcript: grammar and punctuation fixed, names and numbers kept
+    exactly, nothing added, nothing dropped. Empty string when the AI is not available."""
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    text = (english or "").strip()
+    if not key or not text:
+        return ""
+    prompt = ("Clean up this machine transcript of a voicemail left at a charity office (Yiddish-speaking "
+              "callers; the English is a translation). Caller as known: %s.\n\nFix grammar, punctuation and "
+              "obvious mis-hearings; keep every name, number, amount and date exactly as said; keep the "
+              "speaker's meaning and order; do not summarize, do not add anything, do not comment. "
+              "Reply with the cleaned transcript only.\n\nEnglish:\n%s%s"
+              % (who or "unknown", text[:8000],
+                 ("\n\nYiddish original for reference:\n" + yiddish[:8000]) if yiddish else ""))
+    body = json.dumps({"model": os.environ.get("HQ_SUMMARY_MODEL", "claude-haiku-4-5"),
+                       "max_tokens": 1500, "messages": [{"role": "user", "content": prompt}]}).encode()
+    try:
+        j = _req("https://api.anthropic.com/v1/messages", data=body, method="POST", timeout=60,
+                 headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                          "Content-Type": "application/json"})
+        return "".join(p.get("text", "") for p in j.get("content", [])).strip()
+    except Exception:
+        return ""
+
+
 def ensure_calls_schema(con):
     con.execute("CREATE TABLE IF NOT EXISTS vm_calls ("
                 " id INTEGER PRIMARY KEY AUTOINCREMENT, rc_id TEXT UNIQUE, session_id TEXT,"
@@ -874,7 +899,7 @@ def ensure_schema(con):
     for c in ("dh_event_id TEXT", "dh_project TEXT", "dh_url TEXT",
               "notified INTEGER NOT NULL DEFAULT 0", "assignee INTEGER",
               "read_json TEXT", "kind TEXT", "routed INTEGER NOT NULL DEFAULT 0",
-              "closed_at TEXT", "closed_by INTEGER"):
+              "closed_at TEXT", "closed_by INTEGER", "english_prev TEXT", "refresh_task INTEGER NOT NULL DEFAULT 0"):
         if c.split()[0] not in cols:
             con.execute("ALTER TABLE voicemails ADD COLUMN " + c)
     if "routed" not in cols:
