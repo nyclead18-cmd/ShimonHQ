@@ -123,16 +123,31 @@
 {% endif %}
 
 {% if who and who.is_admin %}
-<section class="card acct">
+<section class="card acct" id="routing">
   <div class="sec-head"><h2>Voicemail routing</h2>
     <span class="pill {{ 'done' if autoroute else 'waiting' }}" style="cursor:default">{{ 'On' if autoroute else 'Off' }}</span></div>
   <form method="post" action="{{ url_for('set_autoroute') }}" class="stack">
     <label class="checkrow"><input type="checkbox" name="on" {% if autoroute %}checked{% endif %} onchange="this.form.submit()">
       Hand new voicemails to people automatically by what they are about</label>
   </form>
-  <p class="caveat">Off: everything lands on the Desk and you pass messages on with the <b>To</b> menu.
-  On: family cases, charity, issues and thank-yous go to Mrs. Hartman's queue, money to Toby's; the rest stays on the Desk.
-  Either way the read step still titles each message and builds its checklist.</p>
+  <form method="post" action="{{ url_for('set_route') }}" class="stack routerules">
+    {% for k in kinds %}
+    <label class="routerow"><span>{{ kind_label[k] }}</span>
+      <select name="route_{{ k }}" onchange="this.form.submit()">
+        <option value=""{% if not route_now[k] %} selected{% endif %}>stays on the Desk</option>
+        {% for f in folk if f.id != session.get('uid') %}
+        <option value="{{ f.id }}"{% if route_now[k] == f.id %} selected{% endif %}>{{ f.display_name }}</option>
+        {% endfor %}
+      </select></label>
+    {% endfor %}
+  </form>
+  <form method="post" action="{{ url_for('route_now') }}" class="stack">
+    <button type="submit" class="ghostbtn">Pass on the messages already waiting</button>
+  </form>
+  <p class="caveat">A new message is read, titled, given its checklist, and then goes to the person picked for its kind:
+  a task on their Community/Charity box, a push to their phone, and the message in their Desk queue.
+  "Stays on the Desk" means it waits for you and the <b>To</b> menu. The button above applies the rules once
+  to the unassigned messages from the last two weeks.</p>
 </section>
 {% endif %}
 

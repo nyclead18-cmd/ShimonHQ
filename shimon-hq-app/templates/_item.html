@@ -7,6 +7,7 @@
     data-stage="{{ it.stage or '' }}"
     data-sec="{{ it.section_id }}" data-proj="{{ it.project_id or '' }}"
     data-ltags="{{ (ltags or {}).get(it.id, '') }}">
+  <button type="button" class="xclose" aria-label="Close" title="Close">&#x2715;</button>
   <button type="button" class="pill {{ it.status }}" data-id="{{ it.id }}">
     {{ 'Open' if it.status == 'open' else 'Waiting' if it.status == 'waiting' else 'Done' }}
   </button>
@@ -22,7 +23,7 @@
           aria-label="On the list with {{ cp.first }}">{{ cp.initials }}</button>
   {% endif %}
   <div class="body">
-    <div class="t" dir="auto">{% if it.pinned %}<span class="pinmark" title="Pinned to the top">&#128204;</span>{% endif %}<span class="tt">{{ it.title }}</span>{% if it.note %} <span class="n" dir="auto">&mdash; {{ it.note }}</span>{% endif %}</div>
+    <div class="t" dir="auto">{% if it.pinned %}<span class="pinmark" title="Pinned to the top">&#128204;</span>{% endif %}<span class="tt">{{ it.title }}</span>{% if it.note %} <span class="n" dir="auto"><span class="ndash">&mdash; </span>{% if ' · Voicemail ' in it.note %}{% set cut = it.note.index(' · Voicemail ') %}{{ it.note[:cut] }}<span class="nmeta">{{ it.note[cut + 3:] }}</span>{% else %}{{ it.note }}{% endif %}</span>{% endif %}</div>
     <div class="metaline">
       {% if it.due_date %}
         <span class="due{% if it.status != 'done' %}{% if it.due_date < today_iso %} over{% elif it.due_date <= soon_iso %} soon{% endif %}{% endif %}">due {{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}</span>
@@ -41,7 +42,7 @@
       {% set icks = (checks_by_item or {}).get(it.id, []) %}
       {% if icks %}<span class="ckchip" title="Checklist: done / steps">&#9745; {{ icks|selectattr('done')|list|length }}/{{ icks|length }}</span>{% endif %}
       {% if show_where %}<span class="whence" dir="auto">{{ it.proj_title or '' }}{% if it.proj_title and it.sec_title %} &middot; {% endif %}{{ it.sec_title or '' }}</span>{% endif %}
-      <a class="openfull noprint" href="{{ url_for('task_view', item_id=it.id) }}" title="The full page: briefing, conversation, actions">open &#8599;</a>
+      <a class="openfull noprint" href="{{ url_for('task_view', item_id=it.id) }}" title="The full page: briefing, conversation, actions"><span class="ofl">full page </span>open &#8599;</a>
     </div>
     <div class="stamps noprint">
       {% if it.created_at %}<span>added {{ it.created_at|stamp }}</span>{% endif %}
