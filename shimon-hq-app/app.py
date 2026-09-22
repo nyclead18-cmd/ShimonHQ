@@ -5243,6 +5243,7 @@ def vm_work(date_from=None, budget=240):
         with app.test_request_context(base_url=_base_url()):
             vm_route(con)
             vm_backfill_tasks(con)
+            vm_backfill_desks(con)
     except Exception as e:
         app.logger.warning("vm work failed: %s", e)
     finally:
@@ -5322,7 +5323,9 @@ def vm_route(con):
         con.execute("UPDATE voicemails SET routed=1, assignee=COALESCE(?, assignee) WHERE id=?", (to, r["id"]))
         if to:
             try:
-                rd = vm.reading(con.execute("SELECT * FROM voicemails WHERE id=?", (r["id"],)).fetchone())
+                row = con.execute("SELECT * FROM voicemails WHERE id=?", (r["id"],)).fetchone()
+                _vm_make_task(con, row)
+                rd = vm.reading(row)
                 send_push("Voicemail for you · %s" % rd.get("who", ""), _short(rd.get("gist", ""), 140),
                           "/vm#vm-%d" % r["id"], uid=to)
             except Exception as e:
@@ -6544,6 +6547,8 @@ def vm_handled(vid):
     commit_retry(con)
     if request.form.get("ajax"):
         return jsonify(ok=True)
+    if (request.form.get("back") or "").startswith("/desk"):
+        return redirect(request.form["back"])
     return redirect(url_for("vm_view", show=request.form.get("show", "open")))
 
 
@@ -6563,6 +6568,106 @@ def _let_see(con, section_id, uid):
     con.execute("INSERT OR IGNORE INTO section_shares(section_id, user_id) VALUES(?,?)", (section_id, uid))
 
 
+def _vm_home(con, uid):
+    """Where a person's voicemail tasks live: the Voicemails project inside their own
+    Community/Charity box. Made the first time a message is handed to them.
+    Returns (section_id, project_id)."""
+    sid = ensure_buckets(con, uid)["Community/Charity"]
+    row = con.execute("SELECT id FROM projects WHERE section_id=? AND lower(title)='voicemails'",
+                      (sid,)).fetchone()
+    pid = row[0] if row else con.execute(
+        "INSERT INTO projects(section_id, title, pos) VALUES(?, 'Voicemails', 0)", (sid,)).lastrowid
+    return sid, pid
+
+
+def _vm_task_home(con, r, actor=None):
+    """Which board a voicemail's task belongs on. In somebody's queue: their own board
+    (Community/Charity > Voicemails), with the board owner tagged so he keeps sight of
+    it on the List. On the desk: the owner's Community/Charity box, as before.
+    Returns (section_id, project_id, tag_to)."""
+    owner = _board_owner(con)
+    who = r["assignee"]
+    if who:
+        sid, pid = _vm_home(con, who)
+        return sid, pid, (owner if owner != who else None)
+    sid = ensure_buckets(con, owner)["Community/Charity"]
+    return sid, None, (actor if actor and actor != owner else None)
+
+
+def _vm_make_task(con, r, title="", actor=None):
+    """The voicemail becomes a task: read title, the to-dos as a checklist, transcript
+    and recording in the note, follow-up tomorrow - on the board of whoever holds the
+    message. Returns the item id; a message that already has one keeps it."""
+    if r["item_id"]:
+        return r["item_id"]
+    if not r["read_json"]:
+        d = vm.read(r, _fam_label_for(con)(r), vm.line_label(r["ext"], vm.line_labels(con)))
+        con.execute("UPDATE voicemails SET read_json=?, kind=? WHERE id=?",
+                    (json.dumps(d, ensure_ascii=False), d["kind"], r["id"]))
+        r = con.execute("SELECT * FROM voicemails WHERE id=?", (r["id"],)).fetchone()
+    rd = vm.reading(r)
+    sid, pid, tag_to = _vm_task_home(con, r, actor)
+    title = (title or "").strip() or rd["title"]
+    pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM items WHERE section_id=?", (sid,)).fetchone()[0]
+    now = datetime.now().isoformat(timespec="seconds")
+    due = (date.today() + timedelta(days=1)).isoformat()
+    cur = con.execute(
+        "INSERT INTO items(section_id, project_id, title, note, waiting_on, status, pos, due_date,"
+        " updated_at, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (sid, pid, title, _vm_task_note(r, rd), "", "open", pos, due, now, now))
+    iid = cur.lastrowid
+    for i, step in enumerate(rd["todos"], 1):
+        con.execute("INSERT INTO checks(item_id, body, pos) VALUES(?,?,?)", (iid, step[:200], i))
+    con.execute("UPDATE voicemails SET item_id=? WHERE id=?", (iid, r["id"]))
+    if tag_to:
+        if not r["assignee"]:
+            _let_see(con, sid, tag_to)
+        con.execute("INSERT OR IGNORE INTO list_tags(item_id, user_id) VALUES(?,?)", (iid, tag_to))
+    return iid
+
+
+def _vm_move_task(con, r):
+    """A message handed to somebody else takes its open task along to their board."""
+    if not r["item_id"]:
+        return
+    it = con.execute("SELECT id, status, section_id, project_id FROM items WHERE id=?",
+                     (r["item_id"],)).fetchone()
+    if not it or it["status"] == "done":
+        return
+    sid, pid, tag_to = _vm_task_home(con, r)
+    if it["section_id"] == sid and (it["project_id"] or None) == pid:
+        return
+    pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM items WHERE section_id=?", (sid,)).fetchone()[0]
+    con.execute("UPDATE items SET section_id=?, project_id=?, pos=?, updated_at=? WHERE id=?",
+                (sid, pid, pos, datetime.now().isoformat(timespec="seconds"), it["id"]))
+    con.execute("DELETE FROM list_tags WHERE item_id=?", (it["id"],))
+    if tag_to:
+        con.execute("INSERT OR IGNORE INTO list_tags(item_id, user_id) VALUES(?,?)", (it["id"], tag_to))
+
+
+def vm_backfill_desks(con):
+    """Once: every message already sitting in somebody's queue gets its task on their
+    board - made where there is none, moved where it was on the owner's board."""
+    if _setting(con, "mig:vmdesk1"):
+        return
+    rows = con.execute("SELECT v.* FROM voicemails v WHERE v.assignee IS NOT NULL AND v.tstatus='done'"
+                       " AND NOT EXISTS (SELECT 1 FROM vm_handled h WHERE h.vm_id=v.id AND h.user_id=v.assignee)"
+                       " ORDER BY v.ts").fetchall()
+    n = 0
+    for r in rows:
+        try:
+            if r["item_id"]:
+                _vm_move_task(con, r)
+            else:
+                _vm_make_task(con, r)
+            n += 1
+        except Exception as e:
+            app.logger.warning("desk backfill %s failed: %s", r["id"], e)
+    con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES('mig:vmdesk1', ?)", (str(n),))
+    con.commit()
+    app.logger.info("vm: %d queued messages put on their boards", n)
+
+
 @app.route("/vm/<int:vid>/assign", methods=["POST"])
 @login_required
 def vm_assign(vid):
@@ -6580,8 +6685,15 @@ def vm_assign(vid):
     if uid is not None and not con.execute("SELECT 1 FROM users WHERE id=?", (uid,)).fetchone():
         abort(404)
     con.execute("UPDATE voicemails SET assignee=? WHERE id=?", (uid, vid))
-    if uid is not None:
-        _let_see(con, ensure_buckets(con, _board_owner(con))["Community/Charity"], uid)
+    # the task goes with the message: made on their board if there is none yet
+    r = con.execute("SELECT * FROM voicemails WHERE id=?", (vid,)).fetchone()
+    try:
+        if r["item_id"]:
+            _vm_move_task(con, r)
+        elif uid is not None and r["tstatus"] == "done":
+            _vm_make_task(con, r)
+    except Exception as e:
+        app.logger.warning("vm %s task on assign failed: %s", vid, e)
     commit_retry(con)
     if uid is not None and uid != me() and wants(con, uid, "vm"):
         who = r["caller_name"] or vm.fmt_phone(r["caller_number"]) or "Unknown caller"
@@ -6599,44 +6711,107 @@ def vm_assign(vid):
 @app.route("/vm/<int:vid>/task", methods=["POST"])
 @login_required
 def vm_task(vid):
-    """One click: the voicemail becomes a task in Community/Charity, transcript in the note,
-    follow-up tomorrow, and the recording linked back."""
+    """One click: the voicemail becomes a task - on the board of whoever holds the
+    message - transcript in the note, follow-up tomorrow, recording linked back."""
     con = db()
     r = con.execute("SELECT * FROM voicemails WHERE id=?", (vid,)).fetchone()
     if not r:
         abort(404)
-    # The task lives on the board owner's Community/Charity box - the one board everyone
-    # works off - and is put on the list of whoever the voicemail is assigned to.
-    owner = _board_owner(con)
-    sid = ensure_buckets(con, owner)["Community/Charity"]
-    tag_to = r["assignee"] or (me() if me() != owner else None)
-    # what the message asks for: read once by the read step, or on the spot
-    if not r["read_json"]:
-        d = vm.read(r, _fam_label_for(con)(r), vm.line_label(r["ext"], vm.line_labels(con)))
-        con.execute("UPDATE voicemails SET read_json=?, kind=? WHERE id=?",
-                    (json.dumps(d, ensure_ascii=False), d["kind"], vid))
-        r = con.execute("SELECT * FROM voicemails WHERE id=?", (vid,)).fetchone()
-    rd = vm.reading(r)
-    title = (request.form.get("title") or "").strip() or rd["title"]
-    note = _vm_task_note(r, rd)
-    pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM items WHERE section_id=?",
-                      (sid,)).fetchone()[0]
-    now = datetime.now().isoformat(timespec="seconds")
-    due = (date.today() + timedelta(days=1)).isoformat()
-    cur = con.execute(
-        "INSERT INTO items(section_id, title, note, waiting_on, status, pos, due_date,"
-        " updated_at, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
-        (sid, title, note, "", "open", pos, due, now, now))
-    for i, step in enumerate(rd["todos"], 1):
-        con.execute("INSERT INTO checks(item_id, body, pos) VALUES(?,?,?)", (cur.lastrowid, step[:200], i))
-    con.execute("UPDATE voicemails SET item_id=? WHERE id=?", (cur.lastrowid, vid))
+    iid = _vm_make_task(con, r, title=request.form.get("title") or "", actor=me())
     con.execute("INSERT OR IGNORE INTO vm_handled(vm_id, user_id, at) VALUES(?,?,?)",
                 (vid, me(), datetime.now().isoformat(timespec="seconds")))
-    if tag_to:
-        _let_see(con, sid, tag_to)
-        con.execute("INSERT OR IGNORE INTO list_tags(item_id, user_id) VALUES(?,?)", (cur.lastrowid, tag_to))
     commit_retry(con)
-    return redirect(url_for("task_view", item_id=cur.lastrowid))
+    return redirect(url_for("task_view", item_id=iid))
+
+
+@app.route("/desk")
+@login_required
+def desk_view():
+    """One person's desk: the voicemails in their queue, who still needs a call back,
+    the open tasks those messages became (with their checklists), what got finished
+    this week. Everyone has one; an admin can look at anybody's."""
+    con = db()
+    folk = people_list(con)
+    who = me()
+    if session.get("admin") and (request.args.get("who") or "").isdigit():
+        who = int(request.args["who"])
+    person = user_row(con, who)
+    if not person:
+        abort(404)
+    today = _now_local().date()
+    iso = today.isoformat()
+    monday = (today - timedelta(days=today.weekday())).isoformat()
+    # the queue: handed to them, not yet filed away, task not closed
+    queue = con.execute(
+        "SELECT v.*, i.status AS istatus FROM voicemails v"
+        " LEFT JOIN vm_handled h ON h.vm_id=v.id AND h.user_id=?"
+        " LEFT JOIN items i ON i.id=v.item_id"
+        " WHERE v.assignee=? AND h.vm_id IS NULL AND v.tstatus NOT IN ('short','empty','skipped')"
+        " AND COALESCE(i.status,'') != 'done' ORDER BY v.ts DESC LIMIT 200", (who, who)).fetchall()
+    ids = [r["id"] for r in queue]
+    touches = {}
+    if ids:
+        qm = ",".join("?" * len(ids))
+        for t in con.execute("SELECT * FROM vm_touch WHERE vm_id IN (%s) AND status='sent' ORDER BY at" % qm, ids):
+            touches[t["vm_id"]] = t
+    owed = [r for r in queue if r["id"] not in touches]
+    # the tasks those messages became
+    tasks = con.execute(
+        "SELECT items.*, sections.title AS sec_title, COALESCE(p.title,'') AS proj_title,"
+        " v.id AS vm_id FROM voicemails v JOIN items ON items.id=v.item_id"
+        " JOIN sections ON items.section_id=sections.id LEFT JOIN projects p ON p.id=items.project_id"
+        " WHERE v.assignee=? AND items.status != 'done' AND items.archived=0"
+        " ORDER BY items.status='waiting', items.due_date IS NULL, items.due_date, items.id", (who,)).fetchall()
+    # finished this week: messages filed away, or tasks closed
+    done = con.execute(
+        "SELECT v.*, h.at AS handled_at, i.done_at, i.title AS ititle FROM voicemails v"
+        " LEFT JOIN vm_handled h ON h.vm_id=v.id AND h.user_id=?"
+        " LEFT JOIN items i ON i.id=v.item_id"
+        " WHERE v.assignee=? AND (substr(COALESCE(h.at,''),1,10) >= ? OR"
+        "   (i.status='done' AND substr(COALESCE(i.done_at,''),1,10) >= ?))"
+        " ORDER BY COALESCE(i.done_at, h.at) DESC LIMIT 100", (who, who, monday, monday)).fetchall()
+    tkeep = {t["id"] for t in tasks}
+    notes_by_item, files_by_item, checks_by_item = {}, {}, {}
+    if tkeep:
+        qm = ",".join("?" * len(tkeep))
+        for n in con.execute("SELECT * FROM item_notes WHERE item_id IN (%s) ORDER BY id" % qm, list(tkeep)):
+            notes_by_item.setdefault(n["item_id"], []).append(n)
+        for f in con.execute("SELECT * FROM item_files WHERE item_id IN (%s) ORDER BY id" % qm, list(tkeep)):
+            files_by_item.setdefault(f["item_id"], []).append(f)
+        for c in con.execute("SELECT * FROM checks WHERE item_id IN (%s) ORDER BY pos, id" % qm, list(tkeep)):
+            checks_by_item.setdefault(c["item_id"], []).append(c)
+    ltags = {}
+    for r in con.execute("SELECT item_id, user_id FROM list_tags"):
+        if r["item_id"] in tkeep:
+            ltags.setdefault(r["item_id"], []).append(r["user_id"])
+    ltags = {k: ",".join(str(u) for u in sorted(v)) for k, v in ltags.items()}
+    steps_left = sum(1 for cs in checks_by_item.values() for c in cs if not c["done"])
+    # queue sizes for the admin's chips
+    qcounts = {}
+    if session.get("admin"):
+        for f in folk:
+            qcounts[f["id"]] = con.execute(
+                "SELECT COUNT(*) FROM voicemails v LEFT JOIN vm_handled h ON h.vm_id=v.id AND h.user_id=?"
+                " LEFT JOIN items i ON i.id=v.item_id WHERE h.vm_id IS NULL AND v.assignee=?"
+                " AND v.tstatus NOT IN ('short','empty','skipped') AND COALESCE(i.status,'') != 'done'",
+                (f["id"], f["id"])).fetchone()[0]
+    fam = _fam_label_for(con)
+    readings = {r["id"]: vm.reading(r) for r in list(queue) + list(done)}
+    labels = vm.line_labels(con)
+    return render_template("desk.html", who=who, person=person, folk=folk, qcounts=qcounts,
+                           queue=queue, owed=owed, touches=touches, tasks=tasks, done=done,
+                           readings=readings, fam=fam, fmt_phone=vm.fmt_phone,
+                           kind_label=vm.KIND_LABEL, line_labels=labels,
+                           line_of=lambda r: vm.line_label(r["ext"], labels),
+                           steps_left=steps_left,
+                           notes_by_item=notes_by_item, files_by_item=files_by_item,
+                           checks_by_item=checks_by_item, ltags=ltags,
+                           people={r["id"]: r["display_name"] for r in folk},
+                           my_secs={s["id"] for s in con.execute(
+                               "SELECT id FROM sections WHERE owner_id=?", (me(),))},
+                           sec_kind={}, today_iso=iso, soon_iso=iso, monday=monday,
+                           full_name=full_name,
+                           pretty=_now_local().strftime("%A, %B %-d"))
 
 
 @app.route("/vm/<int:vid>/dh", methods=["POST"])
