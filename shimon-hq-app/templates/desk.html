@@ -43,6 +43,11 @@
   .deskpage .tag{display:inline-block; font-size:11px; padding:1px 8px; border-radius:999px; border:1px solid var(--border); color:var(--muted); margin-left:4px; vertical-align:middle}
   .deskpage .tag.owe{color:var(--danger); border-color:var(--danger)}
   .deskpage .tag.touched{color:var(--pill-done-tx)}
+  .deskpage .passform{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:0 0 12px}
+  .deskpage .passform input[name=title]{grid-column:1/-1}
+  .deskpage .passform input[name=note]{grid-column:1/-1}
+  .deskpage .passform input, .deskpage .passform select, .deskpage .passform button{font:inherit; font-size:14px; padding:8px 10px; border:1px solid var(--border); border-radius:10px; background:var(--card); color:var(--ink); min-width:0}
+  .deskpage .passform button{background:var(--ink); color:var(--card); border-color:var(--ink); grid-column:1/-1}
   .deskpage .donelist .msg{padding:8px 0}
   .deskpage .donelist .msg .gist{color:var(--muted)}
   @media (max-width:640px){ .deskpage .msg{grid-template-columns:1fr} .deskpage .msg .when{text-align:left} }
@@ -59,6 +64,7 @@
   <a class="stat{% if owed %} alarm{% endif %}" href="#lane-queue"><div class="num">{{ owed|length }}</div><div class="lbl">call back owed</div></a>
   <a class="stat" href="#lane-tasks"><div class="num">{{ tasks|length }}</div><div class="lbl">open task{{ '' if tasks|length == 1 else 's' }}</div></a>
   <a class="stat" href="#lane-tasks"><div class="num">{{ steps_left }}</div><div class="lbl">steps left</div></a>
+  <a class="stat" href="#lane-handed"><div class="num">{{ handed|length }}</div><div class="lbl">passed to {{ 'you' if who == session.get('uid') else 'them' }}</div></a>
   <a class="stat good" href="#lane-done"><div class="num">{{ done|length }}</div><div class="lbl">finished this week</div></a>
 </div>
 
@@ -110,6 +116,37 @@
   </ul></div>
   {% else %}<p class="caveat">Every message handed over becomes a task here, with its to-do list. Tick the steps off as you go; mark the task Done and the message is finished too.</p>{% endif %}
 </section>
+
+<section class="card" id="lane-handed" style="--sa:#6B4A8A">
+  <div class="sec-head"><h2><span class="dot"></span>Passed to {{ 'you' if who == session.get('uid') else person.first_name or person.display_name }}</h2>
+    <span class="counts">{{ handed|length }} open</span></div>
+  <form method="post" action="{{ url_for('desk_pass') }}" class="passform noprint" data-no-draft>
+    {% if who != session.get('uid') %}<input type="hidden" name="to" value="{{ who }}">
+    {% else %}<select name="to" required><option value="">Pass to&hellip;</option>{% for f in folk if f.id != who %}<option value="{{ f.id }}">{{ f.display_name }}</option>{% endfor %}</select>{% endif %}
+    <input name="title" dir="auto" placeholder="{% if who != session.get('uid') %}Pass {{ person.first_name or person.display_name }} a task&hellip;{% else %}Pass someone a task&hellip;{% endif %}" required maxlength="200" autocomplete="off">
+    <input name="note" dir="auto" placeholder="Details (optional)" maxlength="2000" autocomplete="off">
+    <select name="board">{% for b in boards %}<option value="{{ b }}" {% if b == 'Community/Charity' %}selected{% endif %}>{{ b }}</option>{% endfor %}</select>
+    <input type="date" name="due" title="Due">
+    <button type="submit">Pass it on</button>
+  </form>
+  {% if handed %}
+  {% set show_where = true %}
+  <div class="seccols"><ul class="items">
+    {% for it in handed %}{% include "_item.html" %}{% endfor %}
+  </ul></div>
+  {% else %}<p class="caveat">Tasks somebody puts on {{ 'your' if who == session.get('uid') else 'their' }} list from their own board show here. Answer in the response box on the row &mdash; it lands on their phone; their answer lands on {{ 'yours' if who == session.get('uid') else 'theirs' }}.</p>{% endif %}
+</section>
+
+{% if passed %}
+<section class="card" id="lane-passed" style="--sa:#1F3A5F">
+  <div class="sec-head"><h2><span class="dot"></span>{{ 'You' if who == session.get('uid') else person.first_name or person.display_name }} passed on</h2>
+    <span class="counts">{{ passed|length }} open</span></div>
+  {% set show_where = true %}
+  <div class="seccols"><ul class="items">
+    {% for it in passed %}{% include "_item.html" %}{% endfor %}
+  </ul></div>
+</section>
+{% endif %}
 
 <section class="card donelist" id="lane-done" style="--sa:#8A671D">
   <div class="sec-head"><h2><span class="dot"></span>Finished this week</h2>
