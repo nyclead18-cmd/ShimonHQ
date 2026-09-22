@@ -5277,6 +5277,7 @@ def vm_work(date_from=None, budget=240):
             vm_backfill_tasks(con)
             vm_backfill_desks(con)
             vm_backfill_notes(con)
+            vm_reread(con)
     except Exception as e:
         app.logger.warning("vm work failed: %s", e)
     finally:
@@ -5326,6 +5327,44 @@ def vm_backfill_notes(con):
         con.execute("UPDATE items SET note=? WHERE id=?", (_vm_task_note(r, vm.reading(r)), r["item_id"]))
     con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES('mig:vmnote2', ?)", (str(len(rows)),))
     con.commit()
+
+
+def vm_reread(con, max_n=5):
+    """Messages read by the keyword fallback (no API key at the time) get a proper read
+    once the key is there - a few per tick, newest first. Their open task follows:
+    stock title, note and an untouched checklist are replaced; anything ticked is kept."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return 0
+    rows = con.execute("SELECT * FROM voicemails WHERE tstatus='done' AND read_json LIKE '%\"by\": \"plain\"%'"
+                       " AND ts > ? ORDER BY ts DESC LIMIT ?",
+                       ((date.today() - timedelta(days=90)).isoformat(), max_n)).fetchall()
+    labels = vm.line_labels(con)
+    fam = _fam_label_for(con)
+    n = 0
+    for r in rows:
+        old = vm.reading(r)
+        d = vm.read(r, fam(r), vm.line_label(r["ext"], labels))
+        if d.get("by") != "claude":
+            # still no luck (key rejected, network) - stop, try again next tick
+            break
+        con.execute("UPDATE voicemails SET read_json=?, kind=? WHERE id=?",
+                    (json.dumps(d, ensure_ascii=False), d["kind"], r["id"]))
+        if r["item_id"]:
+            it = con.execute("SELECT id, title, status FROM items WHERE id=?", (r["item_id"],)).fetchone()
+            if it and it["status"] != "done":
+                r2 = con.execute("SELECT * FROM voicemails WHERE id=?", (r["id"],)).fetchone()
+                title = d["title"] if it["title"] == old.get("title") else it["title"]
+                con.execute("UPDATE items SET title=?, note=? WHERE id=?", (title, _vm_task_note(r2, d), it["id"]))
+                ticked = con.execute("SELECT COUNT(*) FROM checks WHERE item_id=? AND done=1", (it["id"],)).fetchone()[0]
+                if not ticked:
+                    con.execute("DELETE FROM checks WHERE item_id=?", (it["id"],))
+                    for i, step in enumerate(d["todos"], 1):
+                        con.execute("INSERT INTO checks(item_id, body, pos) VALUES(?,?,?)", (it["id"], step[:200], i))
+        con.commit()
+        n += 1
+    if n:
+        app.logger.info("vm: %d messages re-read with the AI", n)
+    return n
 
 
 def vm_popups(con, item_ids):
