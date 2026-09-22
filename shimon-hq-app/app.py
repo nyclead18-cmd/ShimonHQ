@@ -5311,6 +5311,8 @@ def vm_work(date_from=None, budget=240):
             vm_backfill_desks(con)
             vm_backfill_notes(con)
             vm_reread(con)
+            vm_pull_calls(con)
+            vm_transcribe_calls(con)
     except Exception as e:
         app.logger.warning("vm work failed: %s", e)
     finally:
@@ -5398,6 +5400,156 @@ def vm_reread(con, max_n=5):
     if n:
         app.logger.info("vm: %d messages re-read with the AI", n)
     return n
+
+
+def _set_setting(con, k, v):
+    con.execute("INSERT INTO settings(k, v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", (k, v))
+    con.commit()
+
+
+def _digits10(n):
+    d = re.sub(r"\D", "", n or "")
+    return d[-10:] if len(d) >= 10 else d
+
+
+def _mins_apart(a, b):
+    """Minutes between two naive ISO stamps; the smaller of the two readings when one of
+    them may have been written in UTC (Render's clock) instead of New York time."""
+    try:
+        da, db_ = datetime.fromisoformat(a[:19]), datetime.fromisoformat(b[:19])
+    except (TypeError, ValueError):
+        return 10 ** 6
+    d = abs((da - db_).total_seconds()) / 60
+    return min(d, abs(d - 240), abs(d - 300))
+
+
+def vm_pull_calls(con):
+    """Recorded call-backs come home. RingCentral's call log for the line (outbound, with
+    a recording) is read every tick; each new recording is matched to the call-back that
+    made it - same number, same quarter hour - or, failing that, to the newest open message
+    from that number; downloaded; queued for transcription."""
+    if not vm.configured() or vm.mirror_configured():
+        return 0
+    vm.ensure_calls_schema(con)
+    last = con.execute("SELECT MAX(started) FROM vm_calls").fetchone()[0]
+    since = ((datetime.fromisoformat(last) - timedelta(hours=6)) if last
+             else (datetime.now() - timedelta(days=3)))
+    try:
+        recs = vm.rc_call_log(since.strftime("%Y-%m-%dT%H:%M:%S.000Z"))
+        _set_setting(con, "vm_calls_err", "")
+    except Exception as e:
+        msg = vm._rc_err(e) if hasattr(e, "code") else str(e)[:200]
+        _set_setting(con, "vm_calls_err", msg)
+        app.logger.warning("vm calls: log read failed: %s", msg)
+        return 0
+    n = 0
+    for c in recs:
+        rec = c.get("recording") or {}
+        if not rec.get("id") or not c.get("id"):
+            continue
+        if con.execute("SELECT 1 FROM vm_calls WHERE rc_id=?", (str(c["id"]),)).fetchone():
+            continue
+        to = (c.get("to") or {}).get("phoneNumber") or ""
+        started = vm.to_local(c.get("startTime") or "")
+        dur = int(c.get("duration") or 0)
+        d10 = _digits10(to)
+        # the call-back that made it: same number, closest in time
+        touch, vid, uid = None, None, None
+        for t in con.execute("SELECT * FROM vm_touch WHERE kind='call' AND status NOT LIKE 'failed%'"
+                             " ORDER BY id DESC LIMIT 400"):
+            if _digits10(t["to_number"]) == d10 and _mins_apart(t["at"], started) <= 20:
+                touch = t
+                break
+        if touch:
+            vid, uid = touch["vm_id"], touch["user_id"]
+        else:
+            hit = con.execute("SELECT id, assignee FROM voicemails WHERE ts > ? AND caller_number LIKE ?"
+                              " ORDER BY ts DESC LIMIT 1",
+                              ((datetime.now() - timedelta(days=45)).isoformat(), "%" + d10)).fetchone() if d10 else None
+            if hit:
+                vid, uid = hit["id"], hit["assignee"]
+        if not vid:
+            continue                     # a call to somebody who never left a message - not ours to file
+        try:
+            data, ctype = vm.rc_recording(rec["id"])
+        except Exception as e:
+            msg = vm._rc_err(e) if hasattr(e, "code") else str(e)[:200]
+            _set_setting(con, "vm_calls_err", msg)
+            app.logger.warning("vm calls: recording %s failed: %s", rec["id"], msg)
+            break
+        ext = ".wav" if "wav" in (ctype or "") else ".mp3"
+        os.makedirs(os.path.join(FILES_DIR, "calls"), exist_ok=True)
+        stored = "calls/" + uuid.uuid4().hex + ext
+        with open(os.path.join(FILES_DIR, stored), "wb") as f:
+            f.write(data)
+        con.execute("INSERT OR IGNORE INTO vm_calls(rc_id, session_id, vm_id, touch_id, user_id, to_number,"
+                    " started, duration, stored_name, tstatus, created_at) VALUES(?,?,?,?,?,?,?,?,?,'new',?)",
+                    (str(c["id"]), str(c.get("sessionId") or ""), vid, touch["id"] if touch else None, uid,
+                     to, started, dur, stored, datetime.now().isoformat(timespec="seconds")))
+        if touch:
+            con.execute("UPDATE vm_touch SET status='recorded' WHERE id=?", (touch["id"],))
+        con.commit()
+        n += 1
+    if n:
+        app.logger.info("vm: %d recorded call-backs pulled", n)
+    return n
+
+
+def vm_transcribe_calls(con, max_n=3):
+    """Each pulled recording: Yiddish Labs for the words, Claude for the two-line summary,
+    then the recording and the summary go onto the message's task as a file and a response."""
+    if not vm.yl_configured():
+        return 0
+    rows = con.execute("SELECT * FROM vm_calls WHERE tstatus='new' ORDER BY started LIMIT ?", (max_n,)).fetchall()
+    n = 0
+    for c in rows:
+        path = os.path.join(FILES_DIR, c["stored_name"])
+        try:
+            t = vm.yl_transcribe(path, name="Call %s %s" % ((c["started"] or "")[:16], c["to_number"] or ""))
+            en = t["english"] or t.get("summary") or ""
+            v = con.execute("SELECT * FROM voicemails WHERE id=?", (c["vm_id"],)).fetchone()
+            who = (v["caller_name"] if v else "") or vm.fmt_phone(c["to_number"])
+            summ = vm.call_summary(en, t["yiddish"], who) or _short(en, 300)
+            con.execute("UPDATE vm_calls SET yiddish=?, english=?, summary=?, tstatus='done', terror=NULL WHERE id=?",
+                        (t["yiddish"], en, summ, c["id"]))
+            _attach_call(con, c, v, summ)
+            n += 1
+        except Exception as e:
+            con.execute("UPDATE vm_calls SET tstatus='failed', terror=? WHERE id=?", (str(e)[:400], c["id"]))
+            app.logger.warning("vm calls: transcription failed for %s: %s", c["stored_name"], e)
+        con.commit()
+    return n
+
+
+def _attach_call(con, c, v, summ):
+    """The recording as a file on the task, the summary as a response - so the whole
+    conversation lives with the message."""
+    if not v or not v["item_id"]:
+        return
+    it = con.execute("SELECT id, title FROM items WHERE id=?", (v["item_id"],)).fetchone()
+    if not it:
+        return
+    when = (c["started"] or "")[:16].replace("T", " ")
+    mins = "%d:%02d" % ((c["duration"] or 0) // 60, (c["duration"] or 0) % 60)
+    who = v["caller_name"] or vm.fmt_phone(v["caller_number"]) or "caller"
+    fname = "Call_%s_%s%s" % (when[:10], re.sub(r"[^A-Za-z0-9]+", "_", who).strip("_"),
+                              os.path.splitext(c["stored_name"])[1])
+    size = os.path.getsize(os.path.join(FILES_DIR, c["stored_name"])) if os.path.exists(os.path.join(FILES_DIR, c["stored_name"])) else 0
+    fid = con.execute("INSERT INTO item_files(item_id, filename, stored_name, size, created_at) VALUES(?,?,?,?,?)",
+                      (it["id"], fname, c["stored_name"], size, datetime.now().isoformat(timespec="seconds"))).lastrowid
+    caller_name = con.execute("SELECT display_name FROM users WHERE id=?", (c["user_id"],)).fetchone() if c["user_id"] else None
+    body = "\u260e %s called %s \u00b7 %s \u00b7 %s\n%s" % (
+        (caller_name["display_name"] if caller_name else "Someone"), who, when, mins, summ or "(no summary)")
+    nid = con.execute("INSERT INTO item_notes(item_id, body, created_at, source) VALUES(?,?,?,?)",
+                      (it["id"], body, c["started"] or datetime.now().isoformat(timespec="seconds"), "call")).lastrowid
+    con.execute("UPDATE items SET updated_at=? WHERE id=?", (datetime.now().isoformat(timespec="seconds"), it["id"]))
+    con.execute("UPDATE vm_calls SET file_id=?, note_id=? WHERE id=?", (fid, nid, c["id"]))
+    # the other side of the conversation hears about it
+    for uid in watchers(con, it["id"], "notes", exclude=c["user_id"] or 0):
+        try:
+            send_push("Call with %s recorded" % who, _short(summ or it["title"], 140), "/desk#msg-%d" % v["id"], uid=uid)
+        except Exception as e:
+            app.logger.warning("call push failed: %s", e)
 
 
 def vm_popups(con, item_ids):
@@ -6548,7 +6700,7 @@ def _vm_send_audio(row, download=False):
 def _touch(con, vid, kind, to, body, status, rc_id=""):
     con.execute("INSERT INTO vm_touch(vm_id, user_id, kind, to_number, body, status, rc_id, at)"
                 " VALUES(?,?,?,?,?,?,?,?)", (vid, me(), kind, to, body, status, rc_id,
-                                              datetime.now().isoformat(timespec="seconds")))
+                                              _now_local().replace(tzinfo=None).isoformat(timespec="seconds")))
     commit_retry(con)
 
 
@@ -6883,6 +7035,14 @@ def desk_view():
         for t in con.execute("SELECT * FROM vm_touch WHERE vm_id IN (%s) AND status='sent' ORDER BY at" % qm, ids):
             touches[t["vm_id"]] = t
     owed = [r for r in queue if r["id"] not in touches]
+    calls_by_vm = {}
+    if ids:
+        try:
+            for c in con.execute("SELECT * FROM vm_calls WHERE vm_id IN (%s) ORDER BY started" % qm, ids):
+                calls_by_vm.setdefault(c["vm_id"], []).append(c)
+        except sqlite3.Error:
+            pass
+    calls_err = _setting(con, "vm_calls_err", "") if session.get("admin") else ""
     # the tasks those messages became
     tasks = con.execute(
         "SELECT items.*, sections.title AS sec_title, COALESCE(p.title,'') AS proj_title,"
@@ -6951,6 +7111,7 @@ def desk_view():
                            queue=queue, owed=owed, touches=touches, tasks=tasks, done=done,
                            handed=handed, passed=passed, boards=BOARDS, vm_of=vm_of,
                            outbound=vm.configured() and not vm.mirror_configured(),
+                           calls_by_vm=calls_by_vm, calls_err=calls_err,
                            my_phone=(person["phone"] or "") if who == me() else "",
                            readings=readings, fam=fam, fmt_phone=vm.fmt_phone,
                            kind_label=vm.KIND_LABEL, line_labels=labels,
@@ -6964,6 +7125,15 @@ def desk_view():
                            sec_kind={}, today_iso=iso, soon_iso=iso, monday=monday,
                            full_name=full_name,
                            pretty=_now_local().strftime("%A, %B %-d"))
+
+
+@app.route("/calls/<int:cid>/audio")
+@login_required
+def call_audio(cid):
+    row = db().execute("SELECT stored_name FROM vm_calls WHERE id=?", (cid,)).fetchone()
+    if not row or not row["stored_name"]:
+        abort(404)
+    return send_from_directory(FILES_DIR, row["stored_name"], as_attachment=False)
 
 
 @app.route("/desk/pass", methods=["POST"])

@@ -289,7 +289,61 @@ SMS_TEMPLATES = [
 ]
 
 
+# ---------- recorded calls: what was said when we called back ----------
+
+def rc_call_log(date_from, direction="Outbound"):
+    """Recorded voice calls from the line's extension since `date_from` (ISO, UTC ok).
+    Needs ReadCallLog on the app; the recording itself needs ReadCallRecording."""
+    out, page = [], 1
+    while True:
+        j = _rc_get("/restapi/v1.0/account/~/extension/~/call-log",
+                    {"type": "Voice", "direction": direction, "withRecording": "true",
+                     "view": "Simple", "dateFrom": date_from, "perPage": 100, "page": page})
+        out += j.get("records") or []
+        if page >= int((j.get("paging") or {}).get("totalPages") or 1):
+            break
+        page += 1
+    return out
+
+
+def rc_recording(rec_id):
+    """The audio of one recording -> (bytes, content-type)."""
+    return _rc_get("/restapi/v1.0/account/~/recording/%s/content" % rec_id, raw=True)
+
+
+def call_summary(english, yiddish, who=""):
+    """Two or three lines: what was discussed, what was agreed, the next step."""
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    text = (english or "").strip() or (yiddish or "").strip()
+    if not key or not text:
+        return ""
+    prompt = ("This is the transcript of a call our charity office made back to a caller (%s). "
+              "Summarize in plain English, 2-3 short lines: what was discussed, what was agreed or "
+              "promised, and the next step (who does what). No preamble.\n\nTranscript:\n%s"
+              % (who or "unknown", text[:9000]))
+    body = json.dumps({"model": os.environ.get("HQ_SUMMARY_MODEL", "claude-haiku-4-5"),
+                       "max_tokens": 300, "messages": [{"role": "user", "content": prompt}]}).encode()
+    try:
+        j = _req("https://api.anthropic.com/v1/messages", data=body, method="POST", timeout=60,
+                 headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                          "Content-Type": "application/json"})
+        return "".join(p.get("text", "") for p in j.get("content", [])).strip()
+    except Exception:
+        return ""
+
+
+def ensure_calls_schema(con):
+    con.execute("CREATE TABLE IF NOT EXISTS vm_calls ("
+                " id INTEGER PRIMARY KEY AUTOINCREMENT, rc_id TEXT UNIQUE, session_id TEXT,"
+                " vm_id INTEGER, touch_id INTEGER, user_id INTEGER, to_number TEXT, started TEXT,"
+                " duration INTEGER, stored_name TEXT, yiddish TEXT, english TEXT, summary TEXT,"
+                " tstatus TEXT NOT NULL DEFAULT 'new', terror TEXT, file_id INTEGER, note_id INTEGER,"
+                " created_at TEXT)")
+    con.execute("CREATE INDEX IF NOT EXISTS vm_calls_vm ON vm_calls(vm_id)")
+
+
 def ensure_touch_schema(con):
+    ensure_calls_schema(con)
     con.execute("CREATE TABLE IF NOT EXISTS vm_touch ("
                 " id INTEGER PRIMARY KEY AUTOINCREMENT, vm_id INTEGER NOT NULL, user_id INTEGER,"
                 " kind TEXT NOT NULL, to_number TEXT, body TEXT, status TEXT, rc_id TEXT, at TEXT)")
