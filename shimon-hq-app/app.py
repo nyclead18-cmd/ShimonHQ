@@ -5276,6 +5276,7 @@ def vm_work(date_from=None, budget=240):
             vm_route(con)
             vm_backfill_tasks(con)
             vm_backfill_desks(con)
+            vm_backfill_notes(con)
     except Exception as e:
         app.logger.warning("vm work failed: %s", e)
     finally:
@@ -5301,19 +5302,41 @@ def _fam_label_for(con):
 
 
 def _vm_task_note(r, rd):
-    """The task note: what they said in a line or two, the facts, then the transcript
-    underneath for whoever wants the words."""
+    """The task note: what they said in a line, the facts, where it came from. The
+    full transcript and the recording open from the row (the message button), so
+    the board stays readable."""
     facts = [x for x in (
         ("Callback " + rd["callback"]) if rd.get("callback") else "",
         ("Amount " + rd["amount"]) if rd.get("amount") else "",
         vm.KIND_LABEL.get(rd.get("kind") or "", "")) if x]
-    head = "\n".join(x for x in (rd.get("gist", ""), " · ".join(facts)) if x)
-    body = "\n\n".join(x for x in ((r["english"] or "").strip(), (r["yiddish"] or "").strip()) if x)
-    tail = "Voicemail %s · %s · %ss%s\n%s" % (
+    gist = _short(rd.get("gist", ""), 220)
+    tail = "Voicemail %s · %s · %ss%s" % (
         (r["ts"] or "")[:16].replace("T", " "), vm.fmt_phone(r["caller_number"]),
-        r["duration"] or "?", (" · " + rd["line"]) if rd.get("line") else "",
-        url_for("vm_audio", vid=r["id"], _external=True))
-    return "\n\n".join(x for x in (head, ("— transcript —\n" + body) if body else "", tail) if x)
+        r["duration"] or "?", (" · " + rd["line"]) if rd.get("line") else "")
+    return " · ".join(x for x in (gist, " · ".join(facts), tail) if x)
+
+
+def vm_backfill_notes(con):
+    """Once: task notes that carry the whole transcript are cut down to the short form."""
+    if _setting(con, "mig:vmnote2"):
+        return
+    rows = con.execute("SELECT v.*, i.note AS inote FROM voicemails v JOIN items i ON i.id=v.item_id"
+                       " WHERE i.note LIKE '%transcript%' OR i.note LIKE '%/vm/%/audio%'").fetchall()
+    for r in rows:
+        con.execute("UPDATE items SET note=? WHERE id=?", (_vm_task_note(r, vm.reading(r)), r["item_id"]))
+    con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES('mig:vmnote2', ?)", (str(len(rows)),))
+    con.commit()
+
+
+def vm_popups(con, item_ids):
+    """{item_id: voicemail row} for the message button on task rows."""
+    ids = [i for i in item_ids if i]
+    if not ids:
+        return {}
+    qm = ",".join("?" * len(ids))
+    return {r["item_id"]: r for r in con.execute(
+        "SELECT id, item_id, caller_name, caller_number, ts, duration, english, yiddish, stored_name, ext"
+        " FROM voicemails WHERE item_id IN (%s)" % qm, ids)}
 
 
 # Who each kind of message goes to. settings 'route:<kind>' holds a user id; unset
@@ -5854,6 +5877,7 @@ def task_view(item_id):
     files = con.execute("SELECT * FROM item_files WHERE item_id=? ORDER BY id",
                         (item_id,)).fetchall()
     return render_template("task.html", it=it, notes=notes, files=files,
+                           vm_of=vm_popups(con, [item_id]), fmt_phone=vm.fmt_phone,
                            today_iso=_now_local().date().isoformat(),
                            soon_iso=business_days_out(3),
                            pretty=_now_local().strftime("%A, %B %-d"),
@@ -6804,7 +6828,7 @@ def desk_view():
         " ORDER BY COALESCE(i.done_at, h.at) DESC LIMIT 100", (who, who, monday, monday)).fetchall()
     # passed to them by hand: tasks on other people's boards that sit on their list
     # (voicemail tasks already shown above are left out)
-    vm_items = {t["id"] for t in tasks}
+    vm_items = {r[0] for r in con.execute("SELECT item_id FROM voicemails WHERE item_id IS NOT NULL")}
     handed = [r for r in con.execute(
         "SELECT items.*, sections.title AS sec_title, COALESCE(p.title,'') AS proj_title,"
         " sections.owner_id AS from_uid FROM items"
@@ -6823,6 +6847,7 @@ def desk_view():
         " AND items.id NOT IN (SELECT item_id FROM voicemails WHERE item_id IS NOT NULL)"
         " ORDER BY items.updated_at DESC", (who,)).fetchall()
     tkeep = {t["id"] for t in tasks} | {t["id"] for t in handed} | {t["id"] for t in passed}
+    vm_of = vm_popups(con, tkeep)
     notes_by_item, files_by_item, checks_by_item = {}, {}, {}
     if tkeep:
         qm = ",".join("?" * len(tkeep))
@@ -6852,7 +6877,7 @@ def desk_view():
     labels = vm.line_labels(con)
     return render_template("desk.html", who=who, person=person, folk=folk, qcounts=qcounts,
                            queue=queue, owed=owed, touches=touches, tasks=tasks, done=done,
-                           handed=handed, passed=passed, boards=BOARDS,
+                           handed=handed, passed=passed, boards=BOARDS, vm_of=vm_of,
                            readings=readings, fam=fam, fmt_phone=vm.fmt_phone,
                            kind_label=vm.KIND_LABEL, line_labels=labels,
                            line_of=lambda r: vm.line_label(r["ext"], labels),
