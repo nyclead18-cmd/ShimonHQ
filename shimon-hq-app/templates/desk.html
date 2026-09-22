@@ -30,6 +30,7 @@
   .deskpage .whose a{border:1px solid var(--border); border-radius:999px; padding:5px 12px; font-size:13px; color:var(--ink); text-decoration:none; background:var(--card)}
   .deskpage .whose a.on{background:var(--ink); color:var(--card); border-color:var(--ink)}
   .deskpage .whose a small{color:inherit; opacity:.65; margin-left:4px}
+  .deskpage .whose .seeas{font:inherit; font-size:13px; padding:5px 12px; border-radius:999px; border:1px solid #6B4A8A; color:#6B4A8A; background:var(--card); cursor:pointer}
   /* two columns: the work on the left, the side cards on the right */
   .deskpage .desk2{display:grid; grid-template-columns:minmax(0,1.6fr) minmax(0,1fr); gap:20px; align-items:start}
   @media (max-width:980px){ .deskpage .desk2{grid-template-columns:1fr} }
@@ -80,6 +81,9 @@
 {% if session.get('admin') and folk|length > 1 %}
 <div class="whose noprint">
   {% for f in folk %}<a class="{% if f.id == who %}on{% endif %}" href="{{ url_for('desk_view', who=f.id) }}">{{ f.display_name }}<small>{{ qcounts.get(f.id, 0) }}</small></a>{% endfor %}
+  {% if who != session.get('uid') and not session.get('view_as_from') %}
+  <form method="post" action="{{ url_for('view_as', uid=who) }}" style="margin:0"><button type="submit" class="seeas" title="Step into their account: their board, their tabs, exactly as they see it">See HQ as {{ person.first_name or person.display_name }} &rarr;</button></form>
+  {% endif %}
 </div>
 {% endif %}
 
