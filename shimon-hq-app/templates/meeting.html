@@ -16,6 +16,7 @@
       <a class="tab" href="{{ url_for('today_view') }}">Today</a>
       <a class="tab" href="{{ url_for('board') }}">Board</a>
       <a class="tab" href="{{ url_for('vm_view') }}">Voicemail</a>
+      <a class="tab" href="{{ url_for('desk_view') }}">Desk</a>
       <a class="tab" href="{{ url_for('joel_view') }}">Review</a>
     </nav>
     <a class="logout" href="{{ url_for('account_view') }}">{{ session.get('name') or 'Account' }}</a>
