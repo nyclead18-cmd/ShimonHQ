@@ -132,7 +132,8 @@
       {% if r.english %}<div class="txt" dir="auto">{{ r.english }}</div>{% endif %}
       {% if r.yiddish %}<div class="txt yi" dir="rtl">{{ r.yiddish }}</div>{% endif %}
       <div class="acts">
-        {% if num %}<a class="call" href="tel:{{ num|replace(' ','')|replace('(','')|replace(')','')|replace('-','') }}">Call {{ fmt_phone(num) }}</a>{% endif %}
+        {% if num and outbound and who == session.get('uid') %}<button type="button" class="call" data-lcall="{{ url_for('vm_call', vid=r.id) }}" title="RingCentral rings your phone, then dials them - the line's number shows, the call is recorded on the line">&#9742; Call from the line</button>{% endif %}
+        {% if num %}<a class="{{ '' if (outbound and who == session.get('uid')) else 'call' }}" href="tel:{{ num|replace(' ','')|replace('(','')|replace(')','')|replace('-','') }}">{{ 'My phone' if (outbound and who == session.get('uid')) else 'Call' }} {{ fmt_phone(num) }}</a>{% endif %}
         <a href="{{ url_for('vm_view', q=(who if session.get('admin') else None)) }}#vm-{{ r.id }}">Text back &#8599;</a>
         {% if r.item_id %}<a href="{{ url_for('task_view', item_id=r.item_id) }}">Task page &#8599;</a>
         {% else %}<form method="post" action="{{ url_for('vm_task', vid=r.id) }}"><button type="submit">Make task</button></form>{% endif %}
@@ -221,6 +222,23 @@
     var a = m.querySelector('audio[data-src]');
     if (!was && a && !a.src) { a.src = a.dataset.src; }
     if (was && a) { a.pause(); }
+  });
+  // call from the line: RingCentral rings my phone first, then the caller
+  var MY_PHONE = {{ my_phone|tojson }};
+  document.addEventListener('click', function(e){
+    var b = e.target.closest('[data-lcall]'); if (!b) return;
+    e.preventDefault();
+    var mine = MY_PHONE;
+    if (!mine) { mine = prompt('Your phone number - the one RingCentral should ring first:'); if (!mine) return; }
+    b.disabled = true; var was = b.textContent; b.textContent = 'Ringing you…';
+    var fd = new FormData(); fd.append('from', mine);
+    fetch(b.dataset.lcall, {method:'POST', body: fd}).then(function(r){ return r.json(); }).then(function(j){
+      if (j.error) { alert(j.error); b.textContent = was; b.disabled = false; return; }
+      MY_PHONE = MY_PHONE || mine;
+      b.textContent = 'Calling… pick up ' + (j.mine || 'your phone');
+      var tag = b.closest('.msg').querySelector('.tag.owe'); if (tag) { tag.textContent = 'called just now'; tag.className = 'tag touched'; }
+      setTimeout(function(){ b.textContent = 'Call again'; b.disabled = false; }, 8000);
+    }).catch(function(){ b.textContent = was; b.disabled = false; alert('Could not start the call.'); });
   });
   // a message linked from a push (#msg-123) opens itself
   if (location.hash && /^#msg-\d+$/.test(location.hash)) {
