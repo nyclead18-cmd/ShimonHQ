@@ -1492,3 +1492,11 @@ body.calm .toolbar{margin-bottom:10px;}
 .grid.board li.item:not(.expanded) .t .nmeta{display:none;}
 .grid.board li.item:not(.expanded) .metaline{gap:4px 6px;}
 .grid.board li.item:not(.expanded) .stamps{display:none;}
+
+/* ---------- v173: lean HQ - one board, four tabs ----------
+   For somebody who works one corner of the operation: the Community/Charity board
+   only, Today · Board · Voicemail · Desk, nothing else to wonder about. */
+body.lean .tabs .tab:not([href="/"]):not([href="/today"]):not([href="/vm"]):not([href="/desk"]){display:none;}
+body.lean .boardchips{display:none;}
+body.lean .wrap:not(.deskpage) > .stats{display:none;}
+body.lean .calmtog{display:none;}
