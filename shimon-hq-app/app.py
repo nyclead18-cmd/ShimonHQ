@@ -868,6 +868,11 @@ def init_db():
         con.execute("INSERT INTO settings(k, v) VALUES('vm_autoroute', '1')"
                     " ON CONFLICT(k) DO UPDATE SET v='1'")
         con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES('mig:autoroute171', '1')")
+    # Mrs. Hartman works one corner of it: lean HQ, set once (v173)
+    if not con.execute("SELECT 1 FROM settings WHERE k='mig:lean173'").fetchone():
+        con.execute("INSERT OR IGNORE INTO settings(k, v)"
+                    " SELECT 'u' || id || ':lean', '1' FROM users WHERE lower(username)='hartman'")
+        con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES('mig:lean173', '1')")
     # Mrs. Hartman's first name, filled once where it was never typed in
     con.execute("UPDATE users SET first_name='Hindy' WHERE lower(username)='hartman'"
                 " AND COALESCE(first_name,'')=''")
@@ -1155,6 +1160,7 @@ def _finish_login(con, row, remember_device=False):
     if require_2fa(con) and uset(con, "totp_on", row["id"]) != "1":
         session["needs_2fa"] = True
     resp = redirect(url_for(
+        "desk_view" if lean_mode(con, row["id"]) else
         "today_view" if display_mode(con, row["id"]) == "simple" else "board"))
     if remember_device and uset(con, "totp_on", row["id"]) == "1":
         resp.set_cookie("hq_trust", twofa.trust_token(app.secret_key, row["id"],
@@ -1428,6 +1434,8 @@ def board():
         rank = {int(x): i for i, x in enumerate(order)}
         sections = sorted(sections, key=lambda r: (rank.get(r["id"], 10**6), r["pos"], r["id"]))
     cur_board = canonical_board(request.args.get("b"))
+    if lean_mode(con) and not cur_board:
+        cur_board = "Community/Charity"
     if cur_board:
         sections = [r for r in sections if (r["board"] or "").strip() == cur_board]
     shares = {}
@@ -2586,6 +2594,12 @@ def board_title(con, uid=None):
     return "%s' HQ" % name if name.endswith("s") else "%s's HQ" % name
 
 
+def lean_mode(con, uid=None):
+    """Lean HQ: one board (Community/Charity), four tabs (Today, Board, Voicemail, Desk),
+    the Desk as the front door. For somebody who works one corner of the operation."""
+    return uset(con, "lean", uid if uid is not None else me()) == "1"
+
+
 def display_mode(con, uid=None):
     """simple = one line per task, tap for the rest. The default for everyone but
     the admin, because the person who built the board can stand its density and
@@ -2603,7 +2617,7 @@ def inject_identity():
     """The board is named for the person looking at it, not for the person who
     happens to have built it - and dressed for them too: a tab with nothing
     behind it is furniture, so it is not shown."""
-    blank = {"board_name": "Shimon's HQ", "tagline": "", "display_mode": "full",
+    blank = {"board_name": "Shimon's HQ", "tagline": "", "display_mode": "full", "lean": False,
              "has_brief": False, "has_cal": False, "has_pipe": False,
              "boards": [], "team": []}
     try:
@@ -2626,6 +2640,7 @@ def inject_identity():
             "board_name": board_title(con),
             "tagline": uset(con, "tagline"),
             "display_mode": display_mode(con),
+            "lean": lean_mode(con),
             "sec_colors": {r["id"]: sec_color(r) for r in secrows},
             "boards": boards,
             "team": team_list(con),
@@ -3403,6 +3418,7 @@ def _account_page(con, **extra):
                twofa_on=uset(con, "totp_on") == "1",
                require_2fa=require_2fa(con), require_2fa_env=_REQUIRE_2FA_ENV,
                twofa_status={r["id"]: uset(con, "totp_on", r["id"]) == "1" for r in folk},
+               lean_of={r["id"]: uset(con, "lean", r["id"]) == "1" for r in folk},
                autoroute=autoroute_on(con), route_default=ROUTE_DEFAULT_USER, kind_label=vm.KIND_LABEL,
                route_now=route_table(con), kinds=vm.KINDS,
                feed_url=request.url_root.rstrip("/") + url_for("ics_feed", token=_feed_token(con)))
@@ -3534,6 +3550,8 @@ def set_identity():
     d = (request.form.get("display") or "").strip()
     if d in ("simple", "full", "calm"):
         uset_put(con, "display", d, target)
+    if request.form.get("lean_field") and target != me():
+        uset_put(con, "lean", "1" if request.form.get("lean") else "0", target)
     commit_retry(con)
     return redirect(url_for("account_view"))
 
@@ -7203,6 +7221,7 @@ def desk_view():
         " sections.owner_id AS from_uid FROM items"
         " JOIN sections ON items.section_id=sections.id LEFT JOIN projects p ON p.id=items.project_id"
         " WHERE items.status != 'done' AND items.archived=0 AND sections.owner_id != ?"
+        " AND items.id NOT IN (SELECT item_id FROM voicemails WHERE item_id IS NOT NULL)"
         " AND items.id IN (SELECT item_id FROM list_tags WHERE user_id=?"
         "   UNION SELECT i2.id FROM items i2 JOIN project_tags pt ON pt.project_id=i2.project_id WHERE pt.user_id=?)"
         " ORDER BY items.status='waiting', items.due_date IS NULL, items.due_date, items.updated_at DESC",
