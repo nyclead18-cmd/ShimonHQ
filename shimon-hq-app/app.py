@@ -863,6 +863,9 @@ def init_db():
         for u in con.execute("SELECT id, display_name FROM users").fetchall():
             fn, ln = split_name(u["display_name"])
             con.execute("UPDATE users SET first_name=?, last_name=? WHERE id=?", (fn, ln, u["id"]))
+    # Mrs. Hartman's first name, filled once where it was never typed in
+    con.execute("UPDATE users SET first_name='Hindy' WHERE lower(username)='hartman'"
+                " AND COALESCE(first_name,'')=''")
     _seed_history(con)
     ecols = [r[1] for r in con.execute("PRAGMA table_info(events)")]
     if ecols and "source" not in ecols:
@@ -1962,10 +1965,12 @@ def edit_item(item_id):
             uids = {int(x) for x in (request.form.get("ltags") or "").split(",")
                     if x.strip().isdigit()}
             known = {r["id"] for r in people_list(con)}
+            before = _tags_of(con, item_id)
             con.execute("DELETE FROM list_tags WHERE item_id=?", (item_id,))
             for u in uids & (known - {me()}):
                 con.execute("INSERT OR IGNORE INTO list_tags(item_id, user_id)"
                             " VALUES(?,?)", (item_id, u))
+            tell_handed(con, item_id, before, uids & (known - {me()}))
     commit_retry(con)
     return redirect(url_for("board"))
 
@@ -2364,10 +2369,12 @@ def set_item_tags(item_id):
         abort(404)
     uids = {int(u) for u in request.form.getlist("uids") if str(u).isdigit()}
     known = {r["id"] for r in people_list(con)}
+    before = _tags_of(con, item_id)
     con.execute("DELETE FROM list_tags WHERE item_id=?", (item_id,))
     for u in uids & known - {me()}:
         con.execute("INSERT OR IGNORE INTO list_tags(item_id, user_id) VALUES(?,?)",
                     (item_id, u))
+    tell_handed(con, item_id, before, uids & known - {me()})
     commit_retry(con)
     return jsonify(ok=True)
 
@@ -2395,6 +2402,7 @@ def quicktag_item(item_id):
     else:
         con.execute("INSERT OR IGNORE INTO list_tags(item_id, user_id)"
                     " VALUES(?,?)", (item_id, cp["id"]))
+        tell_handed(con, item_id, [], [cp["id"]])
     commit_retry(con)
     return jsonify(on=not cur, who=cp["first"], uid=cp["id"])
 
@@ -3245,7 +3253,8 @@ def _int_or_none(v):
 # rather than passed in, because the one way this goes badly wrong is a push
 # describing work somebody was not allowed to read.
 
-NOTIFY_KINDS = {"notes": "Someone responds on a shared task",
+NOTIFY_KINDS = {"handed": "Someone passes a task to you",
+                "notes": "Someone responds on a shared task",
                 "done": "Someone closes a shared task",
                 "vm": "A new voicemail comes in on the Shefa Yoel line (or Mrs. Mayer's)"}
 
@@ -3282,6 +3291,29 @@ def watchers(con, item_id, kind, exclude=None):
     if not pool:
         return []
     return [u for u in pool if wants(con, u, kind)]
+
+
+def tell_handed(con, item_id, before, after):
+    """Somebody new on this task's list gets one push: who passed it and what it is."""
+    new = set(after) - set(before) - {me()}
+    if not new:
+        return
+    it = con.execute("SELECT title, note FROM items WHERE id=?", (item_id,)).fetchone()
+    if not it:
+        return
+    for uid in new:
+        if not wants(con, uid, "handed"):
+            continue
+        try:
+            send_push("%s passed you a task" % _actor_name(con),
+                      "%s%s" % (_short(it["title"], 80), ("  -  " + _short(it["note"], 60)) if it["note"] else ""),
+                      "/desk#item-%d" % item_id, uid=uid)
+        except Exception as e:
+            app.logger.warning("handed push to %s failed: %s", uid, e)
+
+
+def _tags_of(con, item_id):
+    return [r[0] for r in con.execute("SELECT user_id FROM list_tags WHERE item_id=?", (item_id,))]
 
 
 def tell_others(con, item_id, kind, title, body, url):
@@ -6770,7 +6802,27 @@ def desk_view():
         " WHERE v.assignee=? AND (substr(COALESCE(h.at,''),1,10) >= ? OR"
         "   (i.status='done' AND substr(COALESCE(i.done_at,''),1,10) >= ?))"
         " ORDER BY COALESCE(i.done_at, h.at) DESC LIMIT 100", (who, who, monday, monday)).fetchall()
-    tkeep = {t["id"] for t in tasks}
+    # passed to them by hand: tasks on other people's boards that sit on their list
+    # (voicemail tasks already shown above are left out)
+    vm_items = {t["id"] for t in tasks}
+    handed = [r for r in con.execute(
+        "SELECT items.*, sections.title AS sec_title, COALESCE(p.title,'') AS proj_title,"
+        " sections.owner_id AS from_uid FROM items"
+        " JOIN sections ON items.section_id=sections.id LEFT JOIN projects p ON p.id=items.project_id"
+        " WHERE items.status != 'done' AND items.archived=0 AND sections.owner_id != ?"
+        " AND items.id IN (SELECT item_id FROM list_tags WHERE user_id=?"
+        "   UNION SELECT i2.id FROM items i2 JOIN project_tags pt ON pt.project_id=i2.project_id WHERE pt.user_id=?)"
+        " ORDER BY items.status='waiting', items.due_date IS NULL, items.due_date, items.updated_at DESC",
+        (who, who, who)).fetchall() if r["id"] not in vm_items]
+    # and what they passed on to others, still open
+    passed = con.execute(
+        "SELECT items.*, sections.title AS sec_title, COALESCE(p.title,'') AS proj_title FROM items"
+        " JOIN sections ON items.section_id=sections.id LEFT JOIN projects p ON p.id=items.project_id"
+        " WHERE items.status != 'done' AND items.archived=0 AND sections.owner_id=?"
+        " AND items.id IN (SELECT item_id FROM list_tags)"
+        " AND items.id NOT IN (SELECT item_id FROM voicemails WHERE item_id IS NOT NULL)"
+        " ORDER BY items.updated_at DESC", (who,)).fetchall()
+    tkeep = {t["id"] for t in tasks} | {t["id"] for t in handed} | {t["id"] for t in passed}
     notes_by_item, files_by_item, checks_by_item = {}, {}, {}
     if tkeep:
         qm = ",".join("?" * len(tkeep))
@@ -6800,6 +6852,7 @@ def desk_view():
     labels = vm.line_labels(con)
     return render_template("desk.html", who=who, person=person, folk=folk, qcounts=qcounts,
                            queue=queue, owed=owed, touches=touches, tasks=tasks, done=done,
+                           handed=handed, passed=passed, boards=BOARDS,
                            readings=readings, fam=fam, fmt_phone=vm.fmt_phone,
                            kind_label=vm.KIND_LABEL, line_labels=labels,
                            line_of=lambda r: vm.line_label(r["ext"], labels),
@@ -6812,6 +6865,36 @@ def desk_view():
                            sec_kind={}, today_iso=iso, soon_iso=iso, monday=monday,
                            full_name=full_name,
                            pretty=_now_local().strftime("%A, %B %-d"))
+
+
+@app.route("/desk/pass", methods=["POST"])
+@login_required
+def desk_pass():
+    """Pass a task to somebody straight from their desk: it lives in my box, sits on
+    their list, they get a push, and every response comes back to both of us."""
+    con = db()
+    to = request.form.get("to", "")
+    title = (request.form.get("title") or "").strip()
+    if not to.isdigit() or not title or int(to) == me():
+        return redirect(url_for("desk_view", who=to if to.isdigit() else None))
+    to = int(to)
+    if not con.execute("SELECT 1 FROM users WHERE id=?", (to,)).fetchone():
+        abort(404)
+    board = canonical_board(request.form.get("board") or "")
+    if board not in BOARDS:
+        board = "Community/Charity"
+    sid = ensure_buckets(con, me())[board]
+    pos = con.execute("SELECT COALESCE(MAX(pos),0)+1 FROM items WHERE section_id=?", (sid,)).fetchone()[0]
+    now = datetime.now().isoformat(timespec="seconds")
+    due = (request.form.get("due") or "").strip() or None
+    cur = con.execute(
+        "INSERT INTO items(section_id, title, note, waiting_on, status, pos, due_date, updated_at, created_at)"
+        " VALUES(?,?,?,?,?,?,?,?,?)",
+        (sid, title[:200], (request.form.get("note") or "").strip()[:2000], "", "open", pos, due, now, now))
+    con.execute("INSERT OR IGNORE INTO list_tags(item_id, user_id) VALUES(?,?)", (cur.lastrowid, to))
+    tell_handed(con, cur.lastrowid, [], [to])
+    commit_retry(con)
+    return redirect(url_for("desk_view", who=to, _anchor="item-%d" % cur.lastrowid))
 
 
 @app.route("/vm/<int:vid>/dh", methods=["POST"])
