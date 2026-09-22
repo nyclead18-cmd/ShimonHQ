@@ -180,6 +180,8 @@
     .vmpage .ib{min-width:48px}
     .vmpage .yi{font-size:18px}
   }
+  .vmpage .sheet textarea{width:100%;font:inherit;font-size:14.5px;line-height:1.5;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:var(--card);color:var(--ink);resize:vertical}
+  .vmpage .sheet textarea.yi{font-size:16.5px}
   @media (prefers-reduced-motion:reduce){ .vmpage *{transition:none!important} }
 </style>
 
@@ -189,6 +191,7 @@
 <div class="bar">
   <div class="seg">
     <a class="{% if show == 'open' %}on{% endif %}" href="{{ url_for('vm_view') }}">Open · {{ counts.open }}</a>
+    <a class="{% if show == 'handled' %}on{% endif %}" href="{{ url_for('vm_view', show='handled', q=q if q else None, line=line if line else None) }}" title="What you filed away - handled, or finished by whoever it was passed to">&#10003; Handled · {{ counts.handled }}</a>
     <a class="{% if show == 'short' %}on{% endif %}" href="{{ url_for('vm_view', show='short') }}">Short / empty · {{ counts.short }}</a>
     <a class="{% if show == 'all' %}on{% endif %}" href="{{ url_for('vm_view', show='all') }}">Everything</a>
   </div>
@@ -325,8 +328,12 @@
           <div class="menu">
             {% if r.stored_name %}<button type="button" data-copy="link">Copy web link</button>
             <a href="{{ url_for('vm_audio', vid=r.id, dl=1) }}">Download mp3</a>{% endif %}
-            {% if not mirror and r.tstatus in ('failed','empty','short') and r.stored_name %}<hr>
-            <form method="post" action="{{ url_for('api_vm_retry', vid=r.id) }}"><input type="hidden" name="show" value="{{ show }}"><button type="submit">{% if r.tstatus == 'failed' %}Retry transcript{% else %}Transcribe anyway{% endif %}</button></form>{% endif %}
+            {% if not mirror %}<hr>
+            {% if r.english or r.yiddish %}<button type="button" data-sheet="ed-{{ r.id }}">Edit the words</button>
+            <form method="post" action="{{ url_for('vm_tidy', vid=r.id) }}"><input type="hidden" name="show" value="{{ show }}"><button type="submit" title="AI fixes grammar and mis-hearings; names and numbers stay as said">Tidy English (AI)</button></form>
+            {% if r.english_prev %}<form method="post" action="{{ url_for('vm_tidy', vid=r.id) }}"><input type="hidden" name="show" value="{{ show }}"><input type="hidden" name="undo" value="1"><button type="submit">Undo tidy / edit</button></form>{% endif %}{% endif %}
+            {% if r.stored_name %}<form method="post" action="{{ url_for('api_vm_retry', vid=r.id) }}" onsubmit="return confirm('Transcribe this recording again from scratch? The current words are replaced when the new ones come in.')"><input type="hidden" name="show" value="{{ show }}"><button type="submit">{% if r.tstatus == 'failed' %}Retry transcript{% elif r.tstatus in ('empty','short') %}Transcribe anyway{% else %}Re-transcribe{% endif %}</button></form>{% endif %}
+            {% endif %}
           </div>
         </div>
       </div>
@@ -340,6 +347,16 @@
     </div>
     {% endif %}
     <div class="touches" data-touches>{% for t in touches.get(r.id, []) %}<div class="touch {{ 'bad' if (t.status or '').startswith('failed') else '' }}">{% if t.kind == 'sms' %}<b>{{ t.who or 'Someone' }} texted</b> · {{ (t.at or '')[5:16].replace('T',' ') }}{% if (t.status or '').startswith('failed') %} · {{ t.status }}{% endif %}<div class="tb" dir="auto">{{ t.body }}</div>{% else %}<b>{{ t.who or 'Someone' }} called</b> · {{ (t.at or '')[5:16].replace('T',' ') }}{% if t.status %} · {{ t.status }}{% endif %}{% endif %}</div>{% endfor %}</div>
+    {% if not mirror and (r.english or r.yiddish) %}
+    <div class="sheet" id="ed-{{ r.id }}">
+      <form method="post" action="{{ url_for('vm_text', vid=r.id) }}">
+        <input type="hidden" name="show" value="{{ show }}">
+        <label>English <textarea name="english" rows="5" dir="auto">{{ r.english or '' }}</textarea></label>
+        <label>Yiddish <textarea name="yiddish" rows="4" dir="rtl" class="yi">{{ r.yiddish or '' }}</textarea></label>
+        <div class="txrow"><span class="hint">Fix a name, a number, a word. The title and steps are read again from your text.</span><button type="submit" class="b primary">Save words</button></div>
+      </form>
+    </div>
+    {% endif %}
     {% if dh and not r.dh_event_id and r.stored_name %}
     <div class="sheet" id="dh-{{ r.id }}">
       <form method="post" action="{{ url_for('vm_to_dh', vid=r.id) }}">
@@ -567,7 +584,7 @@
     form.addEventListener('submit', function(){ sessionStorage.setItem('vm_uploading', '1'); });
     if (new URLSearchParams(location.search).get('added')) { drop(); sessionStorage.removeItem('vm_uploading'); }
     get().then(function(d){
-      if (!d || !d.file) { if (d) drop(); return; }
+      if (!d || !d.file || !d.name) { if (d) drop(); return; }
       fields.forEach(function(k){ if (d[k]) form.elements[k].value = d[k]; });
       if (d.file) {
         try { var dt = new DataTransfer(); dt.items.add(d.file); fileIn.files = dt.files; } catch (e) {}
