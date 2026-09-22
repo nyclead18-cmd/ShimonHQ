@@ -1229,3 +1229,12 @@ window.addEventListener('resize', function () {
   li.style.top = Math.min(Math.max(8, parseFloat(li.style.top) || 8),
     window.innerHeight - h - 12) + 'px';
 });
+
+/* ---------- Calm: projects start folded; the board reads as headings ---------- */
+(function () {
+  if (!document.body.classList.contains('calm')) { return; }
+  document.querySelectorAll('.grid.board .project').forEach(function (p) {
+    p.classList.add('pfolded');
+    var b = p.querySelector('.pfoldbtn'); if (b) { b.innerHTML = '&#9656;'; }
+  });
+})();

@@ -1375,3 +1375,26 @@ a.stat:hover{border-color:var(--ink);}
   background:#6B4A8A; color:#fff; font-size:13.5px; padding:8px 14px;}
 .viewas form{margin:0}
 .viewas button{font:inherit; font-size:12.5px; padding:4px 12px; border-radius:999px; border:1px solid rgba(255,255,255,.7); background:transparent; color:#fff; cursor:pointer}
+
+/* ---------- Calm: the same board, one thing at a time ----------
+   Boxes stacked full width down the middle, projects folded to a title line with a
+   count, one line per task. Nothing side by side; nothing to scan across. */
+body.calm .wrap.wide{max-width:860px;}
+body.calm .grid.board.flexw{display:block;}
+body.calm .grid.board.flexw section.card{flex:none !important; width:100%; margin:0 0 14px; align-self:auto !important;}
+body.calm .seccols{column-width:auto; columns:1; column-rule:none;}
+body.calm .seccols .project{margin:0 0 4px; border:1px solid var(--border); border-radius:10px; padding:2px 10px;}
+body.calm .proj-head{padding:8px 0;}
+body.calm .proj-head h3{font-size:14px;}
+body.calm .project.pfolded{background:transparent;}
+body.calm li.item{padding-top:7px; padding-bottom:7px;}
+body.calm li.item .t{font-size:14px;}
+body.calm li.item .n{display:none;}                 /* the note waits until the row is opened */
+body.calm li.item.expanded .n{display:inline;}
+body.calm .stats{gap:8px;}
+body.calm .stats .stat{padding:8px 14px 6px; min-width:96px;}
+body.calm .foldall{display:none;}
+body.calm .addsec{display:none;}
+body.calm .toolbar{margin-bottom:10px;}
+.calmtog{margin:0 0 0 auto;}
+.calmtog .fapill.on{background:var(--ink); color:var(--card); border-color:var(--ink);}
