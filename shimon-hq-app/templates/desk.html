@@ -59,6 +59,11 @@
   .deskpage .fold audio{width:100%; margin:0 0 8px}
   .deskpage .fold .txt{font-size:14.5px; line-height:1.5; white-space:pre-wrap; margin:0 0 8px}
   .deskpage .fold .txt.yi{font-size:16.5px; border-top:1px dashed var(--border); padding-top:8px}
+  .deskpage .callrec{border:1px solid var(--border); border-left:3px solid var(--pill-done-tx,#3A6B3E); border-radius:10px; padding:8px 12px; margin:8px 0}
+  .deskpage .callrec .callhead{font-weight:600; font-size:13.5px; margin-bottom:4px}
+  .deskpage .callrec .callsum{font-size:14px; line-height:1.5; white-space:pre-wrap}
+  .deskpage .callrec details{margin-top:6px} .deskpage .callrec summary{font-size:12.5px; color:var(--muted); cursor:pointer}
+  .deskpage .callserr{background:#fff3f2; border:1px solid var(--danger); color:var(--danger); border-radius:10px; padding:8px 12px; font-size:13px; margin:0 0 12px}
   .deskpage .acts{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0 4px}
   .deskpage .acts a, .deskpage .acts button{font:inherit; font-size:12.5px; padding:5px 11px; border-radius:999px; border:1px solid var(--border); background:var(--card); color:var(--ink); text-decoration:none; cursor:pointer}
   .deskpage .acts a.call{border-color:var(--ink); font-weight:600}
@@ -100,6 +105,7 @@
 <section class="card" id="lane-queue" style="--sa:#A33B2E">
   <div class="sec-head"><h2><span class="dot"></span>Messages</h2>
     <span class="counts">{{ queue|length }} waiting{% if owed %} &middot; {{ owed|length }} not called back{% endif %}</span></div>
+  {% if calls_err %}<div class="callserr">Call recordings are not coming through: {{ calls_err }}<br><small>On the RingCentral app: add <b>ReadCallLog</b> and <b>ReadCallRecording</b> permissions.</small></div>{% endif %}
   {% if queue %}
   <div class="msgs">
   {% for r in queue %}
@@ -131,6 +137,15 @@
       {% if r.stored_name %}<audio controls preload="none" data-src="{{ url_for('vm_audio', vid=r.id) }}"></audio>{% endif %}
       {% if r.english %}<div class="txt" dir="auto">{{ r.english }}</div>{% endif %}
       {% if r.yiddish %}<div class="txt yi" dir="rtl">{{ r.yiddish }}</div>{% endif %}
+      {% for cl in (calls_by_vm or {}).get(r.id, []) %}
+      <div class="callrec">
+        <div class="callhead">&#9742; Call back {{ (cl.started or '')[:16]|stamp }}{% if cl.duration %} &middot; {{ '%d:%02d'|format(cl.duration//60, cl.duration%60) }}{% endif %}
+          {% if cl.tstatus == 'new' %}<span class="tag">transcribing&hellip;</span>{% elif cl.tstatus == 'failed' %}<span class="tag owe">transcript failed</span>{% endif %}</div>
+        <audio controls preload="none" data-src="{{ url_for('call_audio', cid=cl.id) }}"></audio>
+        {% if cl.summary %}<div class="callsum" dir="auto">{{ cl.summary }}</div>{% endif %}
+        {% if cl.english %}<details class="calltxt"><summary>Full transcript</summary><div class="txt" dir="auto">{{ cl.english }}</div>{% if cl.yiddish %}<div class="txt yi" dir="rtl">{{ cl.yiddish }}</div>{% endif %}</details>{% endif %}
+      </div>
+      {% endfor %}
       <div class="acts">
         {% if num and outbound and who == session.get('uid') %}<button type="button" class="call" data-lcall="{{ url_for('vm_call', vid=r.id) }}" title="RingCentral rings your phone, then dials them - the line's number shows, the call is recorded on the line">&#9742; Call from the line</button>{% endif %}
         {% if num %}<a class="{{ '' if (outbound and who == session.get('uid')) else 'call' }}" href="tel:{{ num|replace(' ','')|replace('(','')|replace(')','')|replace('-','') }}">{{ 'My phone' if (outbound and who == session.get('uid')) else 'Call' }} {{ fmt_phone(num) }}</a>{% endif %}
@@ -219,9 +234,10 @@
     if (e.target.closest('a, button, input, label, form')) return;
     var m = h.closest('.msg'); var was = m.classList.contains('open');
     m.classList.toggle('open', !was);
-    var a = m.querySelector('audio[data-src]');
-    if (!was && a && !a.src) { a.src = a.dataset.src; }
-    if (was && a) { a.pause(); }
+    m.querySelectorAll('audio[data-src]').forEach(function(a){
+      if (!was && !a.src) { a.src = a.dataset.src; }
+      if (was) { a.pause(); }
+    });
   });
   // call from the line: RingCentral rings my phone first, then the caller
   var MY_PHONE = {{ my_phone|tojson }};
