@@ -39,6 +39,7 @@
       <select name="display">
         <option value="simple" {% if display_mode == 'simple' %}selected{% endif %}>Simple &mdash; one line per task, tap to open</option>
         <option value="full" {% if display_mode == 'full' %}selected{% endif %}>Full &mdash; everything on the row</option>
+        <option value="calm" {% if display_mode == 'calm' %}selected{% endif %}>Calm &mdash; one box at a time, projects folded, one line per task</option>
       </select>
     </label>
     <button type="submit">Save</button>

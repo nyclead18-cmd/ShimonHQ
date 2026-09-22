@@ -63,6 +63,11 @@
     <button type="button" class="fapill" data-foldall="fold" title="Fold every project to its title line">&#9650; Fold all</button>
     <button type="button" class="fapill" data-foldall="open" title="Open every box and project">&#9660; Open all</button>
   </div>
+  <form method="post" action="{{ url_for('set_display') }}" class="calmtog" title="Calm: boxes stacked, projects folded to a line, one line per task. Full: everything at once.">
+    <input type="hidden" name="back" value="{{ request.full_path if request.query_string else request.path }}">
+    <input type="hidden" name="display" value="{{ 'full' if display_mode == 'calm' else 'calm' }}">
+    <button type="submit" class="fapill{% if display_mode == 'calm' %} on{% endif %}">{{ '&#9673; Calm'|safe if display_mode == 'calm' else '&#9675; Calm'|safe }}</button>
+  </form>
 </div>
 
 <div class="grid board flexw">
