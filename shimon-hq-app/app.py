@@ -2560,7 +2560,7 @@ def display_mode(con, uid=None):
     nobody else should have to."""
     uid = uid if uid is not None else me()
     v = uset(con, "display", uid)
-    if v in ("simple", "full"):
+    if v in ("simple", "full", "calm"):
         return v
     row = con.execute("SELECT is_admin FROM users WHERE id=?", (uid,)).fetchone()
     return "full" if (row and row["is_admin"]) else "simple"
@@ -3499,10 +3499,23 @@ def set_identity():
     if "tagline" in request.form:
         uset_put(con, "tagline", (request.form.get("tagline") or "").strip()[:60], target)
     d = (request.form.get("display") or "").strip()
-    if d in ("simple", "full"):
+    if d in ("simple", "full", "calm"):
         uset_put(con, "display", d, target)
     commit_retry(con)
     return redirect(url_for("account_view"))
+
+
+@app.route("/account/display", methods=["POST"])
+@login_required
+def set_display():
+    """The Calm / Full switch on the board toolbar."""
+    d = (request.form.get("display") or "").strip()
+    if d in ("simple", "full", "calm"):
+        con = db()
+        uset_put(con, "display", d)
+        commit_retry(con)
+    back = request.form.get("back") or ""
+    return redirect(back if back.startswith("/") and not back.startswith("//") else url_for("board"))
 
 
 @app.route("/account/notify", methods=["POST"])
