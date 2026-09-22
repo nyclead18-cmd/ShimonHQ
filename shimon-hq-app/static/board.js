@@ -586,7 +586,7 @@ document.addEventListener('click', function (ev) {
   function popAt(li) {
     var r = li.getBoundingClientRect();
     li.classList.add('expanded');
-    var w = Math.min(540, window.innerWidth * 0.94);
+    var w = Math.min(600, window.innerWidth * 0.94);
     li.style.left = Math.min(Math.max(8, r.left - 12), window.innerWidth - w - 8) + 'px';
     var h = Math.min(li.offsetHeight || 200, window.innerHeight * 0.84);
     li.style.top = Math.min(Math.max(8, r.top - 12), window.innerHeight - h - 12) + 'px';
@@ -607,6 +607,7 @@ document.addEventListener('click', function (ev) {
     if (e.key === 'Escape') { collapseAll(); }
   });
   document.addEventListener('click', function (ev) {
+    if (ev.target.closest('.xclose')) { collapseAll(); return; }
     // a tap on a real control is that control's business
     if (ev.target.closest('button, a, input, select, textarea, label, summary, form')) {
       var chip = ev.target.closest('.ncount');

@@ -1398,3 +1398,86 @@ body.calm .addsec{display:none;}
 body.calm .toolbar{margin-bottom:10px;}
 .calmtog{margin:0 0 0 auto;}
 .calmtog .fapill.on{background:var(--ink); color:var(--card); border-color:var(--ink);}
+
+/* ---------- v171: the opened card, laid out like a page ----------
+   Status on top, the title on its own line, the note under it as a paragraph, the
+   voicemail facts as a quiet meta line; then Steps, Conversation and the response
+   box each in their own band. A close cross in the corner; the star stays. */
+.xclose{display:none;}
+.ofl{display:none;}
+.grid.board li.item.expanded{width:min(600px, 94vw); padding:18px 24px 18px 24px;}
+.grid.board li.item.expanded .xclose{display:flex; position:absolute; top:12px; right:12px;
+  width:32px; height:32px; align-items:center; justify-content:center; border-radius:999px;
+  border:1px solid var(--border); background:var(--card); color:var(--muted); font-size:13px;
+  cursor:pointer; padding:0; z-index:4;}
+.grid.board li.item.expanded .xclose:hover{color:var(--ink); border-color:var(--ink);}
+.grid.board li.item.expanded .cptag{top:14px; right:52px; font-size:11px; padding:6px 9px;}
+.grid.board li.item.expanded .star{top:14px; left:auto; right:92px; font-size:16px;}
+.grid.board li.item.expanded .pill{float:none; display:inline-block; margin:2px 0 12px;
+  font-size:10.5px; padding:4px 11px;}
+.grid.board li.item.expanded .body{overflow:visible; display:flex; flex-direction:column; align-items:stretch;}
+.grid.board li.item.expanded .body > *{order:0;}
+.grid.board li.item.expanded .body > .photostrip{order:1;}
+.grid.board li.item.expanded .body > .checklist{order:2;}
+.grid.board li.item.expanded .body > ul.notes{order:3;}
+.grid.board li.item.expanded .body > .files{order:4;}
+.grid.board li.item.expanded .body > .respondrow{order:5;}
+.grid.board li.item.expanded .body > details.editbox{order:6; align-self:flex-start;}
+.grid.board li.item.expanded .t{font-size:15px; line-height:1.5; font-weight:400; padding-right:8px;}
+.grid.board li.item.expanded .t .tt{display:block; font-family:'Playfair Display',Georgia,serif;
+  font-size:21px; line-height:1.25; font-weight:700; color:var(--ink);}
+.grid.board li.item.expanded .t .ndash{display:none;}
+.grid.board li.item.expanded .t .n{display:block; margin-top:8px; font-size:14.5px; line-height:1.55;
+  color:var(--ink);}
+.grid.board li.item.expanded .t .nmeta{display:block; margin-top:6px; font-size:12px; color:var(--muted);
+  letter-spacing:.01em;}
+.grid.board li.item.expanded .metaline{margin-top:12px; gap:6px 8px; font-size:12px;}
+.grid.board li.item.expanded .metaline > :not(.due):not(.openfull){font-size:11.5px; font-weight:700;
+  border-radius:999px; padding:3px 10px; background:var(--row); color:var(--muted);
+  border:1px solid var(--border); text-transform:none; letter-spacing:.01em; opacity:1; cursor:pointer;}
+.grid.board li.item.expanded .metaline .due{font-size:11.5px; padding:3px 10px;}
+.grid.board li.item.expanded .metaline .openfull{margin-left:auto; opacity:1; color:var(--ink);
+  font-weight:700; font-size:11.5px;}
+.grid.board li.item.expanded .metaline .openfull .ofl{display:inline;}
+.grid.board li.item.expanded .stamps{margin-top:8px; font-size:11px;}
+.grid.board li.item.expanded .checklist,
+.grid.board li.item.expanded ul.notes,
+.grid.board li.item.expanded .files,
+.grid.board li.item.expanded .respondrow{margin-top:14px; padding-top:12px; border-top:1px solid var(--border);}
+.grid.board li.item.expanded .checklist::before,
+.grid.board li.item.expanded ul.notes::before{font-size:10.5px; font-weight:800; letter-spacing:.12em;
+  text-transform:uppercase; color:var(--muted); margin-bottom:4px;}
+.grid.board li.item.expanded .checklist::before{content:'Steps';}
+.grid.board li.item.expanded ul.notes::before{content:'Conversation';}
+.grid.board li.item.expanded .checklist{gap:4px;}
+.grid.board li.item.expanded .ckrow{font-size:14.5px; gap:10px; padding:3px 0;}
+.grid.board li.item.expanded .ckrow .cktick{width:18px; height:18px;}
+.grid.board li.item.expanded form.ckadd input{font-size:13.5px; padding:6px 0; width:100%; max-width:none;}
+.grid.board li.item.expanded ul.notes{border-left:0; padding-left:0; display:flex; flex-direction:column; gap:6px;}
+.grid.board li.item.expanded ul.notes li{flex-wrap:wrap; gap:2px 8px; background:var(--row);
+  border-radius:10px; padding:8px 12px; align-items:baseline;}
+.grid.board li.item.expanded ul.notes li .nd{flex:0 0 100%; font-size:11px;}
+.grid.board li.item.expanded ul.notes li .t{font-weight:400; font-size:14px; line-height:1.45; padding:0;
+  cursor:auto; touch-action:auto; flex:1 1 auto;}
+.grid.board li.item.expanded ul.notes li .ndelform{margin-left:auto;}
+.grid.board li.item.expanded .respondrow{max-width:none; gap:8px; flex-wrap:nowrap;}
+.grid.board li.item.expanded .respondrow form.respond{margin-top:0;}
+.grid.board li.item.expanded form.respond input{font-size:14.5px; padding:9px 14px;}
+.grid.board li.item.expanded .respond button{font-size:14px; padding:6px 14px;}
+.grid.board li.item.expanded .fadd{font-size:12.5px; padding:8px 12px; white-space:nowrap;}
+.grid.board li.item.expanded details.editbox{margin-top:12px;}
+.grid.board li.item.expanded details.editbox>summary{display:inline-block; font-size:12px; font-weight:700;
+  border:1px solid var(--border); border-radius:999px; padding:4px 12px; opacity:1;}
+.grid.board li.item.expanded details.editbox>summary:hover{color:var(--ink); border-color:var(--ink);}
+@media (max-width:700px){
+  .grid.board li.item.expanded{padding:16px 16px 22px 16px;}
+  .grid.board li.item.expanded .t .tt{font-size:19px;}
+  .grid.board li.item.expanded .respondrow{flex-wrap:wrap;}
+}
+
+/* Account: who gets which kind of message */
+.routerules{display:grid; gap:6px; margin-top:6px;}
+.routerow{display:grid; grid-template-columns:120px minmax(0,1fr); gap:10px; align-items:center;
+  font-size:13.5px; color:var(--ink);}
+.routerow select{font:inherit; font-size:13.5px; padding:6px 10px; border:1px solid var(--border);
+  border-radius:10px; background:var(--card); color:var(--ink); max-width:260px;}
