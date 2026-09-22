@@ -35,45 +35,65 @@
   .deskpage .desk2{display:grid; grid-template-columns:minmax(0,1.6fr) minmax(0,1fr); gap:20px; align-items:start}
   @media (max-width:980px){ .deskpage .desk2{grid-template-columns:1fr} }
   .deskpage .desk2 section.card{margin-bottom:20px}
-  /* one row per message */
-  .deskpage .msg{padding:12px 0; border-top:1px solid var(--border)}
-  .deskpage .msg:first-child{border-top:none}
-  .deskpage .msg .head{display:grid; grid-template-columns:1fr auto; gap:2px 12px; cursor:pointer}
-  .deskpage .msg .who{font-weight:700; font-size:14px}
-  .deskpage .msg .who small{font-weight:400; color:var(--muted); margin-left:6px}
+  /* one row per message: name, headline, time - the rest waits behind the tap */
+  .deskpage .msgs{display:flex; flex-direction:column; gap:4px}
+  .deskpage .msg{padding:10px 14px; border-radius:12px; border:1px solid transparent}
+  .deskpage .msg:hover{background:var(--row)}
+  .deskpage .msg.open{background:var(--card); border-color:var(--border); box-shadow:0 6px 24px rgba(20,17,12,.08); padding:16px 20px 18px}
+  .deskpage .msg .head{display:grid; grid-template-columns:1fr auto; gap:1px 12px; cursor:pointer; align-items:baseline}
+  .deskpage .msg .who{font-weight:700; font-size:13.5px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; min-width:0}
+  .deskpage .msg .who .dotst{width:8px; height:8px; border-radius:999px; background:var(--danger); flex:0 0 auto}
+  .deskpage .msg .who .dotst.ok{background:var(--pill-done-tx,#3A6B3E)}
+  .deskpage .msg .who small{font-weight:400; color:var(--muted); font-size:12px}
   .deskpage .msg .when{color:var(--muted); font-size:12px; white-space:nowrap; text-align:right}
-  .deskpage .msg .ttl{font-size:15px; font-weight:600; grid-column:1/-1; overflow-wrap:anywhere}
-  .deskpage .msg .ttl .gist{font-weight:400; color:var(--muted)}
-  .deskpage .msg .caret{display:inline-block; color:var(--muted); font-size:11px; transition:transform .18s ease; margin-left:6px}
-  .deskpage .msg.open .caret{transform:rotate(90deg)}
-  .deskpage .tag{display:inline-block; font-size:11px; padding:1px 8px; border-radius:999px; border:1px solid var(--border); color:var(--muted); margin-left:4px; vertical-align:middle}
-  .deskpage .tag.owe{color:var(--danger); border-color:var(--danger)}
-  .deskpage .tag.touched{color:var(--pill-done-tx)}
-  .deskpage .msg .checklist{margin:6px 0 0; display:flex}
-  .deskpage .msg .ckadd input{font:inherit; font-size:13px; border:0; background:none; color:var(--muted); padding:2px 0; width:100%}
-  /* the fold: player, words, actions, responses */
+  .deskpage .msg .ttl{font-size:14.5px; font-weight:500; grid-column:1/-1; overflow-wrap:anywhere; color:var(--ink); line-height:1.4}
+  .deskpage .msg .ttl .gist{display:none}
+  .deskpage .msg .ttl .ck{color:var(--muted); font-size:11.5px; font-weight:600; margin-left:8px; white-space:nowrap}
+  .deskpage .msg .caret{display:none}
+  .deskpage .tag{color:var(--muted); font-size:11.5px; font-weight:400}
+  .deskpage .tag.owe{color:var(--danger)}
+  .deskpage .tag.touched{color:var(--pill-done-tx,#3A6B3E)}
+  /* open: a small page */
+  .deskpage .msg.open .ttl{font-family:'Playfair Display',Georgia,serif; font-size:19px; font-weight:700; margin-top:4px; line-height:1.25}
+  .deskpage .msg.open .ttl .gist{display:block; font-family:inherit; font-size:14.5px; font-weight:400; color:var(--ink); line-height:1.5; margin-top:6px}
+  .deskpage .msg.open .ttl .gist::before{content:none}
+  .deskpage .msg.open .ttl .ck{display:none}
   .deskpage .fold{display:grid; grid-template-rows:0fr; transition:grid-template-rows .22s ease}
   .deskpage .msg.open .fold{grid-template-rows:1fr}
   .deskpage .fold > div{overflow:hidden; min-height:0}
-  .deskpage .fold .inner{padding-top:10px}
-  .deskpage .fold audio{width:100%; margin:0 0 8px}
-  .deskpage .fold .txt{font-size:14.5px; line-height:1.5; white-space:pre-wrap; margin:0 0 8px}
-  .deskpage .fold .txt.yi{font-size:16.5px; border-top:1px dashed var(--border); padding-top:8px}
-  .deskpage .callrec{border:1px solid var(--border); border-left:3px solid var(--pill-done-tx,#3A6B3E); border-radius:10px; padding:8px 12px; margin:8px 0}
-  .deskpage .callrec .callhead{font-weight:600; font-size:13.5px; margin-bottom:4px}
-  .deskpage .callrec .callsum{font-size:14px; line-height:1.5; white-space:pre-wrap}
+  .deskpage .msg.open .fold > div{overflow:visible}
+  .deskpage .fold .inner{padding-top:8px}
+  .deskpage .kick{font-size:10.5px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); margin:14px 0 6px; padding-top:12px; border-top:1px solid var(--border)}
+  .deskpage .acts{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:4px 0 0}
+  .deskpage .acts a, .deskpage .acts button{font:inherit; font-size:12.5px; font-weight:600; padding:7px 13px; border-radius:999px; border:1px solid var(--border); background:var(--card); color:var(--ink); text-decoration:none; cursor:pointer}
+  .deskpage .acts a.call, .deskpage .acts button.call{background:var(--ink); color:var(--card); border-color:var(--ink)}
+  .deskpage .acts .donebtn{margin-left:auto; background:var(--pill-done-bg,#e6f0e6); color:var(--pill-done-tx,#3A6B3E); border-color:var(--pill-done-tx,#3A6B3E)}
+  .deskpage .acts form{display:contents}
+  .deskpage .fold audio{width:100%; height:36px; margin:0}
+  .deskpage .fold .txt{font-size:14px; line-height:1.55; white-space:pre-wrap; margin:8px 0 0; color:var(--ink)}
+  .deskpage .fold .txt.yi{font-size:16px; margin-top:8px}
+  .deskpage .fold details.yid summary{font-size:12px; color:var(--muted); cursor:pointer; margin-top:6px}
+  .deskpage .msg .checklist{margin:0; display:flex; gap:4px}
+  .deskpage .msg .ckrow{font-size:14px; gap:10px; padding:2px 0}
+  .deskpage .msg .ckrow .cktick{width:17px; height:17px}
+  .deskpage .msg .ckadd input{font:inherit; font-size:13px; border:0; border-bottom:1px dashed var(--border); background:none; color:var(--muted); padding:4px 0; width:100%}
+  .deskpage .callrec{border:1px solid var(--border); border-left:3px solid var(--pill-done-tx,#3A6B3E); border-radius:10px; padding:10px 14px; margin:8px 0 0; background:var(--row)}
+  .deskpage .callrec .callhead{font-weight:600; font-size:13.5px; margin-bottom:6px}
+  .deskpage .callrec .callsum{font-size:14px; line-height:1.5; white-space:pre-wrap; margin-top:6px}
   .deskpage .callrec details{margin-top:6px} .deskpage .callrec summary{font-size:12.5px; color:var(--muted); cursor:pointer}
   .deskpage .callserr{background:#fff3f2; border:1px solid var(--danger); color:var(--danger); border-radius:10px; padding:8px 12px; font-size:13px; margin:0 0 12px}
-  .deskpage .acts{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0 4px}
-  .deskpage .acts a, .deskpage .acts button{font:inherit; font-size:12.5px; padding:5px 11px; border-radius:999px; border:1px solid var(--border); background:var(--card); color:var(--ink); text-decoration:none; cursor:pointer}
-  .deskpage .acts a.call{border-color:var(--ink); font-weight:600}
-  .deskpage .acts .donebtn{background:var(--pill-done-bg,#e6f0e6); color:var(--pill-done-tx,#3A6B3E); border-color:var(--pill-done-tx,#3A6B3E); font-weight:600}
-  .deskpage .acts form{display:contents}
-  .deskpage .fold ul.notes{margin-top:8px}
-  .deskpage .fold form.respond{display:flex; gap:6px; margin-top:8px}
-  .deskpage .fold form.respond input{flex:1; font:inherit; font-size:14px; padding:8px 12px; border:1px solid var(--border); border-radius:999px; background:var(--card); color:var(--ink)}
-  .deskpage .fold form.respond button{font:inherit; padding:6px 12px; border-radius:999px; border:1px solid var(--border); background:var(--card); color:var(--ink)}
+  .deskpage .fold ul.notes{margin:0; border-left:0; padding:0; display:flex; flex-direction:column; gap:6px}
+  .deskpage .fold ul.notes li{flex-wrap:wrap; gap:2px 8px; background:var(--row); border-radius:10px; padding:8px 12px}
+  .deskpage .fold ul.notes li .nd{flex:0 0 100%; font-size:11px}
+  .deskpage .fold ul.notes li .t{font-weight:400; font-size:14px}
+  .deskpage .fold form.respond{display:flex; gap:8px; margin-top:10px; max-width:none}
+  .deskpage .fold form.respond input{flex:1; font:inherit; font-size:14px; padding:9px 14px; border:1px solid var(--border); border-radius:12px; background:var(--bg); color:var(--ink)}
+  .deskpage .fold form.respond button{font:inherit; padding:6px 14px; border-radius:999px; border:1px solid var(--border); background:var(--card); color:var(--ink)}
   /* passing a task */
+  .deskpage details.passbox{margin:0 0 12px}
+  .deskpage details.passbox > summary{list-style:none; cursor:pointer; font-size:13px; font-weight:700; color:var(--muted); border:1px dashed var(--border); border-radius:999px; padding:6px 14px; display:inline-block}
+  .deskpage details.passbox > summary::-webkit-details-marker{display:none}
+  .deskpage details.passbox[open] > summary{margin-bottom:10px; color:var(--ink)}
   .deskpage .passform{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin:0 0 12px}
   .deskpage .passform input[name=title]{grid-column:1/-1}
   .deskpage .passform input[name=note]{grid-column:1/-1}
@@ -117,27 +137,39 @@
   {% set num = rd.callback or r.caller_number %}
   <div class="msg" id="msg-{{ r.id }}"{% if r.item_id %} data-item="{{ r.item_id }}"{% endif %}>
     <div class="head" data-fold>
-      <div class="who">{{ who_s }}{% if r.caller_name and r.caller_number %}<small>{{ fmt_phone(r.caller_number) }}</small>{% endif %}
-        {% if r.kind and r.kind != 'other' %}<span class="tag">{{ kind_label.get(r.kind, r.kind) }}</span>{% endif %}
-        {% if line_labels|length > 1 %}<span class="tag">{{ line_of(r).replace(' line', '') }}</span>{% endif %}
-        {% if t %}<span class="tag touched">{{ 'texted' if t.kind == 'sms' else 'called' }} {{ t.at|stamp }}</span>{% else %}<span class="tag owe">no call back yet</span>{% endif %}
+      <div class="who"><span class="dotst{% if t %} ok{% endif %}" title="{% if t %}{{ 'Texted' if t.kind == 'sms' else 'Called' }} {{ t.at|stamp }}{% else %}Not called back yet{% endif %}"></span>{{ who_s }}{% if r.caller_name and r.caller_number %}<small>{{ fmt_phone(r.caller_number) }}</small>{% endif %}
+        {% if r.kind and r.kind != 'other' %}<small class="tag">{{ kind_label.get(r.kind, r.kind) }}</small>{% endif %}
+        {% if line_labels|length > 1 %}<small class="tag">{{ line_of(r).replace(' line', '') }}</small>{% endif %}
+        {% if t %}<small class="tag touched">{{ 'texted' if t.kind == 'sms' else 'called' }} {{ t.at|stamp }}</small>{% endif %}
       </div>
       <div class="when">{{ (r.ts or '')[:16]|stamp }}{% if r.duration %} &middot; {{ '%d:%02d'|format(r.duration//60, r.duration%60) }}{% endif %}</div>
-      <div class="ttl" dir="auto">{{ rd.title }}{% if rd.gist and rd.gist != rd.title %} <span class="gist">&mdash; {{ rd.gist|truncate(160) }}</span>{% endif %}<span class="caret">&#9654;</span></div>
+      <div class="ttl" dir="auto">{{ rd.title }}{% if icks %}<span class="ck">&#9745; {{ icks|selectattr('done')|list|length }}/{{ icks|length }}</span>{% endif %}{% if rd.gist and rd.gist != rd.title %}<span class="gist">{{ rd.gist }}</span>{% endif %}</div>
     </div>
-    {% if r.item_id %}
-    <div class="checklist" data-id="{{ r.item_id }}">
-      {% for c in icks %}
-      <label class="ckrow{% if c.done %} ckdone{% endif %}"><input type="checkbox" class="cktick" data-ck="{{ c.id }}"{% if c.done %} checked{% endif %}> <span dir="auto">{{ c.body }}</span>
-        <button type="button" class="ckdel" data-ckdel="{{ c.id }}" title="Remove step">&#x2715;</button></label>
-      {% endfor %}
-      <form class="ckadd" data-id="{{ r.item_id }}"><input name="body" placeholder="+ step" dir="auto" autocomplete="off"></form>
-    </div>
-    {% endif %}
     <div class="fold"><div><div class="inner body">
+      <div class="acts">
+        {% if num and outbound and who == session.get('uid') %}<button type="button" class="call" data-lcall="{{ url_for('vm_call', vid=r.id) }}" title="RingCentral rings your phone, then dials them - the line's number shows, the call is recorded on the line">&#9742; Call from the line</button>{% endif %}
+        {% if num %}<a class="{{ '' if (outbound and who == session.get('uid')) else 'call' }}" href="tel:{{ num|replace(' ','')|replace('(','')|replace(')','')|replace('-','') }}">{{ 'My phone' if (outbound and who == session.get('uid')) else 'Call' }} {{ fmt_phone(num) }}</a>{% endif %}
+        <a href="{{ url_for('vm_view', q=(who if session.get('admin') else None)) }}#vm-{{ r.id }}">Text back &#8599;</a>
+        {% if r.item_id %}<a href="{{ url_for('task_view', item_id=r.item_id) }}">Task page &#8599;</a>
+        {% else %}<form method="post" action="{{ url_for('vm_task', vid=r.id) }}"><button type="submit">Make task</button></form>{% endif %}
+        <form method="post" action="{{ url_for('vm_close', vid=r.id) }}"><input type="hidden" name="back" value="{{ url_for('desk_view', who=(who if session.get('admin') else None)) }}"><button type="submit" class="donebtn" title="Finished - for everyone. The task closes, the message leaves every queue, {{ 'Shimon' if who == session.get('uid') else 'they' }} get a buzz.">&#10003; Done</button></form>
+      </div>
+      {% if r.stored_name or r.english %}
+      <div class="kick">The message</div>
       {% if r.stored_name %}<audio controls preload="none" data-src="{{ url_for('vm_audio', vid=r.id) }}"></audio>{% endif %}
       {% if r.english %}<div class="txt" dir="auto">{{ r.english }}</div>{% endif %}
-      {% if r.yiddish %}<div class="txt yi" dir="rtl">{{ r.yiddish }}</div>{% endif %}
+      {% if r.yiddish %}<details class="yid"><summary>Yiddish</summary><div class="txt yi" dir="rtl">{{ r.yiddish }}</div></details>{% endif %}
+      {% endif %}
+      {% if r.item_id %}
+      <div class="kick">Steps</div>
+      <div class="checklist" data-id="{{ r.item_id }}">
+        {% for c in icks %}
+        <label class="ckrow{% if c.done %} ckdone{% endif %}"><input type="checkbox" class="cktick" data-ck="{{ c.id }}"{% if c.done %} checked{% endif %}> <span dir="auto">{{ c.body }}</span>
+          <button type="button" class="ckdel" data-ckdel="{{ c.id }}" title="Remove step">&#x2715;</button></label>
+        {% endfor %}
+        <form class="ckadd" data-id="{{ r.item_id }}"><input name="body" placeholder="+ step" dir="auto" autocomplete="off"></form>
+      </div>
+      {% endif %}
       {% for cl in (calls_by_vm or {}).get(r.id, []) %}
       <div class="callrec">
         <div class="callhead">&#9742; Call back {{ (cl.started or '')[:16]|stamp }}{% if cl.duration %} &middot; {{ '%d:%02d'|format(cl.duration//60, cl.duration%60) }}{% endif %}
@@ -147,16 +179,9 @@
         {% if cl.english %}<details class="calltxt"><summary>Full transcript</summary><div class="txt" dir="auto">{{ cl.english }}</div>{% if cl.yiddish %}<div class="txt yi" dir="rtl">{{ cl.yiddish }}</div>{% endif %}</details>{% endif %}
       </div>
       {% endfor %}
-      <div class="acts">
-        {% if num and outbound and who == session.get('uid') %}<button type="button" class="call" data-lcall="{{ url_for('vm_call', vid=r.id) }}" title="RingCentral rings your phone, then dials them - the line's number shows, the call is recorded on the line">&#9742; Call from the line</button>{% endif %}
-        {% if num %}<a class="{{ '' if (outbound and who == session.get('uid')) else 'call' }}" href="tel:{{ num|replace(' ','')|replace('(','')|replace(')','')|replace('-','') }}">{{ 'My phone' if (outbound and who == session.get('uid')) else 'Call' }} {{ fmt_phone(num) }}</a>{% endif %}
-        <a href="{{ url_for('vm_view', q=(who if session.get('admin') else None)) }}#vm-{{ r.id }}">Text back &#8599;</a>
-        {% if r.item_id %}<a href="{{ url_for('task_view', item_id=r.item_id) }}">Task page &#8599;</a>
-        {% else %}<form method="post" action="{{ url_for('vm_task', vid=r.id) }}"><button type="submit">Make task</button></form>{% endif %}
-        <form method="post" action="{{ url_for('vm_close', vid=r.id) }}"><input type="hidden" name="back" value="{{ url_for('desk_view', who=(who if session.get('admin') else None)) }}"><button type="submit" class="donebtn" title="Finished - for everyone. The task closes, the message leaves every queue, {{ 'Shimon' if who == session.get('uid') else 'they' }} get a buzz.">&#10003; Done</button></form>
-      </div>
       {% if r.item_id %}
       {% set inotes = (notes_by_item or {}).get(r.item_id, []) %}
+      <div class="kick">Conversation</div>
       <ul class="notes"{% if not inotes %} hidden{% endif %}>
         {% for n in inotes %}<li class="noterow" id="note-{{ n.id }}"><span class="nd">{{ n.created_at|stamp }}</span> <span class="t" dir="auto">{{ n.body|linkify }}</span></li>{% endfor %}
       </ul>
@@ -179,7 +204,8 @@
 <section class="card" id="lane-handed" style="--sa:#6B4A8A">
   <div class="sec-head"><h2><span class="dot"></span>Passed to {{ 'you' if who == session.get('uid') else person.first_name or person.display_name }}</h2>
     <span class="counts">{{ handed|length }} open</span></div>
-  <form method="post" action="{{ url_for('desk_pass') }}" class="passform noprint" data-no-draft>
+  <details class="passbox noprint"><summary>+ Pass {{ person.first_name or person.display_name if who != session.get('uid') else 'someone' }} a task</summary>
+  <form method="post" action="{{ url_for('desk_pass') }}" class="passform" data-no-draft>
     {% if who != session.get('uid') %}<input type="hidden" name="to" value="{{ who }}">
     {% else %}<select name="to" required><option value="">Pass to&hellip;</option>{% for f in folk if f.id != who %}<option value="{{ f.id }}">{{ f.display_name }}</option>{% endfor %}</select>{% endif %}
     <input name="title" dir="auto" placeholder="{% if who != session.get('uid') %}Pass {{ person.first_name or person.display_name }} a task&hellip;{% else %}Pass someone a task&hellip;{% endif %}" required maxlength="200" autocomplete="off">
@@ -188,6 +214,7 @@
     <input type="date" name="due" title="Due">
     <button type="submit">Pass it on</button>
   </form>
+  </details>
   {% if handed %}
   {% set show_where = true %}
   <div class="seccols"><ul class="items">
@@ -230,7 +257,7 @@
   // tap the head of a message: fold it open (player + words + actions), tap again to close
   document.addEventListener('click', function(e){
     var h = e.target.closest('.deskpage .msg .head'); if (!h) return;
-    if (e.target.closest('a, button, input, label, form')) return;
+    if (e.target.closest('a, button, input, label, form, details')) return;
     var m = h.closest('.msg'); var was = m.classList.contains('open');
     m.classList.toggle('open', !was);
     m.querySelectorAll('audio[data-src]').forEach(function(a){
@@ -251,7 +278,7 @@
       if (j.error) { alert(j.error); b.textContent = was; b.disabled = false; return; }
       MY_PHONE = MY_PHONE || mine;
       b.textContent = 'Calling… pick up ' + (j.mine || 'your phone');
-      var tag = b.closest('.msg').querySelector('.tag.owe'); if (tag) { tag.textContent = 'called just now'; tag.className = 'tag touched'; }
+      var dot = b.closest('.msg').querySelector('.dotst'); if (dot) { dot.classList.add('ok'); dot.title = 'Called just now'; }
       setTimeout(function(){ b.textContent = 'Call again'; b.disabled = false; }, 8000);
     }).catch(function(){ b.textContent = was; b.disabled = false; alert('Could not start the call.'); });
   });

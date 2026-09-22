@@ -177,6 +177,9 @@
       <div class="caveat" style="margin:0">@{{ f.username }} &middot; two-step {% if twofa_status.get(f.id) %}<b style="color:var(--pill-done-tx)">on</b>{% else %}off{% endif %}</div>
       <label>Their board is called<input name="board_title" value="{{ titles.get(f.id, '') }}" maxlength="40"></label>
       <label>Small line above it<input name="tagline" value="{{ taglines.get(f.id, '') }}" placeholder="leave empty for none" maxlength="60"></label>
+      <input type="hidden" name="lean_field" value="1">
+      <label class="checkrow"><input type="checkbox" name="lean" value="1"{% if lean_of.get(f.id) %} checked{% endif %}>
+        Lean HQ &mdash; only the Community/Charity board, four tabs (Today, Board, Voicemail, Desk), signs in to the Desk</label>
       <button type="submit">Save {{ f.display_name }}</button>
     </form>
     <form method="post" action="{{ url_for('reset_person', uid=f.id) }}" class="resetrow" onsubmit="return confirm('Give {{ f.display_name|e }} a new temporary password? The old one stops working at once.')">

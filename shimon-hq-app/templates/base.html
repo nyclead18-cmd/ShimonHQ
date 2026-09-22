@@ -34,7 +34,7 @@ addEventListener('load', function () {
 </script>
 <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600&family=Frank+Ruhl+Libre:wght@500;700&family=Assistant:wght@400;600;700&display=swap"></noscript>
 </head>
-<body class="{{ 'simple calm' if display_mode == 'calm' else ('simple' if display_mode == 'simple' else '') }}">
+<body class="{{ 'simple calm' if display_mode == 'calm' else ('simple' if display_mode == 'simple' else '') }}{% if lean %} lean{% endif %}">
 {% if session.get('view_as_from') %}
 <div class="viewas noprint">You are seeing HQ as <b>{{ session.get('name') }}</b> &mdash; anything you do here is done in their name.
   <form method="post" action="{{ url_for('view_as_back') }}"><input type="hidden" name="who" value="{{ session.get('uid') }}"><button type="submit">Back to {{ session['view_as_from'].get('name') }}</button></form></div>
