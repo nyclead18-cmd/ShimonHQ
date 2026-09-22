@@ -1,0 +1,46 @@
+{# One dialog per page; filled from the data blocks below when a "message" button is tapped. #}
+{% if vm_of %}
+<dialog id="vmpop" class="vmpop">
+  <div class="vmpop-head"><b id="vmpop-who"></b><span id="vmpop-when" class="muted"></span>
+    <button type="button" class="ghostbtn" onclick="document.getElementById('vmpop').close()">Close</button></div>
+  <audio id="vmpop-audio" controls preload="none" style="width:100%;margin:8px 0"></audio>
+  <div id="vmpop-en" class="vmpop-txt" dir="auto"></div>
+  <div id="vmpop-yi" class="vmpop-txt yi" dir="rtl"></div>
+  <div class="vmpop-foot"><a id="vmpop-call" class="ghostbtn linkbtn" href="#">Call back</a><a id="vmpop-link" class="ghostbtn linkbtn" href="#">Open in Voicemail</a></div>
+</dialog>
+{% for iid, v in vm_of.items() %}
+<script type="application/json" class="vmpop-data" data-vm="{{ v.id }}">{{ {"who": v.caller_name or fmt_phone(v.caller_number) or "Unknown caller", "num": v.caller_number or "", "when": (v.ts or "")[:16]|stamp, "dur": v.duration or 0, "en": v.english or "", "yi": v.yiddish or "", "audio": (url_for("vm_audio", vid=v.id) if v.stored_name else ""), "link": url_for("vm_view") ~ "#vm-" ~ v.id}|tojson }}</script>
+{% endfor %}
+<style>
+  .vmpop{border:1px solid var(--border); border-radius:16px; padding:16px 18px; max-width:560px; width:calc(100% - 32px); background:var(--card); color:var(--ink)}
+  .vmpop::backdrop{background:rgba(0,0,0,.35)}
+  .vmpop-head{display:flex; gap:10px; align-items:baseline; flex-wrap:wrap}
+  .vmpop-head .ghostbtn{margin-left:auto}
+  .vmpop .muted{color:var(--muted); font-size:12.5px}
+  .vmpop-txt{font-size:15px; line-height:1.5; margin:8px 0; white-space:pre-wrap}
+  .vmpop-txt.yi{font-size:17px; border-top:1px dashed var(--border); padding-top:8px}
+  .vmpop-foot{display:flex; gap:8px; margin-top:10px; flex-wrap:wrap}
+  .vmpopbtn{cursor:pointer; background:none; border:0; padding:0; font:inherit; color:inherit}
+</style>
+<script>
+(function(){
+  var dlg=document.getElementById('vmpop'); if(!dlg) return;
+  var data={}; document.querySelectorAll('script.vmpop-data').forEach(function(s){ try{ data[s.dataset.vm]=JSON.parse(s.textContent); }catch(e){} });
+  document.addEventListener('click', function(e){
+    var b=e.target.closest('[data-vmpop]'); if(!b) return;
+    e.preventDefault(); e.stopPropagation();
+    var d=data[b.dataset.vmpop]; if(!d) return;
+    document.getElementById('vmpop-who').textContent=d.who;
+    document.getElementById('vmpop-when').textContent=d.when+(d.dur?' · '+Math.floor(d.dur/60)+':'+('0'+d.dur%60).slice(-2):'');
+    var a=document.getElementById('vmpop-audio'); if(d.audio){a.src=d.audio; a.hidden=false;} else {a.removeAttribute('src'); a.hidden=true;}
+    document.getElementById('vmpop-en').textContent=d.en; document.getElementById('vmpop-yi').textContent=d.yi;
+    document.getElementById('vmpop-yi').hidden=!d.yi;
+    var c=document.getElementById('vmpop-call'); c.hidden=!d.num; c.href='tel:'+d.num.replace(/[^\d+]/g,'');
+    document.getElementById('vmpop-link').href=d.link;
+    dlg.showModal();
+  }, true);
+  dlg.addEventListener('click', function(e){ if(e.target===dlg) dlg.close(); });
+  dlg.addEventListener('close', function(){ var a=document.getElementById('vmpop-audio'); a.pause(); });
+})();
+</script>
+{% endif %}

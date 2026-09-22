@@ -73,6 +73,7 @@
   {% if it.follow_up_at %}<span>chase {{ it.follow_up_at[5:7]|int }}/{{ it.follow_up_at[8:10]|int }}{% if it.follow_up_count %} (x{{ it.follow_up_count }}){% endif %}</span>{% endif %}
   {% if it.due_date %}<span>due {{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}</span>{% endif %}
   {% if it.source_link %}<a class="srclink" href="{{ it.source_link }}" target="_blank" rel="noopener">{% if 'whatsapp' in it.source_link %}&#128172; chat{% else %}&#9993; email{% endif %}</a>{% endif %}
+  {% if vm_of and vm_of.get(it.id) %}<button type="button" class="bchip vmpopbtn" data-vmpop="{{ vm_of[it.id].id }}">&#9654; message</button>{% endif %}
 </div>
 
 {% if it.note %}<p dir="auto" style="margin:0 0 12px">{{ it.note }}</p>{% endif %}
@@ -150,4 +151,5 @@ operation-sized tasks, or ask Claude for a workup on this task by name.</p>
 </form>
 </div>
 </div>
+{% include "_vmpop.html" %}
 {% endblock %}

@@ -139,12 +139,14 @@
 
 {% if passed %}
 <section class="card" id="lane-passed" style="--sa:#1F3A5F">
-  <div class="sec-head"><h2><span class="dot"></span>{{ 'You' if who == session.get('uid') else person.first_name or person.display_name }} passed on</h2>
-    <span class="counts">{{ passed|length }} open</span></div>
+  <details>
+  <summary class="sec-head" style="cursor:pointer"><h2><span class="dot"></span>{{ 'You' if who == session.get('uid') else person.first_name or person.display_name }} passed on</h2>
+    <span class="counts">{{ passed|length }} open &middot; tap to show</span></summary>
   {% set show_where = true %}
   <div class="seccols"><ul class="items">
     {% for it in passed %}{% include "_item.html" %}{% endfor %}
   </ul></div>
+  </details>
 </section>
 {% endif %}
 
@@ -170,6 +172,7 @@
 </div>
 </div>
 {% include "_edittpl.html" %}
+{% include "_vmpop.html" %}
 {% endblock %}
 {% block scripts %}
 <script src="{{ url_for('static', filename='board.js') }}?v={{ css_v }}"></script>
