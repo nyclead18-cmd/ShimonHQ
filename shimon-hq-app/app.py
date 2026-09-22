@@ -3429,6 +3429,39 @@ def _save_profile(con, target):
     return None
 
 
+@app.route("/account/view/<int:uid>", methods=["POST"])
+@login_required
+def view_as(uid):
+    """An admin steps into somebody's account to see HQ exactly as they do - their
+    board, their Desk, their tabs - and can act for them. A banner on every page says
+    so, with one tap back. The real login is kept in the session for the way back."""
+    if not session.get("admin") or session.get("view_as_from"):
+        abort(403)
+    con = db()
+    row = con.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    if not row or row["id"] == me():
+        abort(404)
+    real = {k: session.get(k) for k in ("user", "uid", "name", "admin")}
+    session["view_as_from"] = real
+    session["user"] = row["username"]
+    session["uid"] = row["id"]
+    session["name"] = row["display_name"]
+    session["admin"] = bool(row["is_admin"])
+    session.pop("needs_2fa", None)
+    return redirect(url_for("desk_view"))
+
+
+@app.route("/account/view/back", methods=["POST"])
+def view_as_back():
+    real = session.get("view_as_from")
+    if not real:
+        return redirect(url_for("board"))
+    for k, v in real.items():
+        session[k] = v
+    session.pop("view_as_from", None)
+    return redirect(url_for("desk_view", who=request.form.get("who") or None))
+
+
 @app.route("/account/identity", methods=["POST"])
 @login_required
 def set_identity():
