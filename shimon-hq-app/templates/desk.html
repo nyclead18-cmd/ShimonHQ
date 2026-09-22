@@ -67,6 +67,7 @@
   .deskpage .acts{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0 4px}
   .deskpage .acts a, .deskpage .acts button{font:inherit; font-size:12.5px; padding:5px 11px; border-radius:999px; border:1px solid var(--border); background:var(--card); color:var(--ink); text-decoration:none; cursor:pointer}
   .deskpage .acts a.call{border-color:var(--ink); font-weight:600}
+  .deskpage .acts .donebtn{background:var(--pill-done-bg,#e6f0e6); color:var(--pill-done-tx,#3A6B3E); border-color:var(--pill-done-tx,#3A6B3E); font-weight:600}
   .deskpage .acts form{display:contents}
   .deskpage .fold ul.notes{margin-top:8px}
   .deskpage .fold form.respond{display:flex; gap:6px; margin-top:8px}
@@ -152,9 +153,7 @@
         <a href="{{ url_for('vm_view', q=(who if session.get('admin') else None)) }}#vm-{{ r.id }}">Text back &#8599;</a>
         {% if r.item_id %}<a href="{{ url_for('task_view', item_id=r.item_id) }}">Task page &#8599;</a>
         {% else %}<form method="post" action="{{ url_for('vm_task', vid=r.id) }}"><button type="submit">Make task</button></form>{% endif %}
-        {% if who == session.get('uid') %}
-        <form method="post" action="{{ url_for('vm_handled', vid=r.id) }}"><input type="hidden" name="back" value="{{ url_for('desk_view') }}"><button type="submit" title="File this message away - it counts as finished">Done</button></form>
-        {% endif %}
+        <form method="post" action="{{ url_for('vm_close', vid=r.id) }}"><input type="hidden" name="back" value="{{ url_for('desk_view', who=(who if session.get('admin') else None)) }}"><button type="submit" class="donebtn" title="Finished - for everyone. The task closes, the message leaves every queue, {{ 'Shimon' if who == session.get('uid') else 'they' }} get a buzz.">&#10003; Done</button></form>
       </div>
       {% if r.item_id %}
       {% set inotes = (notes_by_item or {}).get(r.item_id, []) %}
@@ -216,7 +215,7 @@
   {% if done %}
   {% for r in done %}
   {% set rd = readings[r.id] %}
-  <div class="row"><span dir="auto"><b>{{ r.caller_name or fam(r) or fmt_phone(r.caller_number) or 'Unknown caller' }}</b> &middot; {{ r.ititle or rd.title }}</span><span>{{ (r.done_at or r.handled_at or '')|stamp }}</span></div>
+  <div class="row"><span dir="auto"><b>{{ r.caller_name or fam(r) or fmt_phone(r.caller_number) or 'Unknown caller' }}</b> &middot; {{ r.ititle or rd.title }}</span><span>{{ (r.closed_at or r.done_at or r.handled_at or '')|stamp }}{% if r.closed_by and people.get(r.closed_by) %} &middot; {{ people[r.closed_by] }}{% endif %}</span></div>
   {% endfor %}
   {% else %}<p class="caveat">Nothing finished yet this week.</p>{% endif %}
 </section>
