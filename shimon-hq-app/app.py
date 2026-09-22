@@ -6950,6 +6950,8 @@ def desk_view():
     return render_template("desk.html", who=who, person=person, folk=folk, qcounts=qcounts,
                            queue=queue, owed=owed, touches=touches, tasks=tasks, done=done,
                            handed=handed, passed=passed, boards=BOARDS, vm_of=vm_of,
+                           outbound=vm.configured() and not vm.mirror_configured(),
+                           my_phone=(person["phone"] or "") if who == me() else "",
                            readings=readings, fam=fam, fmt_phone=vm.fmt_phone,
                            kind_label=vm.KIND_LABEL, line_labels=labels,
                            line_of=lambda r: vm.line_label(r["ext"], labels),
