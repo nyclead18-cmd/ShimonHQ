@@ -863,6 +863,11 @@ def init_db():
         for u in con.execute("SELECT id, display_name FROM users").fetchall():
             fn, ln = split_name(u["display_name"])
             con.execute("UPDATE users SET first_name=?, last_name=? WHERE id=?", (fn, ln, u["id"]))
+    # routing comes back on (v171), once - the picker on Account holds the rules
+    if not con.execute("SELECT 1 FROM settings WHERE k='mig:autoroute171'").fetchone():
+        con.execute("INSERT INTO settings(k, v) VALUES('vm_autoroute', '1')"
+                    " ON CONFLICT(k) DO UPDATE SET v='1'")
+        con.execute("INSERT OR REPLACE INTO settings(k, v) VALUES('mig:autoroute171', '1')")
     # Mrs. Hartman's first name, filled once where it was never typed in
     con.execute("UPDATE users SET first_name='Hindy' WHERE lower(username)='hartman'"
                 " AND COALESCE(first_name,'')=''")
@@ -1297,6 +1302,32 @@ def set_autoroute():
     return redirect(url_for("account_view"))
 
 
+@app.route("/account/route", methods=["POST"])
+@login_required
+def set_route():
+    """Who each kind of message goes to. Empty = stays on the Desk."""
+    if not session.get("admin"):
+        abort(403)
+    con = db()
+    known = {str(r["id"]) for r in people_list(con)}
+    for k in vm.KINDS:
+        v = (request.form.get("route_" + k) or "").strip()
+        _set_setting(con, "route:%s" % k, v if v in known else "")
+    commit_retry(con)
+    return redirect(url_for("account_view") + "#routing")
+
+
+@app.route("/account/route/now", methods=["POST"])
+@login_required
+def route_now():
+    if not session.get("admin"):
+        abort(403)
+    con = db()
+    n = vm_route_now(con)
+    return _account_page(con, ok=("%d message%s passed on by the rules." % (n, "" if n == 1 else "s")) if n
+                         else "Nothing waiting: every recent message is already with somebody, handled or closed.")
+
+
 @app.route("/account/2fa")
 @login_required
 def twofa_setup():
@@ -1478,6 +1509,7 @@ def board():
                            tenures=TENURES, stages=STAGES,
                            notes_by_item=notes_by_item, files_by_item=files_by_item,
                            today_iso=today_iso, soon_iso=soon_iso,
+                           vm_of=vm_popups(con, keep), fmt_phone=vm.fmt_phone,
                            total_active=total_active, stats=stats,
                            today=datetime.now().strftime("%b %-d, %Y")
                            if os.name != "nt" else datetime.now().strftime("%b %d, %Y"))
@@ -3372,6 +3404,7 @@ def _account_page(con, **extra):
                require_2fa=require_2fa(con), require_2fa_env=_REQUIRE_2FA_ENV,
                twofa_status={r["id"]: uset(con, "totp_on", r["id"]) == "1" for r in folk},
                autoroute=autoroute_on(con), route_default=ROUTE_DEFAULT_USER, kind_label=vm.KIND_LABEL,
+               route_now=route_table(con), kinds=vm.KINDS,
                feed_url=request.url_root.rstrip("/") + url_for("ics_feed", token=_feed_token(con)))
     ctx.update(extra)
     return render_template("account.html", **ctx)
@@ -5630,7 +5663,42 @@ def vm_popups(con, item_ids):
 # Who each kind of message goes to. settings 'route:<kind>' holds a user id; unset
 # falls back to the account named for the job (hartman / toby), else the desk.
 ROUTE_DEFAULT_USER = {"family_case": "hartman", "charity": "hartman", "issue": "hartman",
-                      "thank_you": "hartman", "money": "toby", "other": ""}
+                      "thank_you": "", "money": "toby", "other": "hartman"}
+
+
+def route_table(con):
+    """{kind: user id or None} as the rules stand now - the picker on Account."""
+    return {k: _route_target(con, k) for k in vm.KINDS}
+
+
+def vm_route_now(con, days=14):
+    """Route the messages that came in while routing was off: unassigned, not handled,
+    not closed, recent. Each goes where a new one of its kind would go today."""
+    since = (datetime.now() - timedelta(days=days)).isoformat(timespec="seconds")
+    rows = con.execute("SELECT * FROM voicemails WHERE read_json IS NOT NULL AND assignee IS NULL"
+                       " AND tstatus='done' AND closed_at IS NULL AND ts > ?"
+                       " AND id NOT IN (SELECT vm_id FROM vm_handled)", (since,)).fetchall()
+    n = 0
+    for r in rows:
+        to = _route_target(con, r["kind"] or "other")
+        if not to:
+            continue
+        con.execute("UPDATE voicemails SET routed=1, assignee=? WHERE id=?", (to, r["id"]))
+        row = con.execute("SELECT * FROM voicemails WHERE id=?", (r["id"],)).fetchone()
+        try:
+            _vm_make_task(con, row)
+        except Exception as e:
+            app.logger.warning("route now: task failed for %s: %s", r["id"], e)
+        n += 1
+    if n:
+        commit_retry(con)
+        for uid in {r for r in (_route_target(con, k) for k in vm.KINDS) if r}:
+            try:
+                send_push("Messages moved to your desk", "%d voicemail%s were passed to you" % (n, "" if n == 1 else "s"),
+                          "/desk", uid=uid)
+            except Exception as e:
+                app.logger.warning("route now push failed: %s", e)
+    return n
 
 
 def _route_target(con, kind):
