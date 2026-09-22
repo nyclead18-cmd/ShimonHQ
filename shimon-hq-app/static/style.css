@@ -1481,3 +1481,14 @@ body.calm .toolbar{margin-bottom:10px;}
   font-size:13.5px; color:var(--ink);}
 .routerow select{font:inherit; font-size:13.5px; padding:6px 10px; border:1px solid var(--border);
   border-radius:10px; background:var(--card); color:var(--ink); max-width:260px;}
+
+/* ---------- v172: board rows are the headline only ----------
+   A closed row shows the title, one clamped line of the note and the chips; the
+   full note, the voicemail facts and everything else wait for the opened card. */
+.grid.board li.item:not(.expanded) .t .tt{display:block;}
+.grid.board li.item:not(.expanded) .t .ndash{display:none;}
+.grid.board li.item:not(.expanded) .t .n{display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical;
+  overflow:hidden; font-weight:400; color:var(--muted); font-size:11.5px; line-height:1.35; margin-top:1px;}
+.grid.board li.item:not(.expanded) .t .nmeta{display:none;}
+.grid.board li.item:not(.expanded) .metaline{gap:4px 6px;}
+.grid.board li.item:not(.expanded) .stamps{display:none;}
