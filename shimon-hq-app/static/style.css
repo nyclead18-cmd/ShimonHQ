@@ -1508,3 +1508,13 @@ body.lean .calmtog{display:none;}
 .proj-head:hover .pmenu{opacity:1;}
 .pdelform{margin-left:0;}
 @media print{ .pmenu{display:none;} }
+
+/* v175: a closed board row keeps only what differs between rows */
+.grid.board li.item:not(.expanded) .openfull,
+.grid.board li.item:not(.expanded) .vmpopbtn,
+.grid.board li.item:not(.expanded) .cptag{display:none;}
+.grid.board li.item:not(.expanded) .metaline > .due:only-child{margin-top:2px;}
+/* smoother: rows and cards ease in, buttons settle */
+.grid.board li.item, .deskpage .msg, .vmpage .vm{transition:background-color .18s ease, box-shadow .18s ease;}
+.tabs .tab, .fapill, .bchip, .ghostbtn, .pill{transition:background-color .15s ease, color .15s ease, border-color .15s ease;}
+@media (prefers-reduced-motion: reduce){ .grid.board li.item, .deskpage .msg, .vmpage .vm, .tabs .tab, .fapill, .bchip, .ghostbtn, .pill{transition:none;} }
