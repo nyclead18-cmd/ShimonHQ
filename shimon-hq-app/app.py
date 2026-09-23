@@ -4385,13 +4385,41 @@ def api_note():
     if ans and (it["waiting_on"] or "").strip():
         con.execute("UPDATE items SET answered_at=? WHERE id=?",
                     (_now_local().isoformat(timespec="seconds"), it["id"]))
+    # the outbox closes the loop: done=1 when the email IS the finish (an approval
+    # came back, the thing was sent), status=waiting&waiting_on=X when it hands off
+    closed = ""
+    want = (request.args.get("status") or ("done" if (request.args.get("done") or "") in ("1", "yes") else "")).strip()
+    if want in STATUSES and want != it["status"]:
+        was = con.execute("SELECT status, title FROM items WHERE id=?", (it["id"],)).fetchone()
+        con.execute("UPDATE items SET status=?, updated_at=?, done_at=?, waiting_on=COALESCE(?, waiting_on) WHERE id=?",
+                    (want, now, now if want == "done" else None,
+                     (request.args.get("waiting_on") or "").strip() or None, it["id"]))
+        commit_retry(con)
+        _tell_status(con, it["id"], was, want)
+        closed = " -> " + want.upper()
     commit_retry(con)
     # a sweep filing onto shared work should nudge the other person too - that is
     # the case where somebody genuinely wants to know without opening the app
     tell_others(con, it["id"], "notes", "New on %s" % _short(it["title"], 40),
                 _short(body), "/#item-%d" % it["id"])
-    return "FILED on %s: %s" % (it["title"], body[:60]), 200, \
+    return "FILED on %s%s: %s" % (it["title"], closed, body[:60]), 200, \
         {"Content-Type": "text/plain; charset=utf-8"}
+
+
+@app.route("/api/open")
+def api_open():
+    """Every open task the caller may see, one per line: id, status, waiting_on, thread,
+    title - what the sweep matches the inbox AND the outbox against."""
+    if not _api_auth():
+        abort(401)
+    con = db()
+    where, args = sec_clause(con, "section_id")
+    rows = con.execute("SELECT id, status, waiting_on, thread_key, title, note FROM items"
+                       " WHERE status != 'done' AND archived=0" + where + " ORDER BY updated_at DESC LIMIT 400",
+                       args).fetchall()
+    out = ["%d\t%s\t%s\t%s\t%s\t%s" % (r["id"], r["status"], r["waiting_on"] or "-", r["thread_key"] or "-",
+                                        r["title"], _short(r["note"] or "", 90)) for r in rows]
+    return ("\n".join(out) or "NONE"), 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
 # ---------- WhatsApp, read-only, through TimelinesAI ----------
