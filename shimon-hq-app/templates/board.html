@@ -149,6 +149,7 @@
         </form>
       </details>
       {% endif %}
+      <button type="button" class="pmenu" data-pmenu title="Rename, move, archive this project&hellip;">&#8943;</button>
       <form method="post" action="{{ url_for('delete_project', proj_id=p.id) }}" class="pdelform">
         <button type="submit" class="del" title="Remove project (tasks stay)">&#x2715;</button>
       </form>
