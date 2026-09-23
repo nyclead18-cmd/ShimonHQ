@@ -8,12 +8,7 @@
     <h1>Account</h1>
   </div>
   <div class="right">
-    <nav class="tabs">
-      <a class="tab" href="{{ url_for('today_view') }}">Today</a>
-      <a class="tab" href="{{ url_for('board') }}">Board</a>
-      {% if has_pipe %}<a class="tab" href="{{ url_for('pipeline_view') }}">Pipeline</a>{% endif %}
-      <a class="tab" href="{{ url_for('pulse_view') }}">Pulse</a>
-    </nav>
+    {% set nav_on = '' %}{% include "_nav.html" %}
     <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
   </div>
 </header>

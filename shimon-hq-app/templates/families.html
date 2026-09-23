@@ -8,12 +8,7 @@
     <h1>Families</h1>
   </div>
   <div class="right">
-    <nav class="tabs">
-      <a class="tab" href="{{ url_for('vm_view') }}">Voicemail</a>
-      <a class="tab" href="{{ url_for('desk_view') }}">Desk</a>
-      <a class="tab on" href="{{ url_for('families_view') }}">Families</a>
-      <a class="tab" href="{{ url_for('board') }}">Board</a>
-    </nav>
+    {% set nav_on = 'families_view' %}{% include "_nav.html" %}
     <a class="logout" href="{{ url_for('account_view') }}">{{ session.get('name') or 'Account' }}</a>
   </div>
 </header>

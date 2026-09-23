@@ -11,14 +11,7 @@
     </div>
   </div>
   <div class="right">
-    <nav class="tabs">
-      <a class="tab" href="{{ url_for('today_view') }}">Today</a>
-      <a class="tab" href="{{ url_for('board') }}">Board</a>
-      <a class="tab" href="{{ url_for('list_view') }}">List</a>
-      <a class="tab" href="{{ url_for('vm_view') }}">Voicemail</a>
-      <a class="tab on" href="{{ url_for('desk_view') }}">Desk</a>
-      <a class="tab" href="{{ url_for('pulse_view') }}">Pulse</a>
-    </nav>
+    {% set nav_on = 'desk_view' %}{% include "_nav.html" %}
     <a class="logout" href="{{ url_for('account_view') }}">{{ session.get('name') or 'Account' }}</a>
     <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
   </div>
@@ -72,7 +65,11 @@
   .deskpage .fold audio{width:100%; height:36px; margin:0}
   .deskpage .fold .txt{font-size:14px; line-height:1.55; white-space:pre-wrap; margin:8px 0 0; color:var(--ink)}
   .deskpage .fold .txt.yi{font-size:16px; margin-top:8px}
-  .deskpage .fold details.yid summary{font-size:12px; color:var(--muted); cursor:pointer; margin-top:6px}
+  .deskpage .fold details.yid summary{font-size:12px; color:var(--muted); cursor:pointer; margin-top:8px; list-style:none}
+  .deskpage .fold details.yid summary::-webkit-details-marker{display:none}
+  .deskpage .fold details.yid summary::before{content:'\25B8  '} .deskpage .fold details.yid[open] summary::before{content:'\25BE  '}
+  .deskpage .fold .txt.yi{border-top:1px dashed var(--border); padding-top:8px}
+  .deskpage .msg:not(.open) .who .num{display:none}
   .deskpage .msg .checklist{margin:0; display:flex; gap:4px}
   .deskpage .msg .ckrow{font-size:14px; gap:10px; padding:2px 0}
   .deskpage .msg .ckrow .cktick{width:17px; height:17px}
@@ -116,7 +113,6 @@
 <div class="stats">
   <a class="stat" href="#lane-queue"><div class="num">{{ queue|length }}</div><div class="lbl">messages</div></a>
   <a class="stat{% if owed %} alarm{% endif %}" href="#lane-queue"><div class="num">{{ owed|length }}</div><div class="lbl">call back owed</div></a>
-  <a class="stat" href="#lane-queue"><div class="num">{{ steps_left }}</div><div class="lbl">steps left</div></a>
   <a class="stat" href="#lane-handed"><div class="num">{{ handed|length }}</div><div class="lbl">passed to {{ 'you' if who == session.get('uid') else 'them' }}</div></a>
   <a class="stat good" href="#lane-done"><div class="num">{{ done|length }}</div><div class="lbl">finished this week</div></a>
 </div>
@@ -125,7 +121,7 @@
 <div>
 <section class="card" id="lane-queue" style="--sa:#A33B2E">
   <div class="sec-head"><h2><span class="dot"></span>Messages</h2>
-    <span class="counts">{{ queue|length }} waiting{% if owed %} &middot; {{ owed|length }} not called back{% endif %}</span></div>
+    <span class="counts">{{ queue|length }}</span></div>
   {% if calls_err %}<div class="callserr">Call recordings are not coming through: {{ calls_err }}<br><small>On the RingCentral app: add <b>ReadCallLog</b> and <b>ReadCallRecording</b> permissions.</small></div>{% endif %}
   {% if queue %}
   <div class="msgs">
@@ -137,7 +133,7 @@
   {% set num = rd.callback or r.caller_number %}
   <div class="msg" id="msg-{{ r.id }}"{% if r.item_id %} data-item="{{ r.item_id }}"{% endif %}>
     <div class="head" data-fold>
-      <div class="who"><span class="dotst{% if t %} ok{% endif %}" title="{% if t %}{{ 'Texted' if t.kind == 'sms' else 'Called' }} {{ t.at|stamp }}{% else %}Not called back yet{% endif %}"></span>{{ who_s }}{% if r.caller_name and r.caller_number %}<small>{{ fmt_phone(r.caller_number) }}</small>{% endif %}
+      <div class="who"><span class="dotst{% if t %} ok{% endif %}" title="{% if t %}{{ 'Texted' if t.kind == 'sms' else 'Called' }} {{ t.at|stamp }}{% else %}Not called back yet{% endif %}"></span>{{ who_s }}{% if r.caller_name and r.caller_number %}<small class="num">{{ fmt_phone(r.caller_number) }}</small>{% endif %}
         {% if r.kind and r.kind != 'other' %}<small class="tag">{{ kind_label.get(r.kind, r.kind) }}</small>{% endif %}
         {% if line_labels|length > 1 %}<small class="tag">{{ line_of(r).replace(' line', '') }}</small>{% endif %}
         {% if t %}<small class="tag touched">{{ 'texted' if t.kind == 'sms' else 'called' }} {{ t.at|stamp }}</small>{% endif %}
@@ -157,8 +153,9 @@
       {% if r.stored_name or r.english %}
       <div class="kick">The message</div>
       {% if r.stored_name %}<audio controls preload="none" data-src="{{ url_for('vm_audio', vid=r.id) }}"></audio>{% endif %}
-      {% if r.english %}<div class="txt" dir="auto">{{ r.english }}</div>{% endif %}
-      {% if r.yiddish %}<details class="yid"><summary>Yiddish</summary><div class="txt yi" dir="rtl">{{ r.yiddish }}</div></details>{% endif %}
+      {% if r.english or r.yiddish %}<details class="yid words"><summary>Full transcript</summary>
+        {% if r.english %}<div class="txt" dir="auto">{{ r.english }}</div>{% endif %}
+        {% if r.yiddish %}<div class="txt yi" dir="rtl">{{ r.yiddish }}</div>{% endif %}</details>{% endif %}
       {% endif %}
       {% if r.item_id %}
       <div class="kick">Steps</div>

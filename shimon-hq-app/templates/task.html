@@ -11,11 +11,7 @@
     </div>
   </div>
   <div class="right">
-    <nav class="tabs">
-      <a class="tab" href="{{ url_for('os_view') }}">OS</a>
-      <a class="tab" href="{{ url_for('today_view') }}">Today</a>
-      <a class="tab" href="{{ url_for('board') }}#item-{{ it.id }}">Board</a>
-    </nav>
+    {% set nav_on = '' %}{% include "_nav.html" %}
     <a class="logout" href="{{ url_for('account_view') }}">{{ session.get('name') or 'Account' }}</a>
     <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
   </div>

@@ -8,14 +8,7 @@
     <h1>Voicemail</h1>
   </div>
   <div class="right">
-    <nav class="tabs">
-      <a class="tab" href="{{ url_for('os_view') }}">OS</a>
-      <a class="tab" href="{{ url_for('today_view') }}">Today</a>
-      <a class="tab" href="{{ url_for('board') }}">Board</a>
-      <a class="tab on" href="{{ url_for('vm_view') }}">Voicemail</a>
-      <a class="tab" href="{{ url_for('desk_view') }}">Desk</a>
-      <a class="tab" href="{{ url_for('joel_view') }}">Review</a>
-    </nav>
+    {% set nav_on = 'vm_view' %}{% include "_nav.html" %}
     <a class="logout" href="{{ url_for('account_view') }}">{{ session.get('name') or 'Account' }}</a>
     <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
   </div>
@@ -133,6 +126,10 @@
   .vmpage .en{font-size:15px;line-height:1.55;margin:4px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
   .vmpage .yi{direction:rtl;text-align:right;font-family:'Frank Ruhl Libre','Noto Serif Hebrew','David',serif;font-size:17px;line-height:1.75;margin:10px 0 0;padding-top:10px;border-top:1px dashed var(--border);white-space:pre-wrap;overflow-wrap:anywhere}
   .vmpage .rc{margin-top:8px;color:var(--muted);font-size:13px;font-style:italic}
+  .vmpage details.yid{margin-top:8px} .vmpage details.yid>summary{font-size:12px;color:var(--muted);cursor:pointer;list-style:none}
+  .vmpage details.yid>summary::-webkit-details-marker{display:none} .vmpage details.yid>summary::before{content:'\25B8  '} .vmpage details.yid[open]>summary::before{content:'\25BE  '}
+  .vmpage details.yid .yi{margin-top:6px;padding-top:0;border-top:0}
+  .vmpage .famline.none{font-size:12px;padding:6px 10px;opacity:.8}
   .vmpage .err{margin-top:8px;color:var(--danger);font-size:12.5px}
   .vmpage .note{position:absolute;left:50%;top:-30px;transform:translateX(-50%);font-size:12.5px;font-weight:600;color:var(--btn-tx);background:var(--btn-bg);border-radius:999px;padding:5px 12px;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .2s,transform .2s;z-index:5}
   .vmpage .note.on{opacity:1;transform:translateX(-50%) translateY(-4px)}
@@ -327,14 +324,14 @@
       </div>
       {% if r.stored_name %}<button type="button" class="ib play" data-play aria-label="Play"><svg class="go" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg><svg class="pause" viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg></button>{% else %}<span></span>{% endif %}
       <div class="grp">
-        {% if r.english or r.yiddish %}<button type="button" class="ib" data-copy="all"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>Copy</button>{% endif %}
-        {% if r.stored_name %}<button type="button" class="ib" data-share-btn><svg viewBox="0 0 24 24"><path d="M12 3v13M7 8l5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>Share</button>{% endif %}
         {% if outbound and r.caller_number %}<button type="button" class="ib" data-sheet="tx-{{ r.id }}"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg>Text</button>
         <button type="button" class="ib" data-callback><svg viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg>Call</button>{% endif %}
         {% if dh and not r.dh_event_id and r.stored_name %}<button type="button" class="ib" data-sheet="dh-{{ r.id }}"><svg viewBox="0 0 24 24"><path d="M4 5h11a3 3 0 0 1 3 3v11H7a3 3 0 0 1-3-3z"/><path d="M8 9h6M8 13h6"/></svg>Chronicle</button>{% endif %}
         <div class="more"><button type="button" class="ib quiet" data-menu><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/></svg>More</button>
           <div class="menu">
-            {% if r.stored_name %}<button type="button" data-copy="link">Copy web link</button>
+            {% if r.english or r.yiddish %}<button type="button" data-copy="all">Copy the words</button>{% endif %}
+            {% if r.stored_name %}<button type="button" data-share-btn>Share the recording</button>
+            <button type="button" data-copy="link">Copy web link</button>
             <a href="{{ url_for('vm_audio', vid=r.id, dl=1) }}">Download mp3</a>{% endif %}
             {% if not mirror %}<hr>
             {% if r.english or r.yiddish %}<button type="button" data-sheet="ed-{{ r.id }}">Edit the words</button>
@@ -385,9 +382,9 @@
       <span class="fl-sub">{% if fam.mother_en %}{{ fam.mother_en }} · {% endif %}{{ fam.area }}{% if ks %} · {{ ks|length }} {{ 'child' if ks|length == 1 else 'children' }}{% endif %}{% if fam.qbo_payee %} · {{ fam.qbo_payee }}{% endif %}</span>
       <span class="fl-go">Family &rsaquo;</span>
     </a>
-    {% elif r.caller_number %}<div class="famline none">{{ fmt_phone(r.caller_number) }} · not in the families list</div>{% endif %}
+    {% elif r.caller_number and admin %}<div class="famline none">{{ fmt_phone(r.caller_number) }} · not in the families list</div>{% endif %}
     {% if r.english %}<div class="en">{{ r.english }}</div>{% endif %}
-    {% if r.yiddish %}<div class="yi">{{ r.yiddish }}</div>{% endif %}
+    {% if r.yiddish %}<details class="yid"><summary>Yiddish</summary><div class="yi">{{ r.yiddish }}</div></details>{% endif %}
     {% if not r.yiddish and r.rc_text and r.tstatus in ('new','failed') %}<div class="rc">{{ r.rc_text }}</div>{% endif %}
     {% if r.terror %}<div class="err">{{ r.terror }}</div>{% endif %}
   </div></div></div>

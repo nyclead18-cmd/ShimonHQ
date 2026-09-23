@@ -8,17 +8,7 @@
     <h1>Archive</h1>
   </div>
   <div class="right">
-    <nav class="tabs">
-      <a class="tab" href="{{ url_for('today_view') }}">Today</a>
-      <a class="tab" href="{{ url_for('board') }}">Board</a>
-      <a class="tab" href="{{ url_for('briefing_view') }}">Brief{% if brief_unread %} <span class="badge">{{ brief_unread }}</span>{% endif %}</a>
-      <a class="tab" href="{{ url_for('list_view') }}">List</a>
-      <a class="tab" href="{{ url_for('people_view') }}">People</a>
-      <a class="tab" href="{{ url_for('vm_view') }}">Voicemail</a>
-      <a class="tab" href="{{ url_for('desk_view') }}">Desk</a>
-      <a class="tab" href="{{ url_for('joel_view') }}">Review</a>
-      <a class="tab" href="{{ url_for('pulse_view') }}">Pulse</a>
-    </nav>
+    {% set nav_on = '' %}{% include "_nav.html" %}
     <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
   </div>
 </header>
