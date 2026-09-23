@@ -1056,6 +1056,17 @@ document.addEventListener('change', function (ev) {
     var inp = det.querySelector('input[name=title]');
     if (inp) { setTimeout(function () { inp.focus(); }, 250); }
   }
+  // the ... on a project head opens the same menu a right-click would - for a
+  // phone, a tablet, and anyone who never right-clicks
+  document.addEventListener('click', function (ev) {
+    var b = ev.target.closest && ev.target.closest('[data-pmenu]');
+    if (!b) { return; }
+    ev.preventDefault(); ev.stopPropagation();
+    var h3 = b.closest('.proj-head').querySelector('h3') || b.parentNode;
+    var r = b.getBoundingClientRect();
+    h3.dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, cancelable: true,
+                                                     clientX: r.left, clientY: r.bottom + 4}));
+  });
   document.addEventListener('contextmenu', function (ev) {
     if (ev.target.closest('li.item, a, input, textarea, select, button, summary, form, .sheet-wrap')) { return; }
     var card = ev.target.closest('.grid.board section.card');

@@ -1500,3 +1500,11 @@ body.lean .tabs .tab:not([href="/"]):not([href="/today"]):not([href="/vm"]):not(
 body.lean .boardchips{display:none;}
 body.lean .wrap:not(.deskpage) > .stats{display:none;}
 body.lean .calmtog{display:none;}
+
+/* the ... on a project head: rename, move, archive - no right-click needed */
+.pmenu{margin-left:auto; border:0; background:none; color:var(--muted); font:inherit; font-size:15px;
+  line-height:1; padding:2px 6px; border-radius:8px; cursor:pointer; opacity:.55;}
+.pmenu:hover{opacity:1; background:var(--row); color:var(--ink);}
+.proj-head:hover .pmenu{opacity:1;}
+.pdelform{margin-left:0;}
+@media print{ .pmenu{display:none;} }
