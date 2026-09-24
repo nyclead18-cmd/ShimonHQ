@@ -75,6 +75,7 @@
   .vmpage .tag.k-thank_you{background:var(--pill-done-bg);color:var(--pill-done-tx);border-color:transparent}
   .vmpage .tag.k-issue{background:var(--pill-open-bg);color:var(--pill-open-tx);border-color:transparent}
   .vmpage .tag.k-money{background:var(--pill-wait-bg);color:var(--pill-wait-tx);border-color:transparent}
+  .vmpage .tag.call{background:var(--pill-done-bg,#e6f0e6);color:var(--pill-done-tx,#3A6B3E);border-color:transparent}
   .vmpage .tag{font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;padding:2px 8px;border-radius:999px;background:var(--row);color:var(--muted);border:1px solid var(--border);text-decoration:none}
   .vmpage .tag.wait{background:var(--pill-wait-bg);color:var(--pill-wait-tx);border-color:transparent}
   .vmpage .tag.bad{background:var(--pill-open-bg);color:var(--pill-open-tx);border-color:transparent}
@@ -282,8 +283,9 @@
     <div>
       <div class="who">{{ who }}{% if fam and r.caller_name %} <small class="famtag">{{ fam.name_en }}{% if fam.area %} · {{ fam.area }}{% endif %}</small>{% elif r.caller_name and r.caller_number %} <small>{{ fmt_phone(r.caller_number) }}</small>{% endif %}</div>
       <div class="peek">{% if r.english or r.rc_text %}{{ (r.english or r.rc_text)|truncate(160) }}{% elif r.tstatus == 'new' %}<i>Transcribing…</i>{% endif %}</div>
-      {% if r.tstatus in ('failed','short','empty','skipped') or r.item_id or r.dh_event_id or r.kind or (line_labels|length > 1 and not line) or (r.assignee and q in ('', 'all')) %}
+      {% if r.tstatus in ('failed','short','empty','skipped') or r.item_id or r.dh_event_id or r.kind or r.source or (line_labels|length > 1 and not line) or (r.assignee and q in ('', 'all')) %}
       <div class="tags">
+        {% if r.source == 'call_in' %}<span class="tag call">&#9742; call in</span>{% elif r.source == 'call_out' %}<span class="tag call">&#9742; call out</span>{% endif %}
         {% if r.assignee and q in ('', 'all') %}<span class="tag who" data-who-tag>&rarr; {{ r.assignee_name }}</span>{% endif %}
         {% if line_labels|length > 1 and not line %}<span class="tag line">{{ line_of(r).replace(' line', '') }}</span>{% endif %}
         {% if r.kind and r.kind != 'other' %}<span class="tag kind k-{{ r.kind }}">{{ kind_label.get(r.kind, r.kind) }}</span>{% endif %}

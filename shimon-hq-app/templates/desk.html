@@ -134,6 +134,7 @@
   <div class="msg" id="msg-{{ r.id }}"{% if r.item_id %} data-item="{{ r.item_id }}"{% endif %}>
     <div class="head" data-fold>
       <div class="who"><span class="dotst{% if t %} ok{% endif %}" title="{% if t %}{{ 'Texted' if t.kind == 'sms' else 'Called' }} {{ t.at|stamp }}{% else %}Not called back yet{% endif %}"></span>{{ who_s }}{% if r.caller_name and r.caller_number %}<small class="num">{{ fmt_phone(r.caller_number) }}</small>{% endif %}
+        {% if r.source == 'call_in' %}<small class="tag touched">&#9742; call in</small>{% elif r.source == 'call_out' %}<small class="tag touched">&#9742; call out</small>{% endif %}
         {% if r.kind and r.kind != 'other' %}<small class="tag">{{ kind_label.get(r.kind, r.kind) }}</small>{% endif %}
         {% if line_labels|length > 1 %}<small class="tag">{{ line_of(r).replace(' line', '') }}</small>{% endif %}
         {% if t %}<small class="tag touched">{{ 'texted' if t.kind == 'sms' else 'called' }} {{ t.at|stamp }}</small>{% endif %}
