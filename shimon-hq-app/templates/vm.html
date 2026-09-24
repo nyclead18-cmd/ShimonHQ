@@ -198,6 +198,7 @@
   <div class="seg">
     <a class="{% if show == 'open' %}on{% endif %}" href="{{ url_for('vm_view') }}">Open · {{ counts.open }}</a>
     <a class="{% if show == 'handled' %}on{% endif %}" href="{{ url_for('vm_view', show='handled', q=q if q else None, line=line if line else None) }}" title="What you filed away - handled, or finished by whoever it was passed to">&#10003; Handled · {{ counts.handled }}</a>
+    <a class="{% if show == 'calls' %}on{% endif %}" href="{{ url_for('vm_view', show='calls') }}" title="Recorded calls - in and out - on every line">&#9742; Calls · {{ counts.calls }}</a>
     <a class="{% if show == 'short' %}on{% endif %}" href="{{ url_for('vm_view', show='short') }}">Short / empty · {{ counts.short }}</a>
     <a class="{% if show == 'all' %}on{% endif %}" href="{{ url_for('vm_view', show='all') }}">Everything</a>
   </div>
