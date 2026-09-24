@@ -291,14 +291,19 @@ SMS_TEMPLATES = [
 
 # ---------- recorded calls: what was said when we called back ----------
 
-def rc_call_log(date_from, direction="Outbound"):
-    """Recorded voice calls from the line's extension since `date_from` (ISO, UTC ok).
-    Needs ReadCallLog on the app; the recording itself needs ReadCallRecording."""
+def rc_call_log(date_from, direction=None, ext="~"):
+    """Recorded voice calls on one extension since `date_from` (ISO, UTC ok) - both
+    directions unless one is named. Needs ReadCallLog on the app; the recording itself
+    needs ReadCallRecording."""
     out, page = [], 1
     while True:
-        j = _rc_get("/restapi/v1.0/account/~/extension/~/call-log",
-                    {"type": "Voice", "direction": direction, "withRecording": "true",
-                     "view": "Simple", "dateFrom": date_from, "perPage": 100, "page": page})
+        q = {"type": "Voice", "withRecording": "true", "view": "Simple",
+             "dateFrom": date_from, "perPage": 100, "page": page}
+        if direction:
+            q["direction"] = direction
+        j = _rc_get("/restapi/v1.0/account/~/extension/%s/call-log" % ext, q)
+        for r in j.get("records") or []:
+            r["_ext"] = str(ext)
         out += j.get("records") or []
         if page >= int((j.get("paging") or {}).get("totalPages") or 1):
             break
@@ -761,10 +766,14 @@ def read(row, families_label="", line=""):
     if not key or not (text or yid):
         return plain
     who = row["caller_name"] or families_label or fmt_phone(row["caller_number"]) or "unknown"
+    src = (row["source"] if "source" in row.keys() else "") or ""
+    what = ("a recorded phone call - both sides of the conversation, the office is one of them - so the "
+            "steps are what remains to be done AFTER this call, not a call-back"
+            if src.startswith("call") else "a voicemail")
     prompt = (
-        "You read voicemails left for a charity office that supports almanos and yesomim (widows and "
-        "orphans) with checks, yom tov packages, family help. This one came in on: %s. The office turns "
-        "each message into a task on the board.\n\n"
+        "You read voicemails and recorded calls for a charity office that supports almanos and yesomim (widows and "
+        "orphans) with checks, yom tov packages, family help. This one is %s. It came in on: %s. The office turns "
+        "each one into a task on the board.\n\n"
         "Caller (as known): %s\nCallback number on the line: %s\n\n"
         "English transcript:\n%s\n\nYiddish transcript:\n%s\n\n"
         "Return ONLY a JSON object with these keys:\n"
@@ -781,7 +790,7 @@ def read(row, families_label="", line=""):
         "  callback: the phone number to call back if the caller said one, else \"\".\n"
         "  amount: any dollar amount mentioned, as text, else \"\".\n"
         "  who: the caller's name as best you can tell (e.g. \"Mrs. Reich\"), else \"\".\n"
-        "No markdown, no preamble." % (line or DEFAULT_LINE, who, fmt_phone(row["caller_number"]) or "unknown",
+        "No markdown, no preamble." % (what, line or DEFAULT_LINE, who, fmt_phone(row["caller_number"]) or "unknown",
                                        text[:6000] or "(none)", yid[:6000] or "(none)"))
     body = json.dumps({"model": os.environ.get("HQ_SUMMARY_MODEL", "claude-haiku-4-5"),
                        "max_tokens": 500,
@@ -899,7 +908,8 @@ def ensure_schema(con):
     for c in ("dh_event_id TEXT", "dh_project TEXT", "dh_url TEXT",
               "notified INTEGER NOT NULL DEFAULT 0", "assignee INTEGER",
               "read_json TEXT", "kind TEXT", "routed INTEGER NOT NULL DEFAULT 0",
-              "closed_at TEXT", "closed_by INTEGER", "english_prev TEXT", "refresh_task INTEGER NOT NULL DEFAULT 0"):
+              "closed_at TEXT", "closed_by INTEGER", "english_prev TEXT", "refresh_task INTEGER NOT NULL DEFAULT 0",
+              "source TEXT"):
         if c.split()[0] not in cols:
             con.execute("ALTER TABLE voicemails ADD COLUMN " + c)
     if "routed" not in cols:

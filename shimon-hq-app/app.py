@@ -5457,8 +5457,9 @@ def _vm_task_note(r, rd):
         ("Amount " + rd["amount"]) if rd.get("amount") else "",
         vm.KIND_LABEL.get(rd.get("kind") or "", "")) if x]
     gist = _short(rd.get("gist", ""), 220)
-    tail = "Voicemail %s · %s · %ss%s" % (
-        (r["ts"] or "")[:16].replace("T", " "), vm.fmt_phone(r["caller_number"]),
+    what = "Call" if ((r["source"] if "source" in r.keys() else "") or "").startswith("call") else "Voicemail"
+    tail = "%s %s · %s · %ss%s" % (
+        what, (r["ts"] or "")[:16].replace("T", " "), vm.fmt_phone(r["caller_number"]),
         r["duration"] or "?", (" · " + rd["line"]) if rd.get("line") else "")
     return " · ".join(x for x in (gist, " · ".join(facts), tail) if x)
 
@@ -5567,52 +5568,57 @@ def _mins_apart(a, b):
 
 
 def vm_pull_calls(con):
-    """Recorded call-backs come home. RingCentral's call log for the line (outbound, with
-    a recording) is read every tick; each new recording is matched to the call-back that
-    made it - same number, same quarter hour - or, failing that, to the newest open message
-    from that number; downloaded; queued for transcription."""
+    """Recorded calls come home - on the HQ user's own extension and on every line in the
+    inbox (RC_LINES), both directions. A recording that matches a call-back placed from HQ
+    (same number, same quarter hour) is attached to that message's task as before. Every
+    other recorded call - a call that came in on the Almanos line, a call-back made from
+    the desk phone - becomes a row in the inbox, transcribed and read like a voicemail."""
     if not vm.configured() or vm.mirror_configured():
         return 0
     vm.ensure_calls_schema(con)
     last = con.execute("SELECT MAX(started) FROM vm_calls").fetchone()[0]
-    since = ((datetime.fromisoformat(last) - timedelta(hours=6)) if last
+    last2 = con.execute("SELECT MAX(ts) FROM voicemails WHERE source LIKE 'call%'").fetchone()[0]
+    both = [x for x in (last, last2) if x]
+    since = ((datetime.fromisoformat(max(both)[:19]) - timedelta(hours=6)) if both
              else (datetime.now() - timedelta(days=3)))
-    try:
-        recs = vm.rc_call_log(since.strftime("%Y-%m-%dT%H:%M:%S.000Z"))
-        _set_setting(con, "vm_calls_err", "")
-    except Exception as e:
-        msg = vm._rc_err(e) if hasattr(e, "code") else str(e)[:200]
-        _set_setting(con, "vm_calls_err", msg)
-        app.logger.warning("vm calls: log read failed: %s", msg)
+    exts = ["~"] + [str(l["id"]) for l in vm.lines() if str(l["id"]) != "~"]
+    recs, errs = [], []
+    for ext in exts:
+        try:
+            recs += vm.rc_call_log(since.strftime("%Y-%m-%dT%H:%M:%S.000Z"), ext=ext)
+        except Exception as e:
+            msg = vm._rc_err(e) if hasattr(e, "code") else str(e)[:200]
+            errs.append("ext %s: %s" % (ext, msg))
+            app.logger.warning("vm calls: log read failed on %s: %s", ext, msg)
+    _set_setting(con, "vm_calls_err", "; ".join(errs)[:400] if errs else "")
+    if not recs:
         return 0
-    n = 0
+    labels = vm.line_labels(con)
+    seen, n = set(), 0
     for c in recs:
         rec = c.get("recording") or {}
-        if not rec.get("id") or not c.get("id"):
+        if not rec.get("id") or not c.get("id") or c["id"] in seen:
             continue
-        if con.execute("SELECT 1 FROM vm_calls WHERE rc_id=?", (str(c["id"]),)).fetchone():
+        seen.add(c["id"])
+        cid = str(c["id"])
+        if con.execute("SELECT 1 FROM vm_calls WHERE rc_id=?", (cid,)).fetchone() or \
+           con.execute("SELECT 1 FROM voicemails WHERE rc_id=?", ("call:" + cid,)).fetchone():
             continue
-        to = (c.get("to") or {}).get("phoneNumber") or ""
+        inbound = (c.get("direction") or "") == "Inbound"
+        other = (c.get("from") if inbound else c.get("to")) or {}
+        num = other.get("phoneNumber") or other.get("extensionNumber") or ""
+        name = vm._caller_name(other.get("name") or "")
         started = vm.to_local(c.get("startTime") or "")
         dur = int(c.get("duration") or 0)
-        d10 = _digits10(to)
-        # the call-back that made it: same number, closest in time
-        touch, vid, uid = None, None, None
-        for t in con.execute("SELECT * FROM vm_touch WHERE kind='call' AND status NOT LIKE 'failed%'"
-                             " ORDER BY id DESC LIMIT 400"):
-            if _digits10(t["to_number"]) == d10 and _mins_apart(t["at"], started) <= 20:
-                touch = t
-                break
-        if touch:
-            vid, uid = touch["vm_id"], touch["user_id"]
-        else:
-            hit = con.execute("SELECT id, assignee FROM voicemails WHERE ts > ? AND caller_number LIKE ?"
-                              " ORDER BY ts DESC LIMIT 1",
-                              ((datetime.now() - timedelta(days=45)).isoformat(), "%" + d10)).fetchone() if d10 else None
-            if hit:
-                vid, uid = hit["id"], hit["assignee"]
-        if not vid:
-            continue                     # a call to somebody who never left a message - not ours to file
+        d10 = _digits10(num)
+        # an outbound call that a call-back from HQ placed: it belongs on that message
+        touch = None
+        if not inbound:
+            for t in con.execute("SELECT * FROM vm_touch WHERE kind='call' AND status NOT LIKE 'failed%'"
+                                 " ORDER BY id DESC LIMIT 400"):
+                if _digits10(t["to_number"]) == d10 and _mins_apart(t["at"], started) <= 20:
+                    touch = t
+                    break
         try:
             data, ctype = vm.rc_recording(rec["id"])
         except Exception as e:
@@ -5621,20 +5627,34 @@ def vm_pull_calls(con):
             app.logger.warning("vm calls: recording %s failed: %s", rec["id"], msg)
             break
         ext = ".wav" if "wav" in (ctype or "") else ".mp3"
-        os.makedirs(os.path.join(FILES_DIR, "calls"), exist_ok=True)
-        stored = "calls/" + uuid.uuid4().hex + ext
-        with open(os.path.join(FILES_DIR, stored), "wb") as f:
-            f.write(data)
-        con.execute("INSERT OR IGNORE INTO vm_calls(rc_id, session_id, vm_id, touch_id, user_id, to_number,"
-                    " started, duration, stored_name, tstatus, created_at) VALUES(?,?,?,?,?,?,?,?,?,'new',?)",
-                    (str(c["id"]), str(c.get("sessionId") or ""), vid, touch["id"] if touch else None, uid,
-                     to, started, dur, stored, datetime.now().isoformat(timespec="seconds")))
         if touch:
+            os.makedirs(os.path.join(FILES_DIR, "calls"), exist_ok=True)
+            stored = "calls/" + uuid.uuid4().hex + ext
+            with open(os.path.join(FILES_DIR, stored), "wb") as f:
+                f.write(data)
+            con.execute("INSERT OR IGNORE INTO vm_calls(rc_id, session_id, vm_id, touch_id, user_id, to_number,"
+                        " started, duration, stored_name, tstatus, created_at) VALUES(?,?,?,?,?,?,?,?,?,'new',?)",
+                        (cid, str(c.get("sessionId") or ""), touch["vm_id"], touch["id"], touch["user_id"],
+                         num, started, dur, stored, datetime.now().isoformat(timespec="seconds")))
             con.execute("UPDATE vm_touch SET status='recorded' WHERE id=?", (touch["id"],))
+        else:
+            # a recorded call in its own right: a row in the inbox, on the line it happened on
+            os.makedirs(os.path.join(FILES_DIR, "vm"), exist_ok=True)
+            stamp = (started or "")[:16].replace("-", "").replace(":", "").replace("T", "_")
+            stored = "call_%s_%s_%s%s" % (stamp, re.sub(r"[^A-Za-z0-9]+", "_", name or num).strip("_") or "x", cid, ext)
+            with open(os.path.join(FILES_DIR, "vm", stored), "wb") as f:
+                f.write(data)
+            line_ext = c.get("_ext") if str(c.get("_ext")) in labels else vm.rc_extension_id()
+            con.execute("INSERT OR IGNORE INTO voicemails(rc_id, ext, ts, caller_number, caller_name, duration,"
+                        " stored_name, tstatus, received_at, source) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                        ("call:" + cid, str(line_ext), started, num, name, dur, stored,
+                         "short" if dur <= vm.SHORT_SEC else "new",
+                         datetime.now().isoformat(timespec="seconds"),
+                         "call_in" if inbound else "call_out"))
         con.commit()
         n += 1
     if n:
-        app.logger.info("vm: %d recorded call-backs pulled", n)
+        app.logger.info("vm: %d recorded calls pulled", n)
     return n
 
 
@@ -5835,7 +5855,7 @@ def vm_notify(con):
             continue
         name = r["caller_name"] or vm.fmt_phone(r["caller_number"]) or "Unknown caller"
         secs = int(r["duration"] or 0)
-        title = "Voicemail \u00b7 %s" % name
+        title = ("Recorded call \u00b7 %s" if (r["source"] or "").startswith("call") else "Voicemail \u00b7 %s") % name
         if len(labels) > 1:
             title = "%s \u00b7 %s" % (vm.line_label(r["ext"], labels).replace(" line", ""), name)
         if r["english"]:
