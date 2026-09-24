@@ -6718,6 +6718,7 @@ def vm_view():
     where = {"all": "WHERE 1=1" + qwhere,
              "short": "WHERE tstatus IN ('short','empty','skipped')" + qwhere,
              "handled": "WHERE h.vm_id IS NOT NULL AND tstatus NOT IN ('short','empty','skipped')" + qwhere,
+             "calls": "WHERE v.source LIKE 'call%'" + qwhere,
              }.get(show, "WHERE h.vm_id IS NULL AND tstatus NOT IN ('short','empty','skipped')" + qwhere)
     rows = con.execute(
         "SELECT (h.vm_id IS NOT NULL) AS handled, u.display_name AS assignee_name, v.* FROM voicemails v"
@@ -6747,6 +6748,7 @@ def vm_view():
                              " WHERE tstatus IN ('short','empty','skipped')").fetchone()[0],
         "pending": con.execute("SELECT COUNT(*) FROM voicemails WHERE tstatus IN ('new','failed')"
                                " AND stored_name IS NOT NULL").fetchone()[0],
+        "calls": con.execute("SELECT COUNT(*) FROM voicemails WHERE source LIKE 'call%'").fetchone()[0],
     }
     dh = vm.dh_projects() if vm.dh_configured() else None
     # who is calling: the families directory, by phone
