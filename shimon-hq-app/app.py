@@ -4406,6 +4406,68 @@ def api_note():
         {"Content-Type": "text/plain; charset=utf-8"}
 
 
+@app.route("/api/calls/review")
+def api_calls_review():
+    """One day of calls on one line (or every line): who, how long, what came of it.
+    ?date=YYYY-MM-DD (New York day, default today) &ext=<extension id | ~ | all>.
+    Recorded calls carry the transcript's gist once HQ has read them."""
+    if not _api_auth():
+        abort(401)
+    if not vm.configured() or vm.mirror_configured():
+        return jsonify(error="RingCentral not configured here"), 400
+    from zoneinfo import ZoneInfo
+    ny = ZoneInfo("America/New_York")
+    day = (request.args.get("date") or datetime.now(ny).strftime("%Y-%m-%d")).strip()
+    try:
+        d0 = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=ny)
+    except ValueError:
+        return jsonify(error="date must be YYYY-MM-DD"), 400
+    d1 = d0 + timedelta(days=1)
+    iso = lambda d: d.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    want = (request.args.get("ext") or "all").strip()
+    con = db()
+    labels = dict(vm.line_labels(con))
+    labels.setdefault("~", "My extension")
+    exts = list(labels.keys()) if want == "all" else [want]
+    out = {"date": day, "lines": {}, "errors": []}
+    for ext in exts:
+        try:
+            recs = vm.rc_call_log(iso(d0), ext=ext, recorded_only=False, date_to=iso(d1))
+        except Exception as e:
+            out["errors"].append("%s: %s" % (labels.get(ext, ext), vm._rc_err(e) if hasattr(e, "code") else str(e)[:200]))
+            continue
+        calls = []
+        for c in recs:
+            inbound = (c.get("direction") or "") == "Inbound"
+            other = (c.get("from") if inbound else c.get("to")) or {}
+            rec = c.get("recording") or {}
+            row = con.execute("SELECT id, tstatus, english, read_json, kind FROM voicemails WHERE rc_id=?",
+                              ("call:" + str(c.get("id")),)).fetchone() if rec.get("id") else None
+            gist = ""
+            if row and row["read_json"]:
+                try:
+                    gist = (json.loads(row["read_json"]) or {}).get("gist", "")
+                except Exception:
+                    gist = ""
+            calls.append({"id": c.get("id"), "dir": "in" if inbound else "out",
+                          "number": other.get("phoneNumber") or other.get("extensionNumber") or "",
+                          "name": other.get("name") or "", "start": vm.to_local(c.get("startTime") or ""),
+                          "seconds": int(c.get("duration") or 0), "result": c.get("result") or "",
+                          "recorded": bool(rec.get("id")), "vm_id": row["id"] if row else None,
+                          "transcribed": bool(row and row["tstatus"] == "done"),
+                          "gist": gist, "kind": row["kind"] if row else "",
+                          "english": (row["english"] or "")[:1500] if row else ""})
+        connected = [x for x in calls if x["seconds"] > 0 and "Missed" not in x["result"] and "Voicemail" not in x["result"]]
+        out["lines"][ext] = {"label": labels.get(ext, ext), "calls": calls,
+                             "total": len(calls), "connected": len(connected),
+                             "minutes": round(sum(x["seconds"] for x in connected) / 60, 1),
+                             "people": len({_digits10(x["number"]) for x in connected if x["number"]}),
+                             "out": sum(1 for x in calls if x["dir"] == "out"),
+                             "in": sum(1 for x in calls if x["dir"] == "in"),
+                             "recorded": sum(1 for x in calls if x["recorded"])}
+    return jsonify(out)
+
+
 @app.route("/api/open")
 def api_open():
     """Every open task the caller may see, one per line: id, status, waiting_on, thread,

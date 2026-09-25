@@ -291,14 +291,17 @@ SMS_TEMPLATES = [
 
 # ---------- recorded calls: what was said when we called back ----------
 
-def rc_call_log(date_from, direction=None, ext="~"):
+def rc_call_log(date_from, direction=None, ext="~", recorded_only=True, date_to=None):
     """Recorded voice calls on one extension since `date_from` (ISO, UTC ok) - both
     directions unless one is named. Needs ReadCallLog on the app; the recording itself
     needs ReadCallRecording."""
     out, page = [], 1
     while True:
-        q = {"type": "Voice", "withRecording": "true", "view": "Simple",
-             "dateFrom": date_from, "perPage": 100, "page": page}
+        q = {"type": "Voice", "view": "Simple", "dateFrom": date_from, "perPage": 100, "page": page}
+        if recorded_only:
+            q["withRecording"] = "true"
+        if date_to:
+            q["dateTo"] = date_to
         if direction:
             q["direction"] = direction
         j = _rc_get("/restapi/v1.0/account/~/extension/%s/call-log" % ext, q)
