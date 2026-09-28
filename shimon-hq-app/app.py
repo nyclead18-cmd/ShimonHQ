@@ -4477,6 +4477,38 @@ def _calls_review(con, day, d0, d1, iso, want):
     return jsonify(out)
 
 
+@app.route("/api/calls/dump")
+def api_calls_dump():
+    """Every recorded call HQ holds, straight from the database - no RingCentral round
+    trip, so it answers in milliseconds while the tick is busy. ?since=YYYY-MM-DD
+    (default 7 days) &ext=<extension id> to narrow. JSON rows with the transcript."""
+    if not _api_auth():
+        abort(401)
+    con = db()
+    since = (request.args.get("since") or (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")).strip()
+    ext = (request.args.get("ext") or "").strip()
+    q = "SELECT id, rc_id, ext, ts, caller_number, caller_name, duration, tstatus, source, kind, read_json, english" \
+        " FROM voicemails WHERE source LIKE 'call%' AND ts >= ?"
+    args = [since]
+    if ext:
+        q += " AND ext=?"
+        args.append(ext)
+    rows = con.execute(q + " ORDER BY ts", args).fetchall()
+    labels = dict(vm.line_labels(con))
+    out = []
+    for r in rows:
+        try:
+            rd = json.loads(r["read_json"]) if r["read_json"] else {}
+        except Exception:
+            rd = {}
+        out.append({"id": r["id"], "rc_id": r["rc_id"], "ext": r["ext"], "line": labels.get(str(r["ext"]), r["ext"]),
+                    "ts": r["ts"], "dir": "in" if r["source"] == "call_in" else "out",
+                    "number": r["caller_number"], "name": r["caller_name"], "seconds": r["duration"],
+                    "tstatus": r["tstatus"], "kind": r["kind"], "gist": rd.get("gist", ""),
+                    "title": rd.get("title", ""), "english": r["english"] or ""})
+    return jsonify(since=since, count=len(out), calls=out)
+
+
 @app.route("/api/open")
 def api_open():
     """Every open task the caller may see, one per line: id, status, waiting_on, thread,
