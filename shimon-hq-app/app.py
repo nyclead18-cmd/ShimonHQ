@@ -4426,6 +4426,15 @@ def api_calls_review():
     iso = lambda d: d.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     want = (request.args.get("ext") or "all").strip()
     con = db()
+    try:
+        return _calls_review(con, day, d0, d1, iso, want)
+    except Exception as e:
+        import traceback
+        app.logger.warning("calls review failed: %s", traceback.format_exc())
+        return jsonify(date=day, lines={}, errors=["review failed: %s: %s" % (type(e).__name__, str(e)[:300])]), 200
+
+
+def _calls_review(con, day, d0, d1, iso, want):
     labels = dict(vm.line_labels(con))
     labels.setdefault("~", "My extension")
     exts = list(labels.keys()) if want == "all" else [want]
@@ -5638,14 +5647,19 @@ def vm_pull_calls(con):
     if not vm.configured() or vm.mirror_configured():
         return 0
     vm.ensure_calls_schema(con)
-    last = con.execute("SELECT MAX(started) FROM vm_calls").fetchone()[0]
-    last2 = con.execute("SELECT MAX(ts) FROM voicemails WHERE source LIKE 'call%'").fetchone()[0]
-    both = [x for x in (last, last2) if x]
-    since = ((datetime.fromisoformat(max(both)[:19]) - timedelta(hours=6)) if both
-             else (datetime.now() - timedelta(days=3)))
     exts = ["~"] + [str(l["id"]) for l in vm.lines() if str(l["id"]) != "~"]
     recs, errs = [], []
     for ext in exts:
+        # one watermark per line (v182): a line added today backfills its own week
+        # instead of inheriting the newest line's position
+        key = vm.rc_extension_id() if ext == "~" else ext
+        marks = [con.execute("SELECT MAX(ts) FROM voicemails WHERE source LIKE 'call%' AND ext=?",
+                             (str(key),)).fetchone()[0]]
+        if ext == "~":
+            marks.append(con.execute("SELECT MAX(started) FROM vm_calls").fetchone()[0])
+        marks = [x for x in marks if x]
+        since = ((datetime.fromisoformat(max(marks)[:19]) - timedelta(hours=6)) if marks
+                 else (datetime.now() - timedelta(days=7)))
         try:
             recs += vm.rc_call_log(since.strftime("%Y-%m-%dT%H:%M:%S.000Z"), ext=ext)
         except Exception as e:
