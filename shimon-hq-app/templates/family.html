@@ -86,7 +86,7 @@
   <section class="card">
     <h2>Calls on the line{% if calls %} · {{ calls|length }}{% endif %}</h2>
     {% for c in calls %}
-    <a class="call" href="{{ url_for('vm_view', show='all', q='all') }}#vm-{{ c.id }}">
+    <a class="call" href="{{ url_for('vm_view', src='both', show='all', q='all') }}#vm-{{ c.id }}">
       <span>{{ fmt_phone(c.caller_number) }}{% if c.item_id %} <span class="muted">· task</span>{% endif %}</span>
       <span class="t">{{ (c.ts or '')[:16].replace('T',' ') }}{% if c.duration %} · {{ c.duration }}s{% endif %}</span>
       {% if c.english %}<span class="p">{{ c.english }}</span>{% endif %}

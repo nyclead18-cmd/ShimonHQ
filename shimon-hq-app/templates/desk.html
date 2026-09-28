@@ -146,7 +146,7 @@
       <div class="acts">
         {% if num and outbound and who == session.get('uid') %}<button type="button" class="call" data-lcall="{{ url_for('vm_call', vid=r.id) }}" title="RingCentral rings your phone, then dials them - the line's number shows, the call is recorded on the line">&#9742; Call from the line</button>{% endif %}
         {% if num %}<a class="{{ '' if (outbound and who == session.get('uid')) else 'call' }}" href="tel:{{ num|replace(' ','')|replace('(','')|replace(')','')|replace('-','') }}">{{ 'My phone' if (outbound and who == session.get('uid')) else 'Call' }} {{ fmt_phone(num) }}</a>{% endif %}
-        <a href="{{ url_for('vm_view', q=(who if session.get('admin') else None)) }}#vm-{{ r.id }}">Text back &#8599;</a>
+        <a href="{{ url_for('vm_view', src='both', q=(who if session.get('admin') else None)) }}#vm-{{ r.id }}">Text back &#8599;</a>
         {% if r.item_id %}<a href="{{ url_for('task_view', item_id=r.item_id) }}">Task page &#8599;</a>
         {% else %}<form method="post" action="{{ url_for('vm_task', vid=r.id) }}"><button type="submit">Make task</button></form>{% endif %}
         <form method="post" action="{{ url_for('vm_close', vid=r.id) }}"><input type="hidden" name="back" value="{{ url_for('desk_view', who=(who if session.get('admin') else None)) }}"><button type="submit" class="donebtn" title="Finished - for everyone. The task closes, the message leaves every queue, {{ 'Shimon' if who == session.get('uid') else 'they' }} get a buzz.">&#10003; Done</button></form>

@@ -18,6 +18,8 @@
   /* The list works the way the phone's own Voicemail does: one continuous sheet of
      rows, a hairline between them, the message opening in place under your finger. */
   .vmpage{--ease:cubic-bezier(.32,.72,0,1); --dur:.42s}
+  .vmpage .srcseg a{font-weight:600}
+  .vmpage .srcseg a.on{background:var(--ink,#1f2937);color:var(--card,#fff)}
   .vmpage .seg{display:inline-flex;border:1px solid var(--border);border-radius:999px;overflow:hidden;background:var(--card)}
   .vmpage .seg a{padding:7px 14px;font-size:13px;color:var(--muted);text-decoration:none;border-right:1px solid var(--border)}
   .vmpage .seg a:last-child{border-right:0}
@@ -195,12 +197,15 @@
 {% if rc_ok and not yl_ok and not mirror %}<p class="hint">Recordings come in, but no transcripts until <code>YL_API_KEY</code> is set.</p>{% endif %}
 
 <div class="bar">
+  <div class="seg srcseg">
+    <a class="{% if src == 'vm' %}on{% endif %}" href="{{ url_for('vm_view', show=show, q=q if q else None, line=line if line else None) }}">Voicemails · {{ counts.vm_open }}</a>
+    <a class="{% if src == 'calls' %}on{% endif %}" href="{{ url_for('vm_view', src='calls', show=show, q=q if q else None, line=line if line else None) }}" title="Recorded calls - in and out - on every line">&#9742; Recorded calls · {{ counts.calls_open }}</a>
+  </div>
   <div class="seg">
-    <a class="{% if show == 'open' %}on{% endif %}" href="{{ url_for('vm_view') }}">Open · {{ counts.open }}</a>
-    <a class="{% if show == 'handled' %}on{% endif %}" href="{{ url_for('vm_view', show='handled', q=q if q else None, line=line if line else None) }}" title="What you filed away - handled, or finished by whoever it was passed to">&#10003; Handled · {{ counts.handled }}</a>
-    <a class="{% if show == 'calls' %}on{% endif %}" href="{{ url_for('vm_view', show='calls') }}" title="Recorded calls - in and out - on every line">&#9742; Calls · {{ counts.calls }}</a>
-    <a class="{% if show == 'short' %}on{% endif %}" href="{{ url_for('vm_view', show='short') }}">Short / empty · {{ counts.short }}</a>
-    <a class="{% if show == 'all' %}on{% endif %}" href="{{ url_for('vm_view', show='all') }}">Everything</a>
+    <a class="{% if show == 'open' %}on{% endif %}" href="{{ url_for('vm_view', src=src if src != 'vm' else None, q=q if q else None, line=line if line else None) }}">Open · {{ counts.open }}</a>
+    <a class="{% if show == 'handled' %}on{% endif %}" href="{{ url_for('vm_view', src=src if src != 'vm' else None, show='handled', q=q if q else None, line=line if line else None) }}" title="What you filed away - handled, or finished by whoever it was passed to">&#10003; Handled · {{ counts.handled }}</a>
+    <a class="{% if show == 'short' %}on{% endif %}" href="{{ url_for('vm_view', src=src if src != 'vm' else None, show='short') }}">Short / empty · {{ counts.short }}</a>
+    <a class="{% if show == 'all' %}on{% endif %}" href="{{ url_for('vm_view', src=src if src != 'vm' else None, show='all') }}">Everything</a>
   </div>
   {% if counts.pending %}<span class="stat">{{ counts.pending }} transcribing</span>{% endif %}
   {% if busy %}<span class="working">working in background</span>{% endif %}
@@ -219,16 +224,16 @@
 {% if admin and line_errors %}{% for ext, err in line_errors.items() %}<p class="hint" style="color:var(--pill-open-tx)">{% if ext.startswith('spec:') %}Cannot look up the extension “{{ ext[5:] }}” — {{ err|truncate(90) }}. {% if '403' in err %}The RingCentral app is missing the <b>ReadAccounts</b> permission (developer console → the app → Permissions), or use the extension ID instead of the name in RC_LINES.{% endif %}{% else %}{{ line_labels.get(ext, ext) }}: RingCentral refuses this mailbox ({{ err|truncate(80) }}). {% if '403' in err %}The JWT user needs permission to read it — make that user a Super Admin in the RingCentral admin portal, or give the app account-level Read Messages.{% endif %}{% endif %}</p>{% endfor %}{% endif %}
 {% if line_labels|length > 1 %}
 <div class="queues lines">
-  <a class="qchip {% if line == '' %}on{% endif %}" href="{{ url_for('vm_view', show=show, q=q) }}">All lines</a>
-  {% for ext, lab in line_labels.items() %}<a class="qchip {% if line == ext %}on{% endif %}" href="{{ url_for('vm_view', show=show, q=q, line=ext) }}">{{ lab }}<b>{{ lcounts.get(ext, 0) }}</b></a>{% endfor %}
+  <a class="qchip {% if line == '' %}on{% endif %}" href="{{ url_for('vm_view', src=src if src != 'vm' else None, show=show, q=q) }}">All lines</a>
+  {% for ext, lab in line_labels.items() %}<a class="qchip {% if line == ext %}on{% endif %}" href="{{ url_for('vm_view', src=src if src != 'vm' else None, show=show, q=q, line=ext) }}">{{ lab }}<b>{{ lcounts.get(ext, 0) }}</b></a>{% endfor %}
 </div>
 {% endif %}
 
 {% if admin and folk|length > 1 %}
 <div class="queues">
-  <a class="qchip {% if q == '' %}on{% endif %}" href="{{ url_for('vm_view', show=show, line=line) }}">Desk<b>{{ qcounts[''] }}</b></a>
-  {% for f in folk %}{% if not f.is_admin %}<a class="qchip {% if q == f.id|string %}on{% endif %}" href="{{ url_for('vm_view', show=show, q=f.id, line=line) }}">{{ f.display_name }}<b>{{ qcounts[f.id] }}</b></a>{% endif %}{% endfor %}
-  <a class="qchip {% if q == 'all' %}on{% endif %}" href="{{ url_for('vm_view', show=show, q='all', line=line) }}">Everyone</a>
+  <a class="qchip {% if q == '' %}on{% endif %}" href="{{ url_for('vm_view', src=src if src != 'vm' else None, show=show, line=line) }}">Desk<b>{{ qcounts[''] }}</b></a>
+  {% for f in folk %}{% if not f.is_admin %}<a class="qchip {% if q == f.id|string %}on{% endif %}" href="{{ url_for('vm_view', src=src if src != 'vm' else None, show=show, q=f.id, line=line) }}">{{ f.display_name }}<b>{{ qcounts[f.id] }}</b></a>{% endif %}{% endfor %}
+  <a class="qchip {% if q == 'all' %}on{% endif %}" href="{{ url_for('vm_view', src=src if src != 'vm' else None, show=show, q='all', line=line) }}">Everyone</a>
 </div>
 {% endif %}
 
