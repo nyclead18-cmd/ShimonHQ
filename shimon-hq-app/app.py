@@ -6821,12 +6821,23 @@ def vm_view():
         qargs += (line,)
     else:
         line = ""
+    # Voicemails and recorded calls are two inboxes (v184): the same queues, lines and
+    # handled/short filters, but never mixed. ?src=vm (default) | calls | both
+    src = request.args.get("src", "vm")
+    if show == "calls":
+        src, show = "calls", "open"
+    if src not in ("vm", "calls", "both"):
+        src = "vm"
+    CALLW = " AND v.source LIKE 'call%'"
+    VMW = " AND (v.source IS NULL OR v.source NOT LIKE 'call%')"
+    swhere = {"vm": VMW, "calls": CALLW, "both": ""}[src]
+    base_q = qwhere           # queue + line, without the source split - for the two tab counts
+    qwhere += swhere
     # "Handled" is mine alone: what I file away stays filed for me and untouched for
     # everyone else, so two people can work the same line without tripping over each other.
     where = {"all": "WHERE 1=1" + qwhere,
              "short": "WHERE tstatus IN ('short','empty','skipped')" + qwhere,
              "handled": "WHERE h.vm_id IS NOT NULL AND tstatus NOT IN ('short','empty','skipped')" + qwhere,
-             "calls": "WHERE v.source LIKE 'call%'" + qwhere,
              }.get(show, "WHERE h.vm_id IS NULL AND tstatus NOT IN ('short','empty','skipped')" + qwhere)
     rows = con.execute(
         "SELECT (h.vm_id IS NOT NULL) AS handled, u.display_name AS assignee_name, v.* FROM voicemails v"
@@ -6839,11 +6850,11 @@ def vm_view():
     for f in folk:
         qcounts[f["id"]] = con.execute(
             "SELECT COUNT(*) FROM voicemails v LEFT JOIN vm_handled h ON h.vm_id=v.id AND h.user_id=?"
-            " WHERE h.vm_id IS NULL AND tstatus NOT IN ('short','empty','skipped') AND v.assignee=?",
+            " WHERE h.vm_id IS NULL AND tstatus NOT IN ('short','empty','skipped') AND v.assignee=?" + swhere,
             (f["id"], f["id"])).fetchone()[0]
     qcounts[""] = con.execute(
         "SELECT COUNT(*) FROM voicemails v LEFT JOIN vm_handled h ON h.vm_id=v.id AND h.user_id=?"
-        " WHERE h.vm_id IS NULL AND tstatus NOT IN ('short','empty','skipped') AND v.assignee IS NULL",
+        " WHERE h.vm_id IS NULL AND tstatus NOT IN ('short','empty','skipped') AND v.assignee IS NULL" + swhere,
         (me(),)).fetchone()[0]
     counts = {
         "open": con.execute("SELECT COUNT(*) FROM voicemails v LEFT JOIN vm_handled h"
@@ -6852,12 +6863,17 @@ def vm_view():
         "handled": con.execute("SELECT COUNT(*) FROM voicemails v JOIN vm_handled h"
                                " ON h.vm_id=v.id AND h.user_id=? WHERE tstatus NOT IN ('short','empty','skipped')" + qwhere,
                                (me(),) + qargs).fetchone()[0],
-        "short": con.execute("SELECT COUNT(*) FROM voicemails"
-                             " WHERE tstatus IN ('short','empty','skipped')").fetchone()[0],
+        "short": con.execute("SELECT COUNT(*) FROM voicemails v"
+                             " WHERE tstatus IN ('short','empty','skipped')" + swhere).fetchone()[0],
         "pending": con.execute("SELECT COUNT(*) FROM voicemails WHERE tstatus IN ('new','failed')"
                                " AND stored_name IS NOT NULL").fetchone()[0],
-        "calls": con.execute("SELECT COUNT(*) FROM voicemails WHERE source LIKE 'call%'").fetchone()[0],
     }
+    # the two inbox tabs: open count on each side, same queue and line
+    for key, w in (("vm_open", VMW), ("calls_open", CALLW)):
+        counts[key] = con.execute("SELECT COUNT(*) FROM voicemails v LEFT JOIN vm_handled h"
+                                  " ON h.vm_id=v.id AND h.user_id=? WHERE h.vm_id IS NULL"
+                                  " AND tstatus NOT IN ('short','empty','skipped')" + base_q + w,
+                                  (me(),) + qargs).fetchone()[0]
     dh = vm.dh_projects() if vm.dh_configured() else None
     # who is calling: the families directory, by phone
     fam_of = {}
@@ -6897,9 +6913,9 @@ def vm_view():
             lcounts[ext] = con.execute(
                 "SELECT COUNT(*) FROM voicemails v LEFT JOIN vm_handled h ON h.vm_id=v.id AND h.user_id=?"
                 " WHERE h.vm_id IS NULL AND tstatus NOT IN ('short','empty','skipped') AND v.ext=?"
-                + (" AND v.assignee IS NULL" if q == "" else "" if q == "all" else " AND v.assignee=?"),
+                + (" AND v.assignee IS NULL" if q == "" else "" if q == "all" else " AND v.assignee=?") + swhere,
                 (me(), ext) + (() if q in ("", "all") else (int(q),))).fetchone()[0]
-    return render_template("vm.html", rows=rows, show=show, counts=counts, busy=_vm_lock.locked(),
+    return render_template("vm.html", rows=rows, show=show, src=src, counts=counts, busy=_vm_lock.locked(),
                            line=line, line_labels=line_labels, lcounts=lcounts, line_errors=vm.line_errors(),
                            touches=touches, my_phone=vm.fmt_phone(me_row["phone"]) if me_row and me_row["phone"] else "",
                            sms_templates=vm.SMS_TEMPLATES, outbound=(vm.configured() and not vm.mirror_configured()),
