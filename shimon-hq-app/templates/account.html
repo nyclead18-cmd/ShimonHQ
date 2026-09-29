@@ -118,6 +118,30 @@
 {% endif %}
 
 {% if who and who.is_admin %}
+<section class="card acct" id="callskey">
+  <div class="sec-head"><h2>Read-only calls key</h2>
+    <span class="pill {{ 'done' if calls_token else 'waiting' }}" style="cursor:default">{{ 'On' if calls_token else 'Off' }}</span></div>
+  <p class="caveat">Lets an assistant read your recorded calls and their transcripts
+  (<code>/api/calls/dump</code> and <code>/api/calls/review</code>) &mdash; and nothing else:
+  no board, no tasks, no settings, no writing. Turn it off here any time.</p>
+  {% if calls_token %}
+  <input class="feedurl" value="{{ calls_token }}" readonly onclick="this.select()">
+  <form method="post" action="{{ url_for('calls_key') }}" class="stack">
+    <button type="submit" class="ghostbtn">Replace this key</button>
+  </form>
+  <form method="post" action="{{ url_for('calls_key') }}" class="stack">
+    <input type="hidden" name="off" value="1">
+    <button type="submit" class="ghostbtn">Turn off</button>
+  </form>
+  {% else %}
+  <form method="post" action="{{ url_for('calls_key') }}" class="stack">
+    <button type="submit">Create calls key</button>
+  </form>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if who and who.is_admin %}
 <section class="card acct" id="routing">
   <div class="sec-head"><h2>Voicemail routing</h2>
     <span class="pill {{ 'done' if autoroute else 'waiting' }}" style="cursor:default">{{ 'On' if autoroute else 'Off' }}</span></div>
