@@ -1,0 +1,120 @@
+diff --git a/shimon-hq-app/app.py b/shimon-hq-app/app.py
+index 20a466a..d9e035e 100644
+--- a/shimon-hq-app/app.py
++++ b/shimon-hq-app/app.py
+@@ -3413,6 +3413,7 @@ def _account_page(con, **extra):
+                taglines={r["id"]: uset(con, "tagline", r["id"]) for r in folk},
+                my_title=uset(con, "board_title"),
+                api_token=api_token_for(con),
++               calls_token=uset(con, "calls_token") or "",
+                notify_kinds=NOTIFY_KINDS,
+                notify_on={k: wants(con, me(), k) for k in NOTIFY_KINDS},
+                twofa_on=uset(con, "totp_on") == "1",
+@@ -3579,6 +3580,22 @@ def set_notify():
+     return redirect(url_for("account_view"))
+ 
+ 
++@app.route("/account/callskey", methods=["POST"])
++@login_required
++def calls_key():
++    """Make (or replace) the read-only calls key; ?off=1 revokes it. Admins only."""
++    con = db()
++    u = user_row(con)
++    if not (u and u["is_admin"]):
++        abort(403)
++    uset_del(con, ("calls_token",))
++    if not request.form.get("off"):
++        import secrets
++        uset_put(con, "calls_token", secrets.token_hex(24))
++    commit_retry(con)
++    return redirect(url_for("account_view") + "#callskey")
++
++
+ @app.route("/account/newkey", methods=["POST"])
+ @login_required
+ def new_api_key():
+@@ -3896,6 +3913,31 @@ def _api_auth():
+     return True
+ 
+ 
++def _calls_auth():
++    """The read-only calls key (v185). It opens exactly two doors - /api/calls/dump and
++    /api/calls/review, GET only - and nothing else in HQ. Made on the Account page by an
++    admin, shown there, revocable there. _api_auth never accepts it."""
++    if request.method != "GET":
++        return False
++    auth = request.headers.get("Authorization", "")
++    supplied = (auth[7:] if auth.startswith("Bearer ") else request.args.get("token", "")).strip()
++    if len(supplied) < 32:
++        return False
++    con = db()
++    for row in con.execute("SELECT k, v FROM settings WHERE k LIKE 'u%:calls_token'").fetchall():
++        if row["v"] and hmac.compare_digest(supplied, row["v"]):
++            try:
++                uid = int(row["k"].split(":")[0][1:])
++            except (ValueError, IndexError):
++                return False
++            u = con.execute("SELECT is_admin FROM users WHERE id=?", (uid,)).fetchone()
++            if not (u and u["is_admin"]):
++                return False
++            g.api_uid = uid
++            return True
++    return False
++
++
+ def api_token_for(con, uid=None):
+     """Each person's own key to their own board. Made on first sight."""
+     uid = uid if uid is not None else me()
+@@ -4411,7 +4453,7 @@ def api_calls_review():
+     """One day of calls on one line (or every line): who, how long, what came of it.
+     ?date=YYYY-MM-DD (New York day, default today) &ext=<extension id | ~ | all>.
+     Recorded calls carry the transcript's gist once HQ has read them."""
+-    if not _api_auth():
++    if not (_api_auth() or _calls_auth()):
+         abort(401)
+     if not vm.configured() or vm.mirror_configured():
+         return jsonify(error="RingCentral not configured here"), 400
+@@ -4482,7 +4524,7 @@ def api_calls_dump():
+     """Every recorded call HQ holds, straight from the database - no RingCentral round
+     trip, so it answers in milliseconds while the tick is busy. ?since=YYYY-MM-DD
+     (default 7 days) &ext=<extension id> to narrow. JSON rows with the transcript."""
+-    if not _api_auth():
++    if not (_api_auth() or _calls_auth()):
+         abort(401)
+     con = db()
+     since = (request.args.get("since") or (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")).strip()
+diff --git a/shimon-hq-app/templates/account.html b/shimon-hq-app/templates/account.html
+index 8fa6532..b04e77b 100755
+--- a/shimon-hq-app/templates/account.html
++++ b/shimon-hq-app/templates/account.html
+@@ -117,6 +117,30 @@
+ </section>
+ {% endif %}
+ 
++{% if who and who.is_admin %}
++<section class="card acct" id="callskey">
++  <div class="sec-head"><h2>Read-only calls key</h2>
++    <span class="pill {{ 'done' if calls_token else 'waiting' }}" style="cursor:default">{{ 'On' if calls_token else 'Off' }}</span></div>
++  <p class="caveat">Lets an assistant read your recorded calls and their transcripts
++  (<code>/api/calls/dump</code> and <code>/api/calls/review</code>) &mdash; and nothing else:
++  no board, no tasks, no settings, no writing. Turn it off here any time.</p>
++  {% if calls_token %}
++  <input class="feedurl" value="{{ calls_token }}" readonly onclick="this.select()">
++  <form method="post" action="{{ url_for('calls_key') }}" class="stack">
++    <button type="submit" class="ghostbtn">Replace this key</button>
++  </form>
++  <form method="post" action="{{ url_for('calls_key') }}" class="stack">
++    <input type="hidden" name="off" value="1">
++    <button type="submit" class="ghostbtn">Turn off</button>
++  </form>
++  {% else %}
++  <form method="post" action="{{ url_for('calls_key') }}" class="stack">
++    <button type="submit">Create calls key</button>
++  </form>
++  {% endif %}
++</section>
++{% endif %}
++
+ {% if who and who.is_admin %}
+ <section class="card acct" id="routing">
+   <div class="sec-head"><h2>Voicemail routing</h2>

@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+{% block title %}Account · {{ hq_title }}{% endblock %}
+{% block body %}
+<div class="wrap">
+<header class="top">
+  <div>
+    <div class="eyebrow">{{ who.display_name if who else '' }}</div>
+    <h1>Account</h1>
+  </div>
+  <div class="right">
+    {% set nav_on = '' %}{% include "_nav.html" %}
+    <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
+  </div>
+</header>
+
+{% if error %}<div class="savewarn">{{ error }}</div>{% endif %}
+{% if ok %}<div class="okline">{{ ok }}{% if reset_pw %} <button type="button" class="ghostbtn copypw" data-pw="{{ reset_pw }}" onclick="navigator.clipboard.writeText(this.dataset.pw).then(()=>{this.textContent='Copied'})">Copy password</button>{% endif %}</div>{% endif %}
+
+<section class="card acct">
+  <div class="sec-head"><h2>You and your board</h2></div>
+  <form method="post" action="{{ url_for('set_identity') }}" class="stack">
+    <div class="two">
+      <label>First name<input name="first_name" value="{{ who.first_name or '' }}" maxlength="40" autocomplete="given-name"></label>
+      <label>Last name<input name="last_name" value="{{ who.last_name or '' }}" maxlength="40" autocomplete="family-name"></label>
+    </div>
+    <label>Shown on the board as<input name="display_name" value="{{ who.display_name if who else '' }}" maxlength="40" placeholder="leave empty for first + last"></label>
+    <div class="two">
+      <label>Email<input type="email" name="email" value="{{ who.email or '' }}" maxlength="120" autocomplete="email"></label>
+      <label>Phone<input type="tel" name="phone" value="{{ fmt_phone(who.phone) if who and who.phone else '' }}" maxlength="20" autocomplete="tel"></label>
+    </div>
+    <label>What this board is called<input name="board_title" value="{{ my_title }}" placeholder="{{ board_name }}" maxlength="40"></label>
+    <label>Small line above it<input name="tagline" value="{{ tagline }}" placeholder="leave empty for none" maxlength="60"></label>
+    <label>How it reads
+      <select name="display">
+        <option value="simple" {% if display_mode == 'simple' %}selected{% endif %}>Simple &mdash; one line per task, tap to open</option>
+        <option value="full" {% if display_mode == 'full' %}selected{% endif %}>Full &mdash; everything on the row</option>
+        <option value="calm" {% if display_mode == 'calm' %}selected{% endif %}>Calm &mdash; one box at a time, projects folded, one line per task</option>
+      </select>
+    </label>
+    <button type="submit">Save</button>
+  </form>
+  <p class="caveat">Leave the board name empty and it uses your name.</p>
+</section>
+
+<section class="card acct">
+  <div class="sec-head"><h2>Your password</h2></div>
+  <form method="post" action="{{ url_for('change_password') }}" class="stack">
+    <label>Current password<input type="password" name="current" autocomplete="current-password" required></label>
+    <label>New password<input type="password" name="new" autocomplete="new-password" minlength="8" required></label>
+    <button type="submit">Change it</button>
+  </form>
+</section>
+
+<section class="card acct">
+  <div class="sec-head"><h2>Two-step sign-in</h2>
+    <span class="pill {{ 'done' if twofa_on else 'waiting' }}" style="cursor:default">{{ 'On' if twofa_on else 'Off' }}</span></div>
+  {% if twofa_on %}
+  <p class="caveat">Signing in takes your password and a six-digit code from your phone.
+  A phone you tick &ldquo;remember&rdquo; on is trusted for 30 days.</p>
+  <a class="ghostbtn linkbtn" href="{{ url_for('twofa_setup') }}">Recovery codes &amp; settings</a>
+  {% else %}
+  <p class="caveat">Your password alone opens this board. Add a code from your phone
+  (Google Authenticator, Authy, 1Password or the iPhone Passwords app) and a leaked
+  password gets nobody in.</p>
+  <a class="ghostbtn linkbtn" href="{{ url_for('twofa_setup') }}">Turn it on</a>
+  {% endif %}
+  {% if who and who.is_admin %}
+  <form method="post" action="{{ url_for('set_require_2fa') }}" class="stack" style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
+    <label class="checkrow"><input type="checkbox" name="on" {% if require_2fa %}checked{% endif %} {% if require_2fa_env %}disabled{% endif %} onchange="this.form.submit()">
+      Require two-step sign-in for everyone on this HQ</label>
+    {% if require_2fa_env %}<p class="caveat" style="margin:0">Locked on by the server setting.</p>{% endif %}
+  </form>
+  {% endif %}
+</section>
+
+{% if maps_key %}
+<section class="card acct">
+  <div class="sec-head"><h2>Your addresses</h2></div>
+  <form method="post" action="{{ url_for('set_origin') }}" class="stack">
+    <input type="hidden" name="back" value="{{ url_for('account_view') }}">
+    <label>Home<input name="origin_home" value="{{ home }}" placeholder="Street, town" dir="auto"></label>
+    <label>Office<input name="origin_work" value="{{ work }}" placeholder="Street, town" dir="auto"></label>
+    <button type="submit">Save</button>
+  </form>
+  <p class="caveat">Only for drive times on the Calendar &mdash; leave now, traffic, when to set
+  out. Yours alone: nobody else on the board can see them. Leave both empty and travel times
+  simply stay off.</p>
+</section>
+{% endif %}
+
+{% if notify_kinds %}
+<section class="card acct">
+  <div class="sec-head"><h2>What buzzes your phone</h2></div>
+  <form method="post" action="{{ url_for('set_notify') }}" class="stack">
+    {% for key, label in notify_kinds.items() %}
+    <label class="checkrow"><input type="checkbox" name="{{ key }}" {% if notify_on.get(key) %}checked{% endif %}> {{ label }}</label>
+    {% endfor %}
+    <button type="submit">Save</button>
+  </form>
+  <p class="caveat">Task nudges are only ever about a <b>shared</b> section; nothing private
+  reaches anyone else's phone. Voicemail pings arrive once the transcript is in &mdash; short
+  and empty messages stay quiet.</p>
+</section>
+{% endif %}
+
+{% if api_token %}
+<section class="card acct">
+  <div class="sec-head"><h2>Your board key</h2></div>
+  <p class="caveat">This is what a scheduled task uses to write onto <b>your</b> board and
+  nothing else. It cannot read anyone else's sections. Treat it like a password &mdash;
+  paste it into your own automation, never into an email or a chat.</p>
+  <input class="feedurl" value="{{ api_token }}" readonly onclick="this.select()">
+  <form method="post" action="{{ url_for('new_api_key') }}" class="stack">
+    <button type="submit" class="ghostbtn">Replace this key</button>
+  </form>
+  <p class="caveat">Replacing it breaks anything still using the old one.</p>
+</section>
+{% endif %}
+
+{% if who and who.is_admin %}
+<section class="card acct" id="callskey">
+  <div class="sec-head"><h2>Read-only calls key</h2>
+    <span class="pill {{ 'done' if calls_token else 'waiting' }}" style="cursor:default">{{ 'On' if calls_token else 'Off' }}</span></div>
+  <p class="caveat">Lets an assistant read your recorded calls and their transcripts
+  (<code>/api/calls/dump</code> and <code>/api/calls/review</code>) &mdash; and nothing else:
+  no board, no tasks, no settings, no writing. Turn it off here any time.</p>
+  {% if calls_token %}
+  <input class="feedurl" value="{{ calls_token }}" readonly onclick="this.select()">
+  <form method="post" action="{{ url_for('calls_key') }}" class="stack">
+    <button type="submit" class="ghostbtn">Replace this key</button>
+  </form>
+  <form method="post" action="{{ url_for('calls_key') }}" class="stack">
+    <input type="hidden" name="off" value="1">
+    <button type="submit" class="ghostbtn">Turn off</button>
+  </form>
+  {% else %}
+  <form method="post" action="{{ url_for('calls_key') }}" class="stack">
+    <button type="submit">Create calls key</button>
+  </form>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if who and who.is_admin %}
+<section class="card acct" id="routing">
+  <div class="sec-head"><h2>Voicemail routing</h2>
+    <span class="pill {{ 'done' if autoroute else 'waiting' }}" style="cursor:default">{{ 'On' if autoroute else 'Off' }}</span></div>
+  <form method="post" action="{{ url_for('set_autoroute') }}" class="stack">
+    <label class="checkrow"><input type="checkbox" name="on" {% if autoroute %}checked{% endif %} onchange="this.form.submit()">
+      Hand new voicemails to people automatically by what they are about</label>
+  </form>
+  <form method="post" action="{{ url_for('set_route') }}" class="stack routerules">
+    {% for k in kinds %}
+    <label class="routerow"><span>{{ kind_label[k] }}</span>
+      <select name="route_{{ k }}" onchange="this.form.submit()">
+        <option value=""{% if not route_now[k] %} selected{% endif %}>stays on the Desk</option>
+        {% for f in folk if f.id != session.get('uid') %}
+        <option value="{{ f.id }}"{% if route_now[k] == f.id %} selected{% endif %}>{{ f.display_name }}</option>
+        {% endfor %}
+      </select></label>
+    {% endfor %}
+  </form>
+  <form method="post" action="{{ url_for('route_now') }}" class="stack">
+    <button type="submit" class="ghostbtn">Pass on the messages already waiting</button>
+  </form>
+  <p class="caveat">A new message is read, titled, given its checklist, and then goes to the person picked for its kind:
+  a task on their Community/Charity box, a push to their phone, and the message in their Desk queue.
+  "Stays on the Desk" means it waits for you and the <b>To</b> menu. The button above applies the rules once
+  to the unassigned messages from the last two weeks.</p>
+</section>
+{% endif %}
+
+{% if feed_url %}
+<section class="card acct">
+  <div class="sec-head"><h2>Your calendar feed</h2></div>
+  <p class="caveat">Private to you. Anyone with this link can read your diary, so treat it like a password.</p>
+  <input class="feedurl" value="{{ feed_url }}" readonly onclick="this.select()">
+</section>
+{% endif %}
+
+<section class="card acct">
+  <div class="sec-head"><h2>On the board</h2></div>
+  {% for f in folk %}
+    {% if session.get('admin') and f.id != session.get('uid') %}
+    <form method="post" action="{{ url_for('set_identity') }}" class="stack peoplerow">
+      <input type="hidden" name="uid" value="{{ f.id }}">
+      <div class="two">
+        <label>First name<input name="first_name" value="{{ f.first_name or '' }}" maxlength="40"></label>
+        <label>Last name<input name="last_name" value="{{ f.last_name or '' }}" maxlength="40"></label>
+      </div>
+      <label>Shown on the board as<input name="display_name" value="{{ f.display_name }}" maxlength="40" placeholder="leave empty for first + last"></label>
+      <div class="two">
+        <label>Email<input type="email" name="email" value="{{ f.email or '' }}" maxlength="120"></label>
+        <label>Phone<input type="tel" name="phone" value="{{ fmt_phone(f.phone) if f.phone else '' }}" maxlength="20"></label>
+      </div>
+      <div class="caveat" style="margin:0">@{{ f.username }} &middot; two-step {% if twofa_status.get(f.id) %}<b style="color:var(--pill-done-tx)">on</b>{% else %}off{% endif %}</div>
+      <label>Their board is called<input name="board_title" value="{{ titles.get(f.id, '') }}" maxlength="40"></label>
+      <label>Small line above it<input name="tagline" value="{{ taglines.get(f.id, '') }}" placeholder="leave empty for none" maxlength="60"></label>
+      <input type="hidden" name="lean_field" value="1">
+      <label class="checkrow"><input type="checkbox" name="lean" value="1"{% if lean_of.get(f.id) %} checked{% endif %}>
+        Lean HQ &mdash; only the Community/Charity board, four tabs (Today, Board, Voicemail, Desk), signs in to the Desk</label>
+      <button type="submit">Save {{ f.display_name }}</button>
+    </form>
+    <form method="post" action="{{ url_for('reset_person', uid=f.id) }}" class="resetrow" onsubmit="return confirm('Give {{ f.display_name|e }} a new temporary password? The old one stops working at once.')">
+      <button type="submit" class="ghostbtn">Reset password</button>
+      <label class="inl"><input type="checkbox" name="twofa" value="1"> also reset two-step (lost phone)</label>
+    </form>
+    {% else %}
+    <ul class="prows"><li class="prow rhythm">
+      <span class="pwho">{{ f.display_name }}</span>
+      <span class="ptitle">@{{ f.username }}{% if f.is_admin %} &middot; admin{% endif %}{% if f.email %} &middot; {{ f.email }}{% endif %}{% if f.phone %} &middot; {{ fmt_phone(f.phone) }}{% endif %}</span>
+    </li></ul>
+    {% endif %}
+  {% endfor %}
+  <p class="caveat">Sections you own are private until you tap <b>share</b> on them.
+  Shared sections are visible to everyone here, and they can close and comment on those tasks.
+  The <b>Mine</b> filter on the board hides everything anyone else has shared, so a board
+  can be entirely your own whenever you want it to be.</p>
+</section>
+
+{% if session.get('admin') %}
+<section class="card acct">
+  <div class="sec-head"><h2>Add someone</h2></div>
+  <form method="post" action="{{ url_for('add_person') }}" class="stack">
+    <div class="two">
+      <label>First name<input name="first_name" autocomplete="off" placeholder="Joel" maxlength="40"></label>
+      <label>Last name<input name="last_name" autocomplete="off" placeholder="Landau" maxlength="40"></label>
+    </div>
+    <div class="two">
+      <label>Email<input type="email" name="email" autocomplete="off" placeholder="joel@…" maxlength="120"></label>
+      <label>Phone<input type="tel" name="phone" autocomplete="off" placeholder="(917) 555-0100" maxlength="20"></label>
+    </div>
+    <label>Username<input name="username" autocomplete="off" placeholder="joel" required></label>
+    <label>Shown on the board as<input name="display_name" autocomplete="off" placeholder="leave empty for first + last" maxlength="40"></label>
+    <label>First password<input name="password" autocomplete="off" minlength="8" placeholder="leave empty and one is made for you"></label>
+    <button type="submit">Add</button>
+  </form>
+  <p class="caveat">They get their own tracker section, shared, and a private Inbox.
+  Tell them to change this password the first time they sign in.</p>
+</section>
+{% endif %}
+</div>
+{% endblock %}

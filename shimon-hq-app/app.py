@@ -3413,6 +3413,7 @@ def _account_page(con, **extra):
                taglines={r["id"]: uset(con, "tagline", r["id"]) for r in folk},
                my_title=uset(con, "board_title"),
                api_token=api_token_for(con),
+               calls_token=uset(con, "calls_token") or "",
                notify_kinds=NOTIFY_KINDS,
                notify_on={k: wants(con, me(), k) for k in NOTIFY_KINDS},
                twofa_on=uset(con, "totp_on") == "1",
@@ -3577,6 +3578,22 @@ def set_notify():
         uset_put(con, "notify_" + kind, "1" if request.form.get(kind) else "0")
     commit_retry(con)
     return redirect(url_for("account_view"))
+
+
+@app.route("/account/callskey", methods=["POST"])
+@login_required
+def calls_key():
+    """Make (or replace) the read-only calls key; ?off=1 revokes it. Admins only."""
+    con = db()
+    u = user_row(con)
+    if not (u and u["is_admin"]):
+        abort(403)
+    uset_del(con, ("calls_token",))
+    if not request.form.get("off"):
+        import secrets
+        uset_put(con, "calls_token", secrets.token_hex(24))
+    commit_retry(con)
+    return redirect(url_for("account_view") + "#callskey")
 
 
 @app.route("/account/newkey", methods=["POST"])
@@ -3894,6 +3911,31 @@ def _api_auth():
                or con.execute("SELECT id FROM users ORDER BY id LIMIT 1").fetchone())
     g.api_uid = row["id"] if row else 0
     return True
+
+
+def _calls_auth():
+    """The read-only calls key (v185). It opens exactly two doors - /api/calls/dump and
+    /api/calls/review, GET only - and nothing else in HQ. Made on the Account page by an
+    admin, shown there, revocable there. _api_auth never accepts it."""
+    if request.method != "GET":
+        return False
+    auth = request.headers.get("Authorization", "")
+    supplied = (auth[7:] if auth.startswith("Bearer ") else request.args.get("token", "")).strip()
+    if len(supplied) < 32:
+        return False
+    con = db()
+    for row in con.execute("SELECT k, v FROM settings WHERE k LIKE 'u%:calls_token'").fetchall():
+        if row["v"] and hmac.compare_digest(supplied, row["v"]):
+            try:
+                uid = int(row["k"].split(":")[0][1:])
+            except (ValueError, IndexError):
+                return False
+            u = con.execute("SELECT is_admin FROM users WHERE id=?", (uid,)).fetchone()
+            if not (u and u["is_admin"]):
+                return False
+            g.api_uid = uid
+            return True
+    return False
 
 
 def api_token_for(con, uid=None):
@@ -4411,7 +4453,7 @@ def api_calls_review():
     """One day of calls on one line (or every line): who, how long, what came of it.
     ?date=YYYY-MM-DD (New York day, default today) &ext=<extension id | ~ | all>.
     Recorded calls carry the transcript's gist once HQ has read them."""
-    if not _api_auth():
+    if not (_api_auth() or _calls_auth()):
         abort(401)
     if not vm.configured() or vm.mirror_configured():
         return jsonify(error="RingCentral not configured here"), 400
@@ -4482,7 +4524,7 @@ def api_calls_dump():
     """Every recorded call HQ holds, straight from the database - no RingCentral round
     trip, so it answers in milliseconds while the tick is busy. ?since=YYYY-MM-DD
     (default 7 days) &ext=<extension id> to narrow. JSON rows with the transcript."""
-    if not _api_auth():
+    if not (_api_auth() or _calls_auth()):
         abort(401)
     con = db()
     since = (request.args.get("since") or (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")).strip()
