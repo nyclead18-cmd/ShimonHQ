@@ -254,7 +254,8 @@ def _e164(n):
 def rc_app_url(number):
     """Dial through the RingCentral app on the phone (the user's own line, own caller ID)."""
     n = _e164(number)
-    return ("rcmobile://call?number=" + urllib.parse.quote(n)) if n else ""
+    # the current RingCentral app is rcapp://; rcmobile:// was the retired RingCentral Phone app
+    return ("rcapp://r/call?number=" + n) if n else ""
 
 
 def send_sms(to, text):
