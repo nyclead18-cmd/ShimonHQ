@@ -8,7 +8,7 @@
   {% if has_cal %}<a class="tab{% if nav_on == 'calendar_view' %} on{% endif %}" href="{{ url_for('calendar_view') }}">Calendar</a>{% endif %}
   <a class="tab{% if nav_on == 'list_view' %} on{% endif %}" href="{{ url_for('list_view') }}">List</a>
   <a class="tab{% if nav_on == 'people_view' %} on{% endif %}" href="{{ url_for('people_view') }}">People</a>
-  <a class="tab{% if nav_on == 'vm_view' %} on{% endif %}" href="{{ url_for('vm_view') }}">Voicemail</a>
+  <a class="tab{% if nav_on == 'vm_view' %} on{% endif %}" href="{{ url_for('vm_view') }}">Call Center</a>
   {% if nav_on == 'families_view' %}<a class="tab on" href="{{ url_for('families_view') }}">Families</a>{% endif %}
   <a class="tab{% if nav_on == 'desk_view' %} on{% endif %}" href="{{ url_for('desk_view') }}">Desk</a>
   <a class="tab{% if nav_on == 'joel_view' %} on{% endif %}" href="{{ url_for('joel_view') }}">Review</a>
