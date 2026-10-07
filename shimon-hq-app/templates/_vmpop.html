@@ -35,7 +35,8 @@
     var a=document.getElementById('vmpop-audio'); if(d.audio){a.src=d.audio; a.hidden=false;} else {a.removeAttribute('src'); a.hidden=true;}
     document.getElementById('vmpop-en').textContent=d.en; document.getElementById('vmpop-yi').textContent=d.yi;
     document.getElementById('vmpop-yi').hidden=!d.yi;
-    var c=document.getElementById('vmpop-call'); c.hidden=!d.num; c.href='tel:'+d.num.replace(/[^\d+]/g,'');
+    var c=document.getElementById('vmpop-call'); c.hidden=!d.num; var dg=d.num.replace(/[^\d+]/g,'');
+    c.href = {{ own_line|default(false)|tojson }} ? 'rcmobile://call?number=' + encodeURIComponent(dg.length === 10 ? '+1' + dg : (dg.charAt(0) === '+' ? dg : '+' + dg)) : 'tel:' + dg;
     document.getElementById('vmpop-link').href=d.link;
     dlg.showModal();
   }, true);

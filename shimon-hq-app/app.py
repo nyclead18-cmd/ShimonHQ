@@ -209,6 +209,18 @@ def inject_brand():
     return {"brand_url": brand_url, "hq_title": hq_title(), "hq_short": hq_short(),
             "theme_color": THEME_COLOR}
 
+@app.context_processor
+def inject_own_line():
+    """own_line: the signed-in person has his own RingCentral line (v186) - every Call
+    button on every page then opens the RingCentral app instead of RingOut / tel:."""
+    try:
+        uid = session.get("uid")
+        own = bool(uid) and uid in own_line_uids(db())
+    except Exception:
+        own = False
+    return {"own_line": own, "rc_url": vm.rc_app_url}
+
+
 STATUSES = ("open", "waiting", "done")
 
 
@@ -1321,6 +1333,43 @@ def set_route():
         _set_setting(con, "route:%s" % k, v if v in known else "")
     commit_retry(con)
     return redirect(url_for("account_view") + "#routing")
+
+
+@app.route("/account/lines", methods=["POST"])
+@login_required
+def set_user_lines():
+    """Personal phone lines (v186): RingCentral extension -> HQ user. Admins only.
+    Add: ext + user. Remove: drop=<ext>. Saving a line also moves that line's open,
+    unassigned messages into the person's queue."""
+    if not session.get("admin"):
+        abort(403)
+    con = db()
+    m = user_lines_map(con)
+    drop = (request.form.get("drop") or "").strip()
+    if drop:
+        m.pop(drop, None)
+    else:
+        spec = re.sub(r"\s+", " ", (request.form.get("ext") or "").strip())[:60]
+        uid = (request.form.get("user") or "").strip()
+        if not spec or not uid.isdigit() or not con.execute("SELECT 1 FROM users WHERE id=?", (int(uid),)).fetchone():
+            return _account_page(con, error="Pick a person and type the extension number.")
+        for k in [k for k, v in m.items() if k.lower() == spec.lower()]:
+            m.pop(k)
+        m[spec] = {"user": int(uid), "since": (m.get(spec) or {}).get("since") or
+                   (date.today() - timedelta(days=14)).isoformat()}
+    _set_setting(con, USER_LINES_KEY, json.dumps(m))
+    _ul_cache["at"] = 0
+    moved = 0
+    if not drop:
+        try:
+            for ext, uid in line_owners(con).items():
+                moved += con.execute("UPDATE voicemails SET assignee=?, routed=1 WHERE ext=? AND assignee IS NULL"
+                                     " AND closed_at IS NULL", (uid, ext)).rowcount
+            commit_retry(con)
+        except Exception as e:
+            app.logger.warning("user lines claim: %s", e)
+    threading.Thread(target=vm_work, daemon=True).start()   # read the new box now
+    return redirect(url_for("account_view") + "#phonelines")
 
 
 @app.route("/account/route/now", methods=["POST"])
@@ -3422,6 +3471,8 @@ def _account_page(con, **extra):
                lean_of={r["id"]: uset(con, "lean", r["id"]) == "1" for r in folk},
                autoroute=autoroute_on(con), route_default=ROUTE_DEFAULT_USER, kind_label=vm.KIND_LABEL,
                route_now=route_table(con), kinds=vm.KINDS,
+               user_lines=user_lines_map(con), line_errors=vm.line_errors() if vm.configured() else {},
+               missed_err=_setting(con, "vm_missed_err", ""),
                feed_url=request.url_root.rstrip("/") + url_for("ics_feed", token=_feed_token(con)))
     ctx.update(extra)
     return render_template("account.html", **ctx)
@@ -5551,7 +5602,12 @@ def vm_work(date_from=None, budget=240):
         if vm.mirror_configured():
             vm.mirror_sync(con, FILES_DIR, log=app.logger.info)
         else:
+            try:
+                seed_user_lines(con)
+            except Exception as e:
+                app.logger.warning("seed lines: %s", e)
             vm.sync(con, FILES_DIR, log=app.logger.info, date_from=date_from, transcribe=False)
+            vm_route_lines(con)
             while _time.time() - t0 < budget:
                 if not vm.transcribe_pending(con, FILES_DIR, log=app.logger.info, max_n=3):
                     break
@@ -5568,7 +5624,12 @@ def vm_work(date_from=None, budget=240):
             vm_reread(con)
             vm_refresh_tasks(con)
             vm_pull_calls(con)
+            vm_route_lines(con)
             vm_transcribe_calls(con)
+        try:
+            vm_pull_missed(con)
+        except Exception as e:
+            app.logger.warning("vm missed failed: %s", e)
     except Exception as e:
         app.logger.warning("vm work failed: %s", e)
     finally:
@@ -5926,6 +5987,208 @@ def _route_target(con, kind):
         return None
     row = con.execute("SELECT id FROM users WHERE lower(username)=?", (uname,)).fetchone()
     return row["id"] if row else None
+
+
+# ---------- personal lines (v186) ----------
+#
+# A regular HQ user can have his own RingCentral extension. settings 'rc_user_lines'
+# holds {spec: {"user": uid, "since": "YYYY-MM-DD"}}, spec being the extension number
+# (or id / name, as in RC_LINES). That box is read like the RC_LINES ones; its
+# voicemails and recorded calls land in his queue instead of on the desk; its missed
+# calls make a list on his desk; and his Call buttons open the RingCentral app.
+
+USER_LINES_KEY = "rc_user_lines"
+_ul_cache = {"at": 0.0, "data": []}
+
+
+def user_lines_map(con):
+    """{spec: {"user": uid, "since": date}} as saved on Account."""
+    try:
+        d = json.loads(_setting(con, USER_LINES_KEY, "") or "{}") or {}
+    except ValueError:
+        return {}
+    out = {}
+    for spec, v in d.items():
+        if isinstance(v, dict) and str(v.get("user", "")).isdigit():
+            out[str(spec)] = {"user": int(v["user"]), "since": v.get("since") or ""}
+    return out
+
+
+def _load_user_lines():
+    """For vm.lines(): [(spec, label, since)], own connection (it runs on the worker
+    thread too), cached a minute so every gunicorn worker sees a new mapping quickly."""
+    if _time.time() - _ul_cache["at"] < 60:
+        return _ul_cache["data"]
+    out = []
+    try:
+        c = sqlite3.connect(DB_PATH, timeout=5)
+        c.row_factory = sqlite3.Row
+        try:
+            names = {r["id"]: r["display_name"] for r in c.execute("SELECT id, display_name FROM users")}
+            row = c.execute("SELECT v FROM settings WHERE k=?", (USER_LINES_KEY,)).fetchone()
+            for spec, v in (json.loads(row["v"]) if row and row["v"] else {}).items():
+                uid = int(v.get("user")) if str(v.get("user", "")).isdigit() else None
+                if uid in names:
+                    out.append((str(spec), "%s's line" % names[uid], v.get("since") or ""))
+        finally:
+            c.close()
+    except Exception as e:
+        app.logger.warning("user lines: %s", e)
+        return _ul_cache["data"]
+    _ul_cache.update(at=_time.time(), data=out)
+    return out
+
+
+vm.USER_LINES_LOADER = _load_user_lines
+
+
+# Yanky (Yakov Yosef) Friedman's line, RingCentral ext 107 - mapped once, on the first
+# pass after he has an HQ account. Account > Phone lines changes or removes it.
+SEED_LINES = (("107", ("yanky", "yakov", "friedman")),)
+
+
+def seed_user_lines(con):
+    if _setting(con, "mig:userline186"):
+        return
+    m = user_lines_map(con)
+    done = True
+    for spec, names in SEED_LINES:
+        if spec in m:
+            continue
+        hits = [u for u in con.execute("SELECT id, username, display_name, first_name, last_name FROM users"
+                                       " WHERE is_admin=0").fetchall()
+                if any(n in " ".join(str(u[k] or "") for k in ("username", "display_name", "first_name", "last_name")).lower()
+                       for n in names[:2])]
+        if len(hits) != 1:
+            done = False          # no account yet (or two Yakovs): try again next pass
+            continue
+        m[spec] = {"user": hits[0]["id"], "since": (date.today() - timedelta(days=14)).isoformat()}
+    _set_setting(con, USER_LINES_KEY, json.dumps(m))
+    _ul_cache["at"] = 0
+    if done:
+        _set_setting(con, "mig:userline186", "1")
+
+
+def line_owners(con):
+    """{resolved extension id: uid} for the personal lines RingCentral could resolve."""
+    m = user_lines_map(con)
+    if not m or not vm.configured() or vm.mirror_configured():
+        return {}
+    out = {}
+    try:
+        for ln in vm.lines():
+            v = m.get(ln.get("spec") or "")
+            if v:
+                out[str(ln["id"])] = v["user"]
+    except Exception as e:
+        app.logger.warning("line owners: %s", e)
+    return out
+
+
+def own_line_uids(con):
+    return {v["user"] for v in user_lines_map(con).values()}
+
+
+def vm_route_lines(con):
+    """New voicemails / recorded calls on a personal line go to that person's queue,
+    not the desk - once, before the kind rules ever see them."""
+    n = 0
+    for ext, uid in line_owners(con).items():
+        n += con.execute("UPDATE voicemails SET assignee=?, routed=1 WHERE ext=? AND assignee IS NULL"
+                         " AND routed=0", (uid, ext)).rowcount
+    if n:
+        con.commit()
+    return n
+
+
+def ensure_missed_schema(con):
+    con.execute("CREATE TABLE IF NOT EXISTS vm_missed (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                " rc_id TEXT UNIQUE, ext TEXT, user_id INTEGER, ts TEXT, number TEXT, digits TEXT,"
+                " name TEXT, result TEXT, left_vm INTEGER NOT NULL DEFAULT 0, vm_id INTEGER,"
+                " called_back_at TEXT, created_at TEXT)")
+    con.execute("CREATE INDEX IF NOT EXISTS vm_missed_user ON vm_missed(user_id, ts)")
+
+
+MISSED_EVERY = 180      # call-log is a Heavy RingCentral call: every 3 minutes is plenty
+_missed_last = [0.0]
+
+
+def vm_pull_missed(con, force=False):
+    """Calls on personal lines that nobody picked up (result Missed / Voicemail) become
+    the user's Missed list. Outbound calls in the same log clear 'called back' on every
+    earlier missed call from that number. One watermark per line."""
+    if not vm.configured() or vm.mirror_configured():
+        return 0
+    if not force and _time.time() - _missed_last[0] < MISSED_EVERY:
+        return 0
+    _missed_last[0] = _time.time()
+    owners = line_owners(con)
+    if not owners:
+        return 0
+    ensure_missed_schema(con)
+    since_of = {}
+    for ln in vm.lines():
+        since_of[str(ln["id"])] = ln.get("since") or ""
+    n, errs = 0, []
+    for ext, uid in owners.items():
+        now_utc = datetime.utcnow()
+        mark = _setting(con, "missed_mark:%s" % ext)
+        if mark:
+            start = datetime.fromisoformat(mark[:19]) - timedelta(minutes=15)
+        else:
+            start = now_utc - timedelta(days=14)
+            if since_of.get(ext):
+                try:
+                    start = max(start, datetime.fromisoformat(since_of[ext]) - timedelta(days=1))
+                except ValueError:
+                    pass
+        try:
+            recs = vm.rc_call_log(start.strftime("%Y-%m-%dT%H:%M:%S.000Z"), ext=ext, recorded_only=False)
+        except Exception as e:
+            msg = vm._rc_err(e) if hasattr(e, "code") else str(e)[:200]
+            errs.append("ext %s: %s" % (ext, msg))
+            continue
+        outs = []
+        for c in recs:
+            d, res = c.get("direction") or "", c.get("result") or ""
+            when = vm.to_local(c.get("startTime") or "")
+            if d == "Inbound" and res in ("Missed", "Voicemail"):
+                frm = c.get("from") or {}
+                num = frm.get("phoneNumber") or frm.get("extensionNumber") or ""
+                n += con.execute(
+                    "INSERT OR IGNORE INTO vm_missed(rc_id, ext, user_id, ts, number, digits, name, result,"
+                    " left_vm, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    (str(c.get("id")), ext, uid, when, num, _digits10(num), vm._caller_name(frm.get("name") or ""),
+                     res, 1 if res == "Voicemail" else 0, datetime.now().isoformat(timespec="seconds"))).rowcount
+            elif d == "Outbound":
+                to = c.get("to") or {}
+                outs.append((_digits10(to.get("phoneNumber") or ""), when))
+        for dg, when in outs:
+            if dg:
+                con.execute("UPDATE vm_missed SET called_back_at=? WHERE ext=? AND digits=?"
+                            " AND called_back_at IS NULL AND ts <= ?", (when, ext, dg, when))
+        _set_setting(con, "missed_mark:%s" % ext, now_utc.isoformat(timespec="seconds"))
+    # the voicemail each one left, so the row can open it
+    for m in con.execute("SELECT * FROM vm_missed WHERE vm_id IS NULL AND ts >= ?",
+                         ((datetime.now() - timedelta(days=15)).isoformat(timespec="seconds"),)).fetchall():
+        for v in con.execute("SELECT id, ts, caller_number FROM voicemails WHERE ext=? AND substr(ts,1,10)=?"
+                             " AND (source IS NULL OR source NOT LIKE 'call%')", (m["ext"], (m["ts"] or "")[:10])):
+            if _digits10(v["caller_number"]) == m["digits"] and _mins_apart(v["ts"], m["ts"]) <= 6:
+                con.execute("UPDATE vm_missed SET vm_id=?, left_vm=1 WHERE id=?", (v["id"], m["id"]))
+                break
+    _set_setting(con, "vm_missed_err", "; ".join(errs)[:400])
+    con.commit()
+    return n
+
+
+def missed_for(con, uid, days=14):
+    """The user's Missed list: newest first, two weeks."""
+    try:
+        ensure_missed_schema(con)
+        return con.execute("SELECT * FROM vm_missed WHERE user_id=? AND ts >= ? ORDER BY ts DESC LIMIT 150",
+                           (uid, (datetime.now() - timedelta(days=days)).isoformat(timespec="seconds"))).fetchall()
+    except sqlite3.Error:
+        return []
 
 
 def autoroute_on(con):
@@ -6868,11 +7131,14 @@ def vm_view():
     src = request.args.get("src", "vm")
     if show == "calls":
         src, show = "calls", "open"
-    if src not in ("vm", "calls", "both"):
+    # a queue whose owner has his own line also gets the Missed tab (v186)
+    line_uid = int(q) if q.isdigit() and int(q) in own_line_uids(con) else None
+    if src not in ("vm", "calls", "both") and not (src == "missed" and line_uid):
         src = "vm"
+    missed = missed_for(con, line_uid) if line_uid else []
     CALLW = " AND v.source LIKE 'call%'"
     VMW = " AND (v.source IS NULL OR v.source NOT LIKE 'call%')"
-    swhere = {"vm": VMW, "calls": CALLW, "both": ""}[src]
+    swhere = {"vm": VMW, "calls": CALLW, "both": "", "missed": VMW}[src]
     base_q = qwhere           # queue + line, without the source split - for the two tab counts
     qwhere += swhere
     # "Handled" is mine alone: what I file away stays filed for me and untouched for
@@ -6886,6 +7152,8 @@ def vm_view():
         " LEFT JOIN vm_handled h ON h.vm_id=v.id AND h.user_id=?"
         " LEFT JOIN users u ON u.id=v.assignee %s ORDER BY v.ts DESC LIMIT 300"
         % where, (me(),) + qargs).fetchall()
+    if src == "missed":
+        rows = []
     last = con.execute("SELECT v FROM settings WHERE k='vm_last_sync'").fetchone()
     # open count per queue, each person's own "handled" respected
     qcounts = {}
@@ -6919,7 +7187,7 @@ def vm_view():
     dh = vm.dh_projects() if vm.dh_configured() else None
     # who is calling: the families directory, by phone
     fam_of = {}
-    digs = {families.digits10(r["caller_number"]) for r in rows} - {""}
+    digs = ({families.digits10(r["caller_number"]) for r in rows} | {m["digits"] or "" for m in missed}) - {""}
     if digs:
         qm = ",".join("?" * len(digs))
         for f in con.execute("SELECT f.id, f.name_en, f.name_yi, f.area, f.mother_en, f.qbo_payee, f.children, p.digits"
@@ -6970,7 +7238,9 @@ def vm_view():
                            fam_kids=families.children, kind_label=vm.KIND_LABEL,
                            last_sync=(last["v"] if last else None),
                            rc_ok=vm.configured(), yl_ok=vm.yl_configured(),
-                           fmt_phone=vm.fmt_phone)
+                           fmt_phone=vm.fmt_phone, missed=missed, line_uid=line_uid,
+                           missed_open=sum(1 for m in missed if not m["called_back_at"]),
+                           own_line=me() in own_line_uids(con), rc_url=vm.rc_app_url)
 
 
 # ---------- families (the almanos / yesomim directory) ----------
@@ -7123,6 +7393,20 @@ def vm_call(vid):
     except Exception as e:
         _touch(con, vid, "call", r["caller_number"], "", "failed: %s" % str(e)[:200])
         return jsonify(error=str(e)[:300]), 502
+
+
+@app.route("/vm/<int:vid>/dialed", methods=["POST"])
+@login_required
+def vm_dialed(vid):
+    """The RingCentral app was opened to call this caller back (own-line users). Kept
+    on the message like a RingOut, so the 'called back' dot turns green."""
+    con = db()
+    r = con.execute("SELECT id, caller_number FROM voicemails WHERE id=?", (vid,)).fetchone()
+    if not r:
+        abort(404)
+    num = (request.form.get("number") or r["caller_number"] or "").strip()
+    _touch(con, vid, "call", num, "", "via RC app", "rcapp")
+    return jsonify(ok=True, who=_actor_name(con), at=_now_local().strftime("%-m/%-d %-I:%M %p"))
 
 
 @app.route("/vm/upload", methods=["POST"])
@@ -7403,7 +7687,7 @@ def desk_view():
     touches = {}
     if ids:
         qm = ",".join("?" * len(ids))
-        for t in con.execute("SELECT * FROM vm_touch WHERE vm_id IN (%s) AND status='sent' ORDER BY at" % qm, ids):
+        for t in con.execute("SELECT * FROM vm_touch WHERE vm_id IN (%s) AND status IN ('sent','via RC app') ORDER BY at" % qm, ids):
             touches[t["vm_id"]] = t
     owed = [r for r in queue if r["id"] not in touches]
     calls_by_vm = {}
@@ -7479,7 +7763,12 @@ def desk_view():
     fam = _fam_label_for(con)
     readings = {r["id"]: vm.reading(r) for r in list(queue) + list(done)}
     labels = vm.line_labels(con)
+    has_line = who in own_line_uids(con)
+    missed = missed_for(con, who) if has_line else []
     return render_template("desk.html", who=who, person=person, folk=folk, qcounts=qcounts,
+                           has_line=has_line, missed=missed,
+                           missed_open=sum(1 for m in missed if not m["called_back_at"]),
+                           own_line=me() in own_line_uids(con), rc_url=vm.rc_app_url,
                            queue=queue, owed=owed, touches=touches, tasks=tasks, done=done,
                            handed=handed, passed=passed, boards=BOARDS, vm_of=vm_of,
                            outbound=vm.configured() and not vm.mirror_configured(),

@@ -170,6 +170,34 @@
 </section>
 {% endif %}
 
+{% if who and who.is_admin %}
+<section class="card acct" id="phonelines">
+  <div class="sec-head"><h2>Phone lines</h2>
+    <span class="pill {{ 'done' if user_lines else 'waiting' }}" style="cursor:default">{{ user_lines|length }}</span></div>
+  <p class="caveat">A person's own RingCentral extension. Its voicemails and recorded calls go straight to their queue
+  (not the Desk), its missed calls show on their Desk, and their Call buttons open the RingCentral app on the phone,
+  so they call from their own number. Their HQ access stays as it is.</p>
+  {% if user_lines %}
+  <div class="stack routerules">
+    {% for spec, v in user_lines.items() %}
+    {% set u = (folk|selectattr('id', 'equalto', v.user)|list|first) %}
+    <form method="post" action="{{ url_for('set_user_lines') }}" class="routerow" style="grid-template-columns:120px minmax(0,1fr) auto">
+      <span>Ext {{ spec }}</span><span>{{ u.display_name if u else 'user ' ~ v.user }}{% if v.since %} <small class="caveat">since {{ v.since }}</small>{% endif %}</span>
+      <input type="hidden" name="drop" value="{{ spec }}"><button type="submit" class="ghostbtn" onclick="return confirm('Remove ext {{ spec }}? Messages already in the queue stay there.')">Remove</button>
+    </form>
+    {% endfor %}
+  </div>
+  {% endif %}
+  <form method="post" action="{{ url_for('set_user_lines') }}" class="routerow" style="grid-template-columns:120px minmax(0,1fr) auto; margin-top:8px">
+    <input name="ext" inputmode="numeric" placeholder="Ext e.g. 65926" required maxlength="60" style="font:inherit;font-size:13.5px;padding:6px 10px;border:1px solid var(--border);border-radius:10px;background:var(--card);color:var(--ink);min-width:0">
+    <select name="user" required><option value="">Whose line&hellip;</option>{% for f in folk %}<option value="{{ f.id }}">{{ f.display_name }}</option>{% endfor %}</select>
+    <button type="submit">Add line</button>
+  </form>
+  {% for k, e in (line_errors or {}).items() if k.startswith('spec:') and user_lines.get(k[5:]) %}<p class="savewarn">{{ e }}</p>{% endfor %}
+  {% if missed_err %}<p class="savewarn">Missed calls: {{ missed_err }}</p>{% endif %}
+</section>
+{% endif %}
+
 {% if feed_url %}
 <section class="card acct">
   <div class="sec-head"><h2>Your calendar feed</h2></div>

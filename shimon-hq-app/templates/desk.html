@@ -96,6 +96,18 @@
   .deskpage .passform input[name=note]{grid-column:1/-1}
   .deskpage .passform input, .deskpage .passform select, .deskpage .passform button{font:inherit; font-size:14px; padding:8px 10px; border:1px solid var(--border); border-radius:10px; background:var(--card); color:var(--ink); min-width:0}
   .deskpage .passform button{background:var(--ink); color:var(--card); border-color:var(--ink); grid-column:1/-1}
+  .deskpage .missed{display:flex; flex-direction:column}
+  .deskpage .mrow{display:grid; grid-template-columns:auto minmax(0,1fr) auto auto; gap:4px 12px; align-items:center; padding:9px 4px; border-top:1px solid var(--border)}
+  .deskpage .mrow:first-child{border-top:0}
+  .deskpage .mrow .dotst{width:8px; height:8px; border-radius:999px; background:var(--danger)}
+  .deskpage .mrow .dotst.ok{background:var(--pill-done-tx,#3A6B3E)}
+  .deskpage .mrow.cb .mwho b{font-weight:500; color:var(--muted)}
+  .deskpage .mrow .mwho{font-size:13.5px; min-width:0; overflow-wrap:anywhere}
+  .deskpage .mrow .mwho small{color:var(--muted); font-size:12px}
+  .deskpage .mrow .mtags{display:flex; gap:8px; flex-wrap:wrap; margin-top:2px}
+  .deskpage .mrow .mtags a.tag{text-decoration:none}
+  .deskpage .mrow .mwhen{color:var(--muted); font-size:12px; white-space:nowrap}
+  .deskpage .mrow .mcall{width:36px; height:36px; border-radius:999px; display:grid; place-items:center; background:var(--ink); color:var(--card); text-decoration:none; font-size:16px}
   .deskpage .donelist .row{display:flex; justify-content:space-between; gap:10px; padding:7px 0; border-top:1px solid var(--border); font-size:13.5px}
   .deskpage .donelist .row:first-child{border-top:none}
   .deskpage .donelist .row span:last-child{color:var(--muted); font-size:12px; white-space:nowrap}
@@ -113,6 +125,7 @@
 <div class="stats">
   <a class="stat" href="#lane-queue"><div class="num">{{ queue|length }}</div><div class="lbl">messages</div></a>
   <a class="stat{% if owed %} alarm{% endif %}" href="#lane-queue"><div class="num">{{ owed|length }}</div><div class="lbl">call back owed</div></a>
+  {% if has_line %}<a class="stat{% if missed_open %} alarm{% endif %}" href="#lane-missed"><div class="num">{{ missed_open }}</div><div class="lbl">missed, not called back</div></a>{% endif %}
   <a class="stat" href="#lane-handed"><div class="num">{{ handed|length }}</div><div class="lbl">passed to {{ 'you' if who == session.get('uid') else 'them' }}</div></a>
   <a class="stat good" href="#lane-done"><div class="num">{{ done|length }}</div><div class="lbl">finished this week</div></a>
 </div>
@@ -144,8 +157,11 @@
     </div>
     <div class="fold"><div><div class="inner body">
       <div class="acts">
+        {% if num and own_line and who == session.get('uid') %}<a class="call" href="{{ rc_url(num) }}" data-rcdial="{{ url_for('vm_dialed', vid=r.id) }}" title="Opens the RingCentral app - the call goes out on your own line">&#9742; Call {{ fmt_phone(num) }}</a>
+        {% else %}
         {% if num and outbound and who == session.get('uid') %}<button type="button" class="call" data-lcall="{{ url_for('vm_call', vid=r.id) }}" title="RingCentral rings your phone, then dials them - the line's number shows, the call is recorded on the line">&#9742; Call from the line</button>{% endif %}
         {% if num %}<a class="{{ '' if (outbound and who == session.get('uid')) else 'call' }}" href="tel:{{ num|replace(' ','')|replace('(','')|replace(')','')|replace('-','') }}">{{ 'My phone' if (outbound and who == session.get('uid')) else 'Call' }} {{ fmt_phone(num) }}</a>{% endif %}
+        {% endif %}
         <a href="{{ url_for('vm_view', src='both', q=(who if session.get('admin') else None)) }}#vm-{{ r.id }}">Text back &#8599;</a>
         {% if r.item_id %}<a href="{{ url_for('task_view', item_id=r.item_id) }}">Task page &#8599;</a>
         {% else %}<form method="post" action="{{ url_for('vm_task', vid=r.id) }}"><button type="submit">Make task</button></form>{% endif %}
@@ -196,6 +212,32 @@
   </div>
   {% else %}<p class="caveat">Nothing waiting. New messages handed to {{ 'you' if who == session.get('uid') else person.display_name }} land here with a push to the phone.</p>{% endif %}
 </section>
+
+{% if has_line %}
+<section class="card" id="lane-missed" style="--sa:#A33B2E">
+  <div class="sec-head"><h2><span class="dot"></span>Missed calls</h2>
+    <span class="counts">{{ missed_open }} to call back &middot; {{ missed|length }} in 2 weeks</span></div>
+  {% if missed %}
+  <div class="missed">
+  {% for m in missed %}
+  {% set mwho = m.name or fam({'caller_number': m.number}) or fmt_phone(m.number) or 'Unknown caller' %}
+  <div class="mrow{% if m.called_back_at %} cb{% endif %}">
+    <span class="dotst{% if m.called_back_at %} ok{% endif %}"></span>
+    <div class="mwho"><b dir="auto">{{ mwho }}</b>{% if m.name and m.number %} <small>{{ fmt_phone(m.number) }}</small>{% endif %}
+      <div class="mtags">
+        {% if m.left_vm %}{% if m.vm_id %}<a class="tag" href="{{ url_for('vm_view', q=(who if session.get('admin') else None)) }}#vm-{{ m.vm_id }}">left voicemail &#8599;</a>{% else %}<span class="tag">left voicemail</span>{% endif %}{% else %}<span class="tag">no voicemail</span>{% endif %}
+        {% if m.called_back_at %}<span class="tag touched">called back {{ m.called_back_at|stamp }}</span>{% else %}<span class="tag owe">not called back</span>{% endif %}
+      </div>
+    </div>
+    <div class="mwhen">{{ (m.ts or '')|stamp }}</div>
+    {% if m.number %}{% if own_line and who == session.get('uid') %}<a class="mcall" href="{{ rc_url(m.number) }}" title="Call from your line (RingCentral app)">&#9742;</a>
+    {% else %}<a class="mcall" href="tel:{{ m.number }}">&#9742;</a>{% endif %}{% endif %}
+  </div>
+  {% endfor %}
+  </div>
+  {% else %}<p class="caveat">No missed calls on {{ 'your' if who == session.get('uid') else 'their' }} line in the last two weeks.</p>{% endif %}
+</section>
+{% endif %}
 </div>
 
 <div>
@@ -250,6 +292,7 @@
 </div>
 {% include "_edittpl.html" %}
 {% include "_vmpop.html" %}
+{% if who == session.get('uid') %}{% include "_dialpad.html" %}{% endif %}
 <script>
 (function(){
   // tap the head of a message: fold it open (player + words + actions), tap again to close

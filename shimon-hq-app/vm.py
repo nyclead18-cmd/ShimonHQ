@@ -251,6 +251,12 @@ def _e164(n):
     return ("+" + d) if d else ""
 
 
+def rc_app_url(number):
+    """Dial through the RingCentral app on the phone (the user's own line, own caller ID)."""
+    n = _e164(number)
+    return ("rcmobile://call?number=" + urllib.parse.quote(n)) if n else ""
+
+
 def send_sms(to, text):
     """Text the caller from the line's number. Returns the RC message id."""
     frm = line_numbers()["sms"]
@@ -424,9 +430,32 @@ def _resolve_ext(spec):
     raise RuntimeError("RingCentral extension %r not found (%d loose matches)" % (want, len(hits)))
 
 
+# Personal lines (v186): an HQ user's own RingCentral extension, mapped on Account.
+# app.py hands over a loader -> [(spec, label, since)]; those boxes are read like the
+# RC_LINES ones, and their voicemails / recorded calls land in that user's queue.
+USER_LINES_LOADER = None
+
+
+def user_line_specs():
+    try:
+        return list(USER_LINES_LOADER() or []) if USER_LINES_LOADER else []
+    except Exception:
+        return []
+
+
 def line_specs():
     """[(spec, label)] from RC_LINES ("Shefa yoel=Shefa Yoel line;Rivky Mayer=Mrs. Mayer's line"),
-    else the single RC_EXTENSION_ID / RC_EXTENSION_NAME line."""
+    else the single RC_EXTENSION_ID / RC_EXTENSION_NAME line - then the personal lines."""
+    out = _env_line_specs()
+    have = {sp.lower() for sp, _ in out}
+    for spec, label, _since in user_line_specs():
+        if spec.lower() not in have:
+            out.append((spec, label))
+            have.add(spec.lower())
+    return out
+
+
+def _env_line_specs():
     raw = (os.environ.get("RC_LINES") or "").strip()
     out = []
     if raw:
@@ -450,13 +479,17 @@ def line_errors():
 
 
 def lines():
-    """[{id, label}] - the voicemail boxes this HQ reads, resolved once an hour."""
-    if _lines_cache["data"] and time.time() - _lines_cache["at"] < 3600:
+    """[{id, label, spec, since}] - the voicemail boxes this HQ reads, resolved once an
+    hour, or at once when the list of lines changes (a personal line mapped on Account)."""
+    specs = line_specs()
+    since = {sp.lower(): sn for sp, _l, sn in user_line_specs()}
+    if _lines_cache["data"] and time.time() - _lines_cache["at"] < 3600 and _lines_cache.get("specs") == specs:
         return _lines_cache["data"]
     out = []
-    for i, (spec, label) in enumerate(line_specs()):
+    for i, (spec, label) in enumerate(specs):
         try:
-            out.append({"id": _resolve_ext(spec), "label": label})
+            out.append({"id": _resolve_ext(spec), "label": label, "spec": spec,
+                        "since": since.get(spec.lower()) or ""})
             _line_err.pop("spec:" + spec, None)
         except Exception as e:
             # a name we cannot look up (no ReadAccounts permission, or a typo): the main
@@ -464,9 +497,9 @@ def lines():
             _line_err["spec:" + spec] = "%s: %s" % (label, str(e)[:160])
             if i == 0:
                 fb = (os.environ.get("RC_EXTENSION_ID") or "~").strip()
-                out.append({"id": fb, "label": label})
+                out.append({"id": fb, "label": label, "spec": spec, "since": ""})
     if out:
-        _lines_cache.update(at=time.time(), data=out)
+        _lines_cache.update(at=time.time(), data=out, specs=specs)
     return out or _lines_cache["data"] or [{"id": "~", "label": DEFAULT_LINE}]
 
 
@@ -981,8 +1014,11 @@ def sync(con, files_dir, log=None, date_from=None, transcribe=True, limit=None):
     for ln in lines():
         # one box that RingCentral refuses (403: the JWT user may not read it) must
         # not stop the others; it is logged and shown on the page until it is fixed
+        df = date_from or os.environ.get("RC_DATE_FROM")
+        if ln.get("since") and (not df or ln["since"] > df):
+            df = ln["since"]      # a personal line backfills from its mapping, not 90 days
         try:
-            for m in rc_list_voicemails(date_from or os.environ.get("RC_DATE_FROM"), ext=ln["id"]):
+            for m in rc_list_voicemails(df, ext=ln["id"]):
                 m["_ext"] = ln["id"]
                 recs.append(m)
             _line_err.pop(ln["id"], None)

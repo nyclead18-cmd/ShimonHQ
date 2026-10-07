@@ -200,6 +200,7 @@
   <div class="seg srcseg">
     <a class="{% if src == 'vm' %}on{% endif %}" href="{{ url_for('vm_view', show=show, q=q if q else None, line=line if line else None) }}">Voicemails · {{ counts.vm_open }}</a>
     <a class="{% if src == 'calls' %}on{% endif %}" href="{{ url_for('vm_view', src='calls', show=show, q=q if q else None, line=line if line else None) }}" title="Recorded calls - in and out - on every line">&#9742; Recorded calls · {{ counts.calls_open }}</a>
+    {% if line_uid %}<a class="{% if src == 'missed' %}on{% endif %}" href="{{ url_for('vm_view', src='missed', q=q if (q and admin) else None) }}" title="Calls on the personal line nobody picked up - clears when the number is called back">Missed · {{ missed_open }}</a>{% endif %}
   </div>
   <div class="seg">
     <a class="{% if show == 'open' %}on{% endif %}" href="{{ url_for('vm_view', src=src if src != 'vm' else None, q=q if q else None, line=line if line else None) }}">Open · {{ counts.open }}</a>
@@ -260,7 +261,42 @@
   </form>
 </dialog>
 
-{% if not rows %}<p class="hint">Nothing here.</p>{% endif %}
+{% if src == 'missed' %}
+<style>
+  .vmpage .mlist{display:flex; flex-direction:column; background:var(--card); border:1px solid var(--border); border-radius:14px; overflow:hidden}
+  .vmpage .mrow{display:grid; grid-template-columns:auto minmax(0,1fr) auto auto; gap:2px 12px; align-items:center; padding:11px 14px; border-top:1px solid var(--border)}
+  .vmpage .mrow:first-child{border-top:0}
+  .vmpage .mrow .mdot{width:9px; height:9px; border-radius:999px; background:var(--danger,#A33B2E)}
+  .vmpage .mrow.cb .mdot{background:var(--pill-done-tx,#3A6B3E)}
+  .vmpage .mrow .mwho{font-weight:600; font-size:14.5px; min-width:0; overflow-wrap:anywhere}
+  .vmpage .mrow.cb .mwho{font-weight:500; color:var(--muted)}
+  .vmpage .mrow .mwho small{font-weight:400; color:var(--muted); font-size:12px}
+  .vmpage .mrow .msub{font-size:12px; color:var(--muted); display:flex; gap:10px; flex-wrap:wrap; margin-top:2px}
+  .vmpage .mrow .msub .owe{color:var(--danger,#A33B2E)} .vmpage .mrow .msub .ok{color:var(--pill-done-tx,#3A6B3E)}
+  .vmpage .mrow .msub a{color:inherit}
+  .vmpage .mrow .mwhen{font-size:12.5px; color:var(--muted); white-space:nowrap; text-align:right}
+  .vmpage .mrow .mcall{width:38px; height:38px; border-radius:999px; display:grid; place-items:center; background:var(--ink); color:var(--card); text-decoration:none}
+  .vmpage .mrow .mcall svg{width:18px; height:18px; fill:currentColor}
+</style>
+{% if not missed %}<p class="hint">No missed calls on this line in the last two weeks.</p>{% else %}
+<div class="mlist">
+{% for m in missed %}
+{% set fam = fam_of.get(m.digits or '') %}
+{% set mwho = m.name or (fam and fam_label(fam)) or fmt_phone(m.number) or 'Unknown caller' %}
+<div class="mrow{% if m.called_back_at %} cb{% endif %}">
+  <span class="mdot"></span>
+  <div><div class="mwho" dir="auto">{{ mwho }}{% if m.name and m.number %} <small>{{ fmt_phone(m.number) }}</small>{% endif %}</div>
+    <div class="msub">
+      {% if m.left_vm %}{% if m.vm_id %}<a href="{{ url_for('vm_view', q=q if (q and admin) else None) }}#vm-{{ m.vm_id }}">left voicemail &#8599;</a>{% else %}<span>left voicemail</span>{% endif %}{% else %}<span>no voicemail</span>{% endif %}
+      {% if m.called_back_at %}<span class="ok">&#10003; called back {{ m.called_back_at|stamp }}</span>{% else %}<span class="owe">not called back</span>{% endif %}
+    </div></div>
+  <div class="mwhen">{{ day_label((m.ts or '')[:10]) }}<br>{{ (m.ts or '')[11:16]|fmt12 }}</div>
+  {% if m.number %}<a class="mcall" href="{{ rc_url(m.number) if own_line else 'tel:' ~ m.number }}" aria-label="Call {{ mwho }}"><svg viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg></a>{% else %}<span></span>{% endif %}
+</div>
+{% endfor %}
+</div>
+{% endif %}
+{% elif not rows %}<p class="hint">Nothing here.</p>{% endif %}
 
 {% set ns = namespace(day=None) %}
 {% for r in rows %}
@@ -334,8 +370,9 @@
       <div class="grp">
         {% if r.english or r.yiddish %}<button type="button" class="ib" data-copy="all"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>Copy</button>{% endif %}
         {% if r.stored_name %}<button type="button" class="ib" data-share-btn><svg viewBox="0 0 24 24"><path d="M12 3v13M7 8l5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>Share</button>{% endif %}
-        {% if outbound and r.caller_number %}<button type="button" class="ib" data-sheet="tx-{{ r.id }}"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg>Text</button>
-        <button type="button" class="ib" data-callback><svg viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg>Call</button>{% endif %}
+        {% if outbound and r.caller_number %}<button type="button" class="ib" data-sheet="tx-{{ r.id }}"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg>Text</button>{% endif %}
+        {% if own_line and r.caller_number %}<a class="ib" href="{{ rc_url(r.caller_number) }}" data-rcdial="{{ url_for('vm_dialed', vid=r.id) }}" title="Opens the RingCentral app - your own line" style="text-decoration:none"><svg viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg>Call</a>
+        {% elif outbound and r.caller_number %}<button type="button" class="ib" data-callback><svg viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg>Call</button>{% endif %}
         {% if dh and not r.dh_event_id and r.stored_name %}<button type="button" class="ib" data-sheet="dh-{{ r.id }}"><svg viewBox="0 0 24 24"><path d="M4 5h11a3 3 0 0 1 3 3v11H7a3 3 0 0 1-3-3z"/><path d="M8 9h6M8 13h6"/></svg>Chronicle</button>{% endif %}
         <div class="more"><button type="button" class="ib quiet" data-menu><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/></svg>More</button>
           <div class="menu down">
@@ -400,6 +437,7 @@
 {% if loop.last %}</div>{% endif %}
 {% endfor %}
 </div>
+{% include "_dialpad.html" %}
 {% endblock %}
 
 {% block scripts %}
