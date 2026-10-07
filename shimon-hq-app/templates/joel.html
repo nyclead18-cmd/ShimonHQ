@@ -4,7 +4,7 @@
 <div class="wrap">
 <header class="top noprint">
   <div>
-    <div class="eyebrow">{% if cp %}The {{ cp.initials }} list, on one page{% else %}The whole board, on one page{% endif %}</div>
+    <div class="eyebrow">{% if rev_eyebrow %}{{ rev_eyebrow }}{% elif cp %}The {{ cp.initials }} list, on one page{% else %}The whole board, on one page{% endif %}</div>
     <h1>{{ board_name }}</h1>
   </div>
   <div class="right">
@@ -17,7 +17,7 @@
 <div class="agsheet revsheet">
   <div class="printhead">
     <div>
-      <div class="joel-eyebrow">{% if cp %}{{ cp.first }} Review{% else %}{{ session.get('name') or 'Board' }} Review{% endif %}</div>
+      <div class="joel-eyebrow">{% if rev_title %}{{ rev_title }}{% elif cp %}{{ cp.first }} Review{% else %}{{ session.get('name') or 'Board' }} Review{% endif %}</div>
       <div class="joel-date">{{ today }}</div>
     </div>
     <div class="joel-brand">Pinta Capital Partners</div>
@@ -39,6 +39,7 @@
     <li>
       <div class="si-head">
         <span class="si-title" dir="auto"><a class="plain" href="{{ url_for('task_view', item_id=it.id) }}">{{ it.title }}</a></span>
+        {% if tag_of.get(it.id) %}<span class="si-due">{{ tag_of[it.id]|join(' · ') }}</span>{% endif %}
         {% if it.status == 'waiting' %}<span class="si-due">waiting{% if it.waiting_on %} on {{ it.waiting_on }}{% endif %}</span>{% endif %}
         {% if it.due_date and (it.due_date|string)|length >= 10 %}<span class="si-due">due {{ (it.due_date|string)[5:7]|int }}/{{ (it.due_date|string)[8:10]|int }}</span>{% endif %}
       </div>
@@ -60,6 +61,7 @@
     <li>
       <div class="si-head">
         <span class="si-title" dir="auto"><a class="plain" href="{{ url_for('task_view', item_id=it.id) }}">{{ it.title }}</a></span>
+        {% if tag_of.get(it.id) %}<span class="si-due">{{ tag_of[it.id]|join(' · ') }}</span>{% endif %}
         {% if it.status == 'waiting' %}<span class="si-due">waiting{% if it.waiting_on %} on {{ it.waiting_on }}{% endif %}</span>{% endif %}
         {% if it.due_date and (it.due_date|string)|length >= 10 %}<span class="si-due">due {{ (it.due_date|string)[5:7]|int }}/{{ (it.due_date|string)[8:10]|int }}</span>{% endif %}
       </div>
@@ -76,7 +78,7 @@
   {% endfor %}
 
   {% if not by_sec %}
-  <p class="meta">{% if cp %}Nothing tagged for {{ cp.first }} yet &mdash; tap the {{ cp.initials }} button
+  <p class="meta">{% if rev_empty %}{{ rev_empty }}{% elif cp %}Nothing tagged for {{ cp.first }} yet &mdash; tap the {{ cp.initials }} button
   on a task and it lands on this sheet.{% else %}Nothing open on the board.{% endif %}</p>
   {% endif %}
   {% if done_count %}<div class="sheet-foot">{{ done_count }} finished items are not printed.</div>{% endif %}

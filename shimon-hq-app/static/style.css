@@ -1290,6 +1290,10 @@ li.item{padding-right:34px;}
 .cptag.on{background:#6B4A8A; border-color:#6B4A8A; color:#FFFEFB;}
 .grid.board .cptag{top:20px; font-size:9px; padding:3px 5px;}
 .grid.board li.item.expanded .cptag{top:12px; right:12px; font-size:11px; padding:5px 8px;}
+/* a second person (v191): the next pill stacks under the first */
+.cptag.cp2{top:calc(24px + var(--cpn,1) * 24px);}
+.grid.board .cptag.cp2{top:calc(20px + var(--cpn,1) * 21px);}
+.grid.board li.item.expanded .cptag.cp2{top:12px; right:calc(12px + var(--cpn,1) * 38px);}
 @media print{ .cptag{display:none;} }
 
 /* the open card can be picked up by its title, meta line or stamps and

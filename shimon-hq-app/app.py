@@ -257,7 +257,11 @@ def inject_own_line():
         own = bool(uid) and uid in own_line_uids(db())
     except Exception:
         own = False
-    return {"own_line": own, "rc_url": vm.rc_app_url}
+    try:
+        cps = counterparts(db()) if session.get("uid") else []
+    except Exception:
+        cps = []
+    return {"own_line": own, "rc_url": vm.rc_app_url, "cps": cps}
 
 
 STATUSES = ("open", "waiting", "done")
@@ -1041,6 +1045,10 @@ def counterpart(con, uid=None):
                 break
     if pick is None:
         return None
+    return _cp_dict(pick)
+
+
+def _cp_dict(pick):
     name = (pick["display_name"] or pick["username"] or "").strip()
     words = name.split()
     if len(words) >= 2:
@@ -1050,6 +1058,41 @@ def counterpart(con, uid=None):
     return {"id": pick["id"], "id_s": str(pick["id"]),
             "first": (words[0] if words else name) or "them",
             "initials": ini}
+
+
+def counterparts(con, uid=None):
+    """Everyone a person's initials buttons aim at (v191). settings u<id>:counterparts
+    = "3,1" gives several (Yanky: SH and JL); unset = the one counterpart, as before."""
+    uid = uid if uid is not None else me()
+    ids = [int(x) for x in (uset(con, "counterparts", uid) or "").split(",") if x.strip().isdigit()]
+    out = []
+    if ids:
+        folk = {r["id"]: r for r in people_list(con)}
+        out = [_cp_dict(folk[i]) for i in ids if i in folk and i != uid]
+    if not out:
+        c = counterpart(con, uid)
+        out = [c] if c else []
+    return out
+
+
+def seed_counterparts(con):
+    """Once: Yanky's tasks get two buttons - SH (Shimon) and JL (Joel)."""
+    if _setting(con, "mig:cps191"):
+        return
+    folk = people_list(con)
+    def find(pred):
+        hits = [r for r in folk if pred(r)]
+        return hits[0]["id"] if len(hits) == 1 else None
+    y = find(lambda r: (r["username"] or "").lower() == "yanky")
+    sh = find(lambda r: (r["username"] or "").lower() == "shimon") or \
+        find(lambda r: r["is_admin"] and (r["display_name"] or "").lower().startswith("shimon"))
+    jl = find(lambda r: (r["username"] or "").lower() == "joel") or \
+        find(lambda r: (r["display_name"] or "").lower().startswith("joel"))
+    if not (y and sh and jl):
+        return
+    if not uset(con, "counterparts", y):
+        uset_put(con, "counterparts", "%d,%d" % (sh, jl), uid=y)
+    _set_setting(con, "mig:cps191", "1")
 
 
 VISIBLE_SQL = ("owner_id=? OR visibility='shared'"
@@ -2383,11 +2426,15 @@ def joel_view():
         sec_ids).fetchall() if sec_ids else []
     # the review is the sit-down sheet: only what was tagged by hand for the
     # person across the table. No counterpart on the board - the whole board.
-    cp = counterpart(con)
-    if cp:
-        tagged = {r["item_id"] for r in con.execute(
-            "SELECT item_id FROM list_tags WHERE user_id=?", (cp["id"],))}
-        items = [it for it in items if it["id"] in tagged]
+    cps = counterparts(con)
+    cp = cps[0] if cps else None
+    tag_of = {}
+    if cps:
+        by = {c["id"]: c["initials"] for c in cps}
+        qm = ",".join("?" * len(by))
+        for r in con.execute("SELECT item_id, user_id FROM list_tags WHERE user_id IN (%s)" % qm, list(by)):
+            tag_of.setdefault(r["item_id"], []).append(by[r["user_id"]])
+        items = [it for it in items if it["id"] in tag_of]
     keep = {it["id"] for it in items}
     latest, done_count = {}, sum(1 for it in items if it["status"] == "done")
     for n in con.execute("SELECT item_id, body, created_at FROM item_notes ORDER BY id"):
@@ -2400,8 +2447,15 @@ def joel_view():
     for c in con.execute("SELECT * FROM checks WHERE done=0 ORDER BY pos, id"):
         if c["item_id"] in keep:
             checks_by_item.setdefault(c["item_id"], []).append(c)
+    mine = user_row(con)
+    mine_first = ((mine["first_name"] or (mine["display_name"] or "").split(" ")[0]) if mine else "") or "My"
+    multi = len(cps) > 1
     return render_template("joel.html", sections=sections, by_sec=by_sec,
-                           cp=cp, checks_by_item=checks_by_item,
+                           cp=cp, checks_by_item=checks_by_item, tag_of=tag_of if multi else {},
+                           rev_title=("%s Review" % mine_first) if multi else None,
+                           rev_eyebrow=("The %s list, on one page" % " + ".join(c["initials"] for c in cps)) if multi else None,
+                           rev_empty=("Nothing tagged yet - tap %s on a task and it lands on this sheet."
+                                      % " or ".join(c["initials"] for c in cps)) if multi else None,
                            projects_by_sec=projects_by_sec, latest=latest,
                            done_count=done_count,
                            today=_now_local().strftime("%B %-d, %Y")
@@ -2542,7 +2596,9 @@ def quicktag_item(item_id):
         " WHERE i.id=?", (item_id,)).fetchone()
     if not row or row["owner_id"] != me():
         abort(404)
-    cp = counterpart(con)
+    cps = counterparts(con)
+    want = request.values.get("uid", "")
+    cp = next((c for c in cps if c["id_s"] == want), None) or (cps[0] if cps else None)
     if not cp:
         abort(404)
     cur = con.execute("SELECT 1 FROM list_tags WHERE item_id=? AND user_id=?",
@@ -5685,6 +5741,7 @@ def vm_work(date_from=None, budget=240):
         else:
             try:
                 seed_user_lines(con)
+                seed_counterparts(con)
             except Exception as e:
                 app.logger.warning("seed lines: %s", e)
             vm.sync(con, FILES_DIR, log=app.logger.info, date_from=date_from, transcribe=False)

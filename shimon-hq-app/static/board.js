@@ -514,7 +514,8 @@ document.addEventListener('click', function (ev) {
   var id = b.getAttribute('data-cptag');
   if (!id || b.dataset.busy) { return; }
   b.dataset.busy = '1';
-  fetch('/items/' + id + '/quicktag', {
+  var cu = b.getAttribute('data-cpuid');
+  fetch('/items/' + id + '/quicktag' + (cu ? '?uid=' + encodeURIComponent(cu) : ''), {
     method: 'POST', headers: {'X-Requested-With': 'fetch'}
   }).then(function (r) {
     if (!r.ok) { throw new Error('http ' + r.status); }
