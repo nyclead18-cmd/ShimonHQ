@@ -96,6 +96,11 @@
   .deskpage .passform input[name=note]{grid-column:1/-1}
   .deskpage .passform input, .deskpage .passform select, .deskpage .passform button{font:inherit; font-size:14px; padding:8px 10px; border:1px solid var(--border); border-radius:10px; background:var(--card); color:var(--ink); min-width:0}
   .deskpage .passform button{background:var(--ink); color:var(--card); border-color:var(--ink); grid-column:1/-1}
+  .deskpage .sumcard{margin:0 0 20px}
+  .deskpage .sumcard .sec-head{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+  .deskpage .sumcard .sumbtn{margin-left:auto; font:inherit; font-size:12.5px; font-weight:600; padding:7px 14px; border-radius:999px; border:1px solid var(--ink); background:var(--ink); color:var(--card); cursor:pointer}
+  .deskpage .sumcard .sumbtn[disabled]{opacity:.6}
+  .deskpage .sumtxt{white-space:pre-wrap; font-size:14.5px; line-height:1.6; margin-top:8px; overflow-wrap:anywhere}
   .deskpage .missed{display:flex; flex-direction:column}
   .deskpage .mrow{display:grid; grid-template-columns:auto minmax(0,1fr) auto auto; gap:4px 12px; align-items:center; padding:9px 4px; border-top:1px solid var(--border)}
   .deskpage .mrow:first-child{border-top:0}
@@ -129,6 +134,13 @@
   <a class="stat" href="#lane-handed"><div class="num">{{ handed|length }}</div><div class="lbl">passed to {{ 'you' if who == session.get('uid') else 'them' }}</div></a>
   <a class="stat good" href="#lane-done"><div class="num">{{ done|length }}</div><div class="lbl">finished this week</div></a>
 </div>
+
+<section class="card sumcard" id="summary" style="--sa:#8A671D">
+  <div class="sec-head"><h2><span class="dot"></span>Summary</h2>
+    <span class="counts" data-sum-at>{% if summary.at %}updated {{ summary.at|stamp }}{% else %}not made yet{% endif %}</span>
+    <button type="button" class="sumbtn noprint" data-sum="{{ url_for('desk_summary_now') }}" data-who="{{ who }}">{{ 'Refresh' if summary.text else 'Summarize my open calls' }}</button></div>
+  <div class="sumtxt" dir="auto" data-sum-txt{% if not summary.text %} hidden{% endif %}>{{ summary.text or '' }}</div>
+</section>
 
 <div class="desk2">
 <div>
@@ -323,6 +335,23 @@
       setTimeout(function(){ b.textContent = 'Call again'; b.disabled = false; }, 8000);
     }).catch(function(){ b.textContent = was; b.disabled = false; alert('Could not start the call.'); });
   });
+  // the call sheet: made on demand; refreshed by itself when it is over two hours old
+  var sb = document.querySelector('[data-sum]');
+  function summarize(){
+    if (!sb || sb.disabled) return;
+    sb.disabled = true; var was = sb.textContent; sb.textContent = 'Reading your calls\u2026';
+    var fd = new FormData(); fd.append('who', sb.dataset.who);
+    fetch(sb.dataset.sum, {method:'POST', body: fd, credentials:'same-origin'}).then(function(r){ return r.json(); }).then(function(j){
+      var t = document.querySelector('[data-sum-txt]'); t.textContent = j.text || ''; t.hidden = !j.text;
+      document.querySelector('[data-sum-at]').textContent = 'updated just now';
+      sb.textContent = 'Refresh'; sb.disabled = false;
+    }).catch(function(){ sb.textContent = was; sb.disabled = false; alert('Could not make the summary - try again.'); });
+  }
+  if (sb) {
+    sb.addEventListener('click', summarize);
+    var at = {{ (summary.at or '')|tojson }};
+    if (at && (Date.now() - new Date(at).getTime()) > 2 * 3600 * 1000 && {{ (queue|length) + (missed_open or 0) }} > 0) summarize();
+  }
   // a message linked from a push (#msg-123) opens itself
   if (location.hash && /^#msg-\d+$/.test(location.hash)) {
     var m = document.querySelector(location.hash); if (m) { m.classList.add('open'); var a = m.querySelector('audio[data-src]'); if (a) a.src = a.dataset.src; }

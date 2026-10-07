@@ -221,7 +221,15 @@ def _user_manifest():
 
 
 def brand_url(name):
-    return "/brand/%s" % name
+    """A personal mark puts its folder in the URL (v189): iOS fetches the home-screen icon
+    and the manifest icons without the sign-in cookie, so the path itself must say whose."""
+    ub = user_brand()
+    return ("/brand/%s/%s" % (ub, name)) if ub else ("/brand/%s" % name)
+
+
+def manifest_url():
+    ub = user_brand()
+    return "/manifest.webmanifest" + (("?b=" + ub) if ub else "")
 
 
 def _theme_color():
@@ -237,7 +245,7 @@ THEME_COLOR = _theme_color()
 
 @app.context_processor
 def inject_brand():
-    return {"brand_url": brand_url, "hq_title": hq_title(), "hq_short": hq_short(),
+    return {"brand_url": brand_url, "manifest_url": manifest_url(), "hq_title": hq_title(), "hq_short": hq_short(),
             "theme_color": _user_manifest().get("theme_color") or THEME_COLOR}
 
 @app.context_processor
@@ -5333,9 +5341,26 @@ def share_section(sec_id):
 
 # ---------- pwa ----------
 
+def _named_brand(slug, name):
+    """static/brand/u_<user>/<name> when it exists, else None. Only personal marks."""
+    slug = re.sub(r"[^a-z0-9_.-]", "", (slug or "").lower())
+    if not slug.startswith("u_") or "/" in name or name.startswith("."):
+        return None
+    p = os.path.join(BASE, "static", "brand", slug, name)
+    return p if os.path.exists(p) else None
+
+
+@app.route("/brand/<slug>/<name>")
+def brand_file_named(slug, name):
+    p = _named_brand(slug, name)
+    if not p:
+        abort(404)
+    return send_from_directory(os.path.dirname(p), os.path.basename(p), conditional=True, max_age=86400)
+
+
 @app.route("/manifest.webmanifest")
 def manifest():
-    p = brand_path("manifest.webmanifest")
+    p = _named_brand(request.args.get("b"), "manifest.webmanifest") or brand_path("manifest.webmanifest")
     resp = send_from_directory(os.path.dirname(p), os.path.basename(p),
                                mimetype="application/manifest+json")
     resp.headers["Vary"] = "Cookie"
@@ -5614,6 +5639,20 @@ def reminder_tick():
                 bits.append("%d overdue" % over)
             if bits:
                 send_push("Today", "  ·  ".join(bits), "/calendar", uid=uid)
+
+    # 4. the call sheet, every weekday morning, for people with their own line (v189)
+    if now.weekday() < 5 and "08:30" <= now.strftime("%H:%M") < "10:00":
+        try:
+            for uid in own_line_uids(con):
+                if not _claim(con, "u%d:callsheet:%s" % (uid, today)):
+                    continue
+                d = desk_summary(con, uid)
+                c = d["counts"]
+                if c["open"] or c["missed"]:
+                    send_push("Your calls today", "%d open \u00b7 %d to call back \u00b7 %d missed"
+                              % (c["open"], c["owed"], c["missed"]), "/desk#summary", uid=uid)
+        except Exception as e:
+            app.logger.warning("call sheet push failed: %s", e)
 
     con.execute("DELETE FROM reminders_sent WHERE sent_at < ?",
                 ((now - _td(days=14)).isoformat(timespec="seconds"),))
@@ -7807,8 +7846,9 @@ def desk_view():
     labels = vm.line_labels(con)
     has_line = who in own_line_uids(con)
     missed = missed_for(con, who) if has_line else []
+    summary = stored_summary(con, who)
     return render_template("desk.html", who=who, person=person, folk=folk, qcounts=qcounts,
-                           has_line=has_line, missed=missed,
+                           has_line=has_line, missed=missed, summary=summary,
                            missed_open=sum(1 for m in missed if not m["called_back_at"]),
                            own_line=me() in own_line_uids(con), rc_url=vm.rc_app_url,
                            queue=queue, owed=owed, touches=touches, tasks=tasks, done=done,
@@ -7828,6 +7868,126 @@ def desk_view():
                            sec_kind={}, today_iso=iso, soon_iso=iso, monday=monday,
                            full_name=full_name,
                            pretty=_now_local().strftime("%A, %B %-d"))
+
+
+# ---------- the call sheet: one summary of everything still open (v189) ----------
+
+def desk_open_work(con, uid):
+    """Everything on a person's plate from the phone: messages in their queue not
+    closed, missed calls not called back, the open tasks those messages became."""
+    queue = con.execute(
+        "SELECT v.*, i.status AS istatus, i.title AS ititle FROM voicemails v"
+        " LEFT JOIN vm_handled h ON h.vm_id=v.id AND h.user_id=?"
+        " LEFT JOIN items i ON i.id=v.item_id"
+        " WHERE v.assignee=? AND h.vm_id IS NULL AND v.tstatus NOT IN ('short','empty','skipped')"
+        " AND v.closed_at IS NULL AND COALESCE(i.status,'') != 'done' ORDER BY v.ts DESC LIMIT 120",
+        (uid, uid)).fetchall()
+    ids = [r["id"] for r in queue]
+    touched = {}
+    if ids:
+        qm = ",".join("?" * len(ids))
+        for t in con.execute("SELECT vm_id, kind, at FROM vm_touch WHERE vm_id IN (%s)"
+                             " AND status NOT LIKE 'failed%%' ORDER BY at" % qm, ids):
+            touched[t["vm_id"]] = t
+    steps = {}
+    iids = [r["item_id"] for r in queue if r["item_id"]]
+    if iids:
+        qm = ",".join("?" * len(iids))
+        for c in con.execute("SELECT item_id, body FROM checks WHERE done=0 AND item_id IN (%s) ORDER BY pos" % qm, iids):
+            steps.setdefault(c["item_id"], []).append(c["body"])
+    missed = [m for m in missed_for(con, uid, days=7) if not m["called_back_at"] and not m["vm_id"]]
+    return queue, touched, steps, missed
+
+
+def _age(iso):
+    try:
+        d = _now_local().replace(tzinfo=None) - datetime.fromisoformat((iso or "")[:19])
+    except ValueError:
+        return ""
+    h = int(d.total_seconds() // 3600)
+    return ("%dd" % (h // 24)) if h >= 24 else ("%dh" % h if h else "now")
+
+
+def desk_summary(con, uid):
+    """-> {text, at, counts}. Claude writes the call sheet when there is a key; otherwise
+    a plain list in the same order (oldest unanswered first)."""
+    queue, touched, steps, missed = desk_open_work(con, uid)
+    fam = _fam_label_for(con)
+    lines = []
+    for r in queue:
+        rd = vm.reading(r)
+        who = r["caller_name"] or rd.get("who") or fam(r) or vm.fmt_phone(r["caller_number"]) or "Unknown caller"
+        t = touched.get(r["id"])
+        what = "call" if (r["source"] or "").startswith("call") else "voicemail"
+        lines.append({"who": who, "num": vm.fmt_phone(rd.get("callback") or r["caller_number"]), "what": what,
+                      "age": _age(r["ts"]), "ts": (r["ts"] or "")[:16], "title": r["ititle"] or rd.get("title", ""),
+                      "gist": rd.get("gist", ""), "amount": rd.get("amount", ""), "kind": r["kind"] or "",
+                      "called_back": ("%s %s" % ("texted" if t["kind"] == "sms" else "called", (t["at"] or "")[:16])) if t else "",
+                      "steps_left": steps.get(r["item_id"], [])[:4]})
+    mlines = [{"who": m["name"] or fam({"caller_number": m["number"]}) or vm.fmt_phone(m["number"]) or "Unknown",
+               "num": vm.fmt_phone(m["number"]), "age": _age(m["ts"]), "ts": (m["ts"] or "")[:16]} for m in missed]
+    counts = {"open": len(lines), "owed": sum(1 for l in lines if not l["called_back"]), "missed": len(mlines)}
+    text = ""
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if key and (lines or mlines):
+        person = user_row(con, uid)
+        prompt = (
+            "You write the call sheet for %s, who works the phone for a charity office (almanos/yesomim families "
+            "call in; Yiddish-speaking). Below is everything still open on his desk as JSON: messages "
+            "(voicemails and recorded calls in his queue) and missed calls with no voicemail. Today is %s.\n\n"
+            "Write a short plain-text summary he can work from on his phone. Sections, only if non-empty:\n"
+            "CALL BACK FIRST - not called back yet; most urgent first (problems, money, a family in need, oldest "
+            "waiting). One line each: Name · number · what they need (a few words) · how long waiting.\n"
+            "FOLLOW UP - already called/texted back but the task is still open: Name · what is left.\n"
+            "MISSED, NO MESSAGE - missed calls with no voicemail: Name/number · when.\n"
+            "Start with one line of totals. No markdown symbols, no bold, no preamble, no advice paragraph. "
+            "Use the names as given.\n\nMESSAGES:\n%s\n\nMISSED:\n%s"
+            % ((person["display_name"] if person else "the user"), _now_local().strftime("%A %B %-d, %-I:%M %p"),
+               json.dumps(lines, ensure_ascii=False)[:14000], json.dumps(mlines, ensure_ascii=False)[:3000]))
+        try:
+            j = vm._req("https://api.anthropic.com/v1/messages", method="POST", timeout=50,
+                        data=json.dumps({"model": os.environ.get("HQ_SUMMARY_MODEL", "claude-haiku-4-5"),
+                                         "max_tokens": 1400,
+                                         "messages": [{"role": "user", "content": prompt}]}).encode(),
+                        headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                                 "Content-Type": "application/json"})
+            text = "".join(p.get("text", "") for p in j.get("content", [])).strip()
+        except Exception as e:
+            app.logger.warning("desk summary AI failed: %s", e)
+    if not text:
+        out = ["%d open · %d not called back · %d missed" % (counts["open"], counts["owed"], counts["missed"])]
+        owed = sorted([l for l in lines if not l["called_back"]], key=lambda l: l["ts"])
+        if owed:
+            out += ["", "CALL BACK"] + ["%s · %s · %s · %s" % (l["who"], l["num"], _short(l["gist"] or l["title"], 70), l["age"]) for l in owed]
+        fu = [l for l in lines if l["called_back"]]
+        if fu:
+            out += ["", "FOLLOW UP"] + ["%s · %s" % (l["who"], _short("; ".join(l["steps_left"]) or l["title"], 70)) for l in fu]
+        if mlines:
+            out += ["", "MISSED, NO MESSAGE"] + ["%s · %s ago" % (m["who"] if m["who"] != m["num"] else m["num"], m["age"]) for m in mlines]
+        if not (lines or mlines):
+            out = ["Nothing open. Every message is handled and every missed call called back."]
+        text = "\n".join(out)
+    d = {"text": text, "at": _now_local().replace(tzinfo=None).isoformat(timespec="seconds"), "counts": counts}
+    uset_put(con, "desk_summary", json.dumps(d, ensure_ascii=False), uid=uid)
+    commit_retry(con)
+    return d
+
+
+def stored_summary(con, uid):
+    try:
+        return json.loads(uset(con, "desk_summary", uid) or "{}") or {}
+    except ValueError:
+        return {}
+
+
+@app.route("/desk/summary", methods=["POST"])
+@login_required
+def desk_summary_now():
+    con = db()
+    who = me()
+    if session.get("admin") and (request.form.get("who") or "").isdigit():
+        who = int(request.form["who"])
+    return jsonify(desk_summary(con, who))
 
 
 @app.route("/vm/<int:vid>/text", methods=["POST"])

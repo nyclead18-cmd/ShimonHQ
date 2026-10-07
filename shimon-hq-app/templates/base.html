@@ -11,7 +11,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="{{ hq_short }}">
-<link rel="manifest" href="/manifest.webmanifest?v={{ css_v }}">
+<link rel="manifest" href="{{ manifest_url }}{{ '&' if '?' in manifest_url else '?' }}v={{ css_v }}">
 <link rel="apple-touch-icon" href="{{ brand_url('apple-touch-icon.png') }}?v={{ css_v }}">
 <link rel="icon" href="{{ brand_url('favicon.png') }}?v={{ css_v }}">
 <link rel="preconnect" href="https://fonts.googleapis.com">
