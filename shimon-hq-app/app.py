@@ -7,7 +7,7 @@ import sqlite3
 from datetime import datetime, timezone, timedelta, date
 from functools import wraps
 
-from flask import (Flask, g, render_template, request, redirect,
+from flask import (Flask, has_request_context, g, render_template, request, redirect,
                    url_for, session, jsonify, send_from_directory, abort)
 from markupsafe import Markup, escape
 
@@ -160,6 +160,9 @@ HQ_PASSWORD = os.environ.get("HQ_PASSWORD", "changeme")
 # HQ_BRAND, else the owner's first name in lower case ("Joel Landau" -> joel).
 
 def hq_title():
+    um = _user_manifest()
+    if um.get("name"):
+        return um["name"]
     lt = (os.environ.get("HQ_LOGIN_TITLE") or "").strip()
     if lt:
         return lt
@@ -172,6 +175,9 @@ def hq_title():
 
 def hq_short():
     """Home-screen label: short and unpossessive."""
+    um = _user_manifest()
+    if um.get("short_name"):
+        return um["short_name"]
     nm = (os.environ.get("HQ_NAME") or "Shimon").strip().split()[0]
     return "%s HQ" % nm
 
@@ -180,13 +186,38 @@ BRAND = (os.environ.get("HQ_BRAND") or (os.environ.get("HQ_NAME") or "Shimon").s
 BRAND = re.sub(r"[^a-z0-9_-]", "", BRAND)
 
 
+def user_brand():
+    """A person can carry his own mark inside somebody else's HQ (v187): a folder
+    static/brand/u_<username>/ (logo, icons, manifest). It follows the signed-in person,
+    and a cookie set at sign-in keeps it on the sign-in page and the home-screen icon."""
+    if not has_request_context():
+        return ""
+    for cand in (session.get("user") or "", request.cookies.get("hq_brand") or ""):
+        slug = re.sub(r"[^a-z0-9_.-]", "", (cand or "").lower())
+        if slug and os.path.isdir(os.path.join(BASE, "static", "brand", "u_" + slug)):
+            return "u_" + slug
+    return ""
+
+
 def brand_path(name):
-    """Absolute path of a branded static file, or the house one."""
-    if BRAND:
-        p = os.path.join(BASE, "static", "brand", BRAND, name)
-        if os.path.exists(p):
-            return p
+    """Absolute path of a branded static file: the person's own, else this HQ's, else the house one."""
+    for slug in (user_brand(), BRAND):
+        if slug:
+            p = os.path.join(BASE, "static", "brand", slug, name)
+            if os.path.exists(p):
+                return p
     return os.path.join(BASE, "static", name)
+
+
+def _user_manifest():
+    ub = user_brand()
+    if not ub:
+        return {}
+    try:
+        with open(os.path.join(BASE, "static", "brand", ub, "manifest.webmanifest")) as f:
+            return json.load(f)
+    except Exception:
+        return {}
 
 
 def brand_url(name):
@@ -207,7 +238,7 @@ THEME_COLOR = _theme_color()
 @app.context_processor
 def inject_brand():
     return {"brand_url": brand_url, "hq_title": hq_title(), "hq_short": hq_short(),
-            "theme_color": THEME_COLOR}
+            "theme_color": _user_manifest().get("theme_color") or THEME_COLOR}
 
 @app.context_processor
 def inject_own_line():
@@ -1179,6 +1210,11 @@ def _finish_login(con, row, remember_device=False):
                                                       uset(con, "totp_secret", row["id"])),
                         max_age=30 * 86400, httponly=True, secure=request.is_secure,
                         samesite="Lax")
+    if os.path.isdir(os.path.join(BASE, "static", "brand", "u_" + row["username"])):
+        resp.set_cookie("hq_brand", row["username"], max_age=400 * 86400, secure=request.is_secure,
+                        httponly=True, samesite="Lax")
+    else:
+        resp.delete_cookie("hq_brand")
     return resp
 
 
@@ -5300,8 +5336,10 @@ def share_section(sec_id):
 @app.route("/manifest.webmanifest")
 def manifest():
     p = brand_path("manifest.webmanifest")
-    return send_from_directory(os.path.dirname(p), os.path.basename(p),
+    resp = send_from_directory(os.path.dirname(p), os.path.basename(p),
                                mimetype="application/manifest+json")
+    resp.headers["Vary"] = "Cookie"
+    return resp
 
 
 @app.route("/brand/<path:name>")
@@ -5312,8 +5350,12 @@ def brand_file(name):
     p = brand_path(name)
     if not os.path.exists(p):
         abort(404)
-    return send_from_directory(os.path.dirname(p), os.path.basename(p), conditional=True,
+    resp = send_from_directory(os.path.dirname(p), os.path.basename(p), conditional=True,
                                max_age=86400)
+    resp.headers["Vary"] = "Cookie"          # one URL, a different mark per person
+    resp.cache_control.public = False
+    resp.cache_control.private = True
+    return resp
 
 
 @app.route("/sw.js")
