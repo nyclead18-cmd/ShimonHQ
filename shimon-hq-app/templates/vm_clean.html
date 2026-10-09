@@ -54,6 +54,8 @@
 
 {% include "_vm_modes.html" %}
 
+{% set act = today %}{% include "_vm_today.html" %}
+
 <div class="cbar">
   {% if admin and unassigned %}<a href="{{ url_for('vm_view', mode='all', q='') }}">{{ unassigned }} unassigned &rsaquo;</a>{% endif %}
   <span class="sp"></span>

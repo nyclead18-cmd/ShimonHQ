@@ -3478,7 +3478,8 @@ NOTIFY_KINDS = {"handed": "Someone passes a task to you",
                 "notes": "Someone responds on a shared task",
                 "done": "Someone closes a shared task",
                 "vm": "A new voicemail comes in on the Shefa Yoel line (or Mrs. Mayer's)",
-                "ring": "A call is ringing on your line (who it is, before you pick up)"}
+                "ring": "A call is ringing on your line (who it is, before you pick up)",
+                "eod": "End of day: my calls, who is still owed a call back (admins: the whole team)"}
 
 
 def wants(con, uid, kind):
@@ -6807,6 +6808,10 @@ def _reminder_loop():
             ring_tick()
         except Exception as e:
             app.logger.warning("ring tick failed: %s", e)
+        try:
+            eod_tick()
+        except Exception as e:
+            app.logger.warning("eod tick failed: %s", e)
         _time.sleep(60)
 
 
@@ -7739,7 +7744,8 @@ def vm_clean(con):
                            outbound=(vm.configured() and not vm.mirror_configured()),
                            my_phone=vm.fmt_phone(me_row["phone"]) if me_row and me_row["phone"] else "",
                            fmt_phone=vm.fmt_phone, summary=stored_summary(con, uid), mode="clean",
-                           n_owe=sum(1 for t in threads if t["state"] == "owe"))
+                           n_owe=sum(1 for t in threads if t["state"] == "owe"),
+                           today=_today_card(con, uid))
 
 
 @app.route("/vm/thread", methods=["POST"])
@@ -8708,6 +8714,240 @@ def desk_summary_now():
     if session.get("admin") and (request.form.get("who") or "").isdigit():
         who = int(request.form["who"])
     return jsonify(desk_summary(con, who))
+
+
+# ---------- Today (v195) ----------
+# The top of the Call Center: one person's day in numbers, who is still waiting for a
+# call back, what was finished, a few lines on what the day was about (Claude, from
+# the transcripts), and every call with its one-line gist. /vm/today is the full page,
+# where an admin can pick a person and a day. At the end of the day each person gets
+# a push with their numbers, and the admins get one line per person.
+
+def _my_exts(con, uid):
+    return [e for e, u in line_owners(con).items() if u == uid]
+
+
+def _day_rows(con, uid, d):
+    exts = _my_exts(con, uid)
+    q = "SELECT * FROM voicemails WHERE substr(ts,1,10)=? AND (assignee=?"
+    a = [d, uid]
+    if exts:
+        q += " OR ext IN (%s)" % ",".join("?" * len(exts))
+        a += exts
+    return con.execute(q + ") ORDER BY ts DESC", a).fetchall()
+
+
+def _day_missed(con, uid, d):
+    ensure_missed_schema(con)
+    return con.execute("SELECT * FROM vm_missed WHERE user_id=? AND substr(ts,1,10)=? AND left_vm=0"
+                       " ORDER BY ts DESC", (uid, d)).fetchall()
+
+
+def _fmt_secs(s):
+    s = int(s or 0)
+    h, m = s // 3600, (s % 3600) // 60
+    return ("%dh %02dm" % (h, m)) if h else ("%dm" % m if m else ("%ds" % s if s else "0m"))
+
+
+def day_activity(con, uid, d=None):
+    """-> {date, n:{calls,in,out,missed,vm,talk,finished,owed}, owed:[thread], calls:[...]}"""
+    d = d or _now_local().date().isoformat()
+    today = d == _now_local().date().isoformat()
+    rows = _day_rows(con, uid, d)
+    missed = _day_missed(con, uid, d)
+    fam = _fam_label_for(con)
+    n_in = sum(1 for r in rows if (r["source"] or "") == "call_in")
+    n_out = sum(1 for r in rows if (r["source"] or "") == "call_out")
+    dials = con.execute("SELECT COUNT(*) FROM vm_touch WHERE user_id=? AND kind='call'"
+                        " AND substr(at,1,10)=? AND COALESCE(status,'') NOT LIKE 'failed%'", (uid, d)).fetchone()[0]
+    n_out = max(n_out, dials)
+    n_vm = sum(1 for r in rows if not (r["source"] or "").startswith("call"))
+    talk = sum(int(r["duration"] or 0) for r in rows if (r["source"] or "").startswith("call"))
+    finished = con.execute("SELECT COUNT(*) FROM voicemails WHERE closed_by=? AND substr(closed_at,1,10)=?",
+                           (uid, d)).fetchone()[0]
+    owed = [t for t in clean_threads(con, uid) if t["state"] == "owe"] if today else []
+    calls = []
+    for r in rows:
+        src = r["source"] or ""
+        rd = vm.reading(r)
+        quiet = r["tstatus"] in ("short", "empty", "skipped")
+        calls.append({
+            "ts": (r["ts"] or "")[11:16], "sort": r["ts"] or "", "id": r["id"],
+            "dir": "out" if src == "call_out" else ("in" if src.startswith("call") else "vm"),
+            "who": r["caller_name"] or fam(r) or vm.fmt_phone(r["caller_number"]) or "Unknown caller",
+            "fam": fam(r) if r["caller_name"] else "",
+            "digits": families.digits10(r["caller_number"]) or "",
+            "gist": "" if quiet else (rd.get("gist") or _short(r["english"] or r["rc_text"] or "", 160)),
+            "dur": _fmt_secs(r["duration"]), "done": bool(r["closed_at"]), "quiet": quiet})
+    for m in missed:
+        calls.append({"ts": (m["ts"] or "")[11:16], "sort": m["ts"] or "", "id": None, "dir": "missed",
+                      "who": m["name"] or fam({"caller_number": m["number"]}) or vm.fmt_phone(m["number"]) or "Unknown",
+                      "fam": "", "digits": m["digits"] or "", "gist": "", "dur": "",
+                      "done": bool(m["called_back_at"]), "quiet": False})
+    calls.sort(key=lambda c: c["sort"], reverse=True)
+    return {"date": d, "today": today, "calls": calls, "owed": owed,
+            "n": {"calls": n_in + n_out + len(missed), "in": n_in, "out": n_out, "missed": len(missed),
+                  "vm": n_vm, "talk": _fmt_secs(talk), "talk_s": talk, "finished": finished, "owed": len(owed)}}
+
+
+def _day_fp(act):
+    return "%d:%d:%s" % (len(act["calls"]), act["n"]["owed"],
+                         max((c["sort"] for c in act["calls"]), default=""))
+
+
+def day_summary_cached(con, uid, d):
+    try:
+        j = json.loads(uset(con, "day_summary", uid) or "{}") or {}
+    except ValueError:
+        j = {}
+    return j if j.get("d") == d else {}
+
+
+def day_summary(con, uid, act, force=False):
+    """A few plain lines on what the day was about. Cached per person per day; written
+    again only when the day has moved on (new calls, owed changed)."""
+    fp = _day_fp(act)
+    cur = day_summary_cached(con, uid, act["date"])
+    if cur.get("fp") == fp and cur.get("text") and not force:
+        return cur["text"]
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    talked = [c for c in act["calls"] if c["gist"]]
+    if not key or not talked:
+        return cur.get("text", "")
+    person = user_row(con, uid)
+    name = (person["display_name"] if person else "") or "this person"
+    items = [{"time": c["ts"], "type": c["dir"], "who": c["who"], "family": c["fam"], "said": c["gist"]}
+             for c in sorted(talked, key=lambda c: c["sort"])][:80]
+    owed = [{"who": t["who"], "waiting": t["ago"], "what": t["gist"][:120]} for t in act["owed"][:20]]
+    prompt = (
+        "You write the end-of-day phone summary for %s, who works the phones for a charity office "
+        "(almanos/yesomim families call in; Yiddish-speaking, transcripts translated). Today's numbers: %s. "
+        "Below are today's calls and voicemails with a one-line gist each, and who is still waiting for a call back.\n\n"
+        "Write 3-4 short plain-English lines, no preamble, no bullets, no headings: what the day was mostly about "
+        "(group by topic, name the families for money requests or problems), anything promised or urgent, and who "
+        "still needs a call back first. Keep names exactly as given. Do not invent anything.\n\nCalls:\n%s\n\n"
+        "Still owed a call back:\n%s"
+        % (name, json.dumps({k: act["n"][k] for k in ("calls", "in", "out", "missed", "vm", "talk", "finished", "owed")}),
+           json.dumps(items, ensure_ascii=False), json.dumps(owed, ensure_ascii=False)))
+    body = json.dumps({"model": os.environ.get("HQ_SUMMARY_MODEL", "claude-haiku-4-5"), "max_tokens": 400,
+                       "messages": [{"role": "user", "content": prompt}]}).encode()
+    try:
+        j = vm._req("https://api.anthropic.com/v1/messages", data=body, method="POST", timeout=60,
+                    headers={"x-api-key": key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"})
+        text = "".join(p.get("text", "") for p in j.get("content", [])).strip()
+    except Exception as e:
+        app.logger.warning("day summary for %s failed: %s", uid, e)
+        return cur.get("text", "")
+    if text:
+        uset_put(con, "day_summary", json.dumps({"d": act["date"], "fp": fp, "text": text,
+                                                 "at": _now_local().strftime("%H:%M")}), uid)
+        commit_retry(con)
+    return text
+
+
+def _today_card(con, uid, d=None):
+    act = day_activity(con, uid, d)
+    cur = day_summary_cached(con, uid, act["date"])
+    act["summary"] = cur.get("text", "")
+    act["summary_at"] = cur.get("at", "")
+    act["summary_stale"] = cur.get("fp") != _day_fp(act) and any(c["gist"] for c in act["calls"])
+    return act
+
+
+def team_today(con, d=None):
+    """[{id, name, n}] for everyone who had calls or owes some - the admin rollup."""
+    out = []
+    for f in people_list(con):
+        a = day_activity(con, f["id"], d)
+        if a["n"]["calls"] or a["n"]["vm"] or a["n"]["owed"] or a["n"]["finished"]:
+            out.append({"id": f["id"], "name": f["display_name"] or f["username"], "n": a["n"]})
+    return out
+
+
+@app.route("/vm/today")
+@login_required
+def vm_today():
+    con = db()
+    admin = bool(session.get("admin"))
+    uid = me()
+    if admin and (request.args.get("u") or "").isdigit():
+        uid = int(request.args["u"])
+    d = request.args.get("d") or _now_local().date().isoformat()
+    try:
+        dd = date.fromisoformat(d)
+    except ValueError:
+        dd = _now_local().date()
+    act = _today_card(con, uid, dd.isoformat())
+    person = user_row(con, uid)
+    return render_template("vm_today.html", act=act, uid=uid, admin=admin, folk=people_list(con),
+                           person=person, team=team_today(con, dd.isoformat()) if admin else [],
+                           prev=(dd - timedelta(days=1)).isoformat(),
+                           next=(dd + timedelta(days=1)).isoformat() if dd < _now_local().date() else "")
+
+
+@app.route("/vm/today/summary", methods=["POST"])
+@login_required
+def vm_today_summary():
+    con = db()
+    uid = me()
+    if session.get("admin") and (request.form.get("u") or "").isdigit():
+        uid = int(request.form["u"])
+    act = day_activity(con, uid, request.form.get("d") or None)
+    text = day_summary(con, uid, act, force=request.form.get("force") == "1")
+    return jsonify(text=text, at=_now_local().strftime("%H:%M"))
+
+
+# End of day: Sun-Thu at CALLS_EOD (18:00), Friday at CALLS_EOD_FRI (12:00), none on Shabbos.
+CALLS_EOD = os.environ.get("CALLS_EOD", "18:00")
+CALLS_EOD_FRI = os.environ.get("CALLS_EOD_FRI", "12:00")
+
+
+def eod_tick():
+    now = _now_local()
+    wd = now.weekday()                     # Mon=0 .. Fri=4, Sat=5, Sun=6
+    if wd == 5:
+        return
+    at = CALLS_EOD_FRI if wd == 4 else CALLS_EOD
+    try:
+        hh, mm = (int(x) for x in at.split(":"))
+    except ValueError:
+        return
+    if (now.hour, now.minute) < (hh, mm) or now.hour >= 23:
+        return
+    d = now.date().isoformat()
+    con = sqlite3.connect(DB_PATH)
+    con.row_factory = sqlite3.Row
+    try:
+        if not _claim(con, "eod:" + d):
+            return
+        rollup = []
+        for f in people_list(con):
+            act = day_activity(con, f["id"], d)
+            n = act["n"]
+            if not (n["calls"] or n["vm"] or n["owed"]):
+                continue
+            name = f["display_name"] or f["username"]
+            rollup.append("%s %d calls, %d vm, %d owed" % (name.split()[0], n["calls"], n["vm"], n["owed"]))
+            if not wants(con, f["id"], "eod"):
+                continue
+            text = day_summary(con, f["id"], act)
+            title = "Today: %d call%s \u00b7 %d voicemail%s \u00b7 %d still owed" % (
+                n["calls"], "" if n["calls"] == 1 else "s", n["vm"], "" if n["vm"] == 1 else "s", n["owed"])
+            body = _short(text, 170) if text else "%d in \u00b7 %d out \u00b7 %d missed \u00b7 %d voicemails \u00b7 %s talking" % (
+                n["in"], n["out"], n["missed"], n["vm"], n["talk"])
+            try:
+                send_push(title, body, "/vm/today", uid=f["id"])
+            except Exception as e:
+                app.logger.warning("eod push %s: %s", f["id"], e)
+        if rollup:
+            for a in con.execute("SELECT id FROM users WHERE is_admin=1").fetchall():
+                if wants(con, a[0], "eod"):
+                    try:
+                        send_push("Team today", " \u00b7 ".join(rollup)[:200], "/vm/today", uid=a[0])
+                    except Exception as e:
+                        app.logger.warning("eod team push: %s", e)
+    finally:
+        con.close()
 
 
 @app.route("/vm/<int:vid>/text", methods=["POST"])

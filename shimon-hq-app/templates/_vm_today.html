@@ -1,0 +1,52 @@
+{# v195: today's numbers at the top of the Call Center. act = _today_card(). #}
+<style>
+  .tday{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:12px 14px;margin:0 0 16px;box-shadow:var(--shadow)}
+  .tday .hd{display:flex;align-items:baseline;gap:8px;margin-bottom:8px}
+  .tday .hd b{font-size:15px}
+  .tday .hd span{color:var(--muted);font-size:12.5px}
+  .tday .hd a{margin-left:auto;font-size:13px;font-weight:600;color:var(--accent);text-decoration:none}
+  .tday .nums{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}
+  .tday .num{background:var(--row,rgba(0,0,0,.03));border-radius:10px;padding:7px 4px;text-align:center;min-width:0}
+  .tday .num b{display:block;font-size:19px;line-height:1.15}
+  .tday .num small{display:block;font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tday .num.owe b{color:var(--danger,#A33B2E)}
+  .tday .split{font-size:12px;color:var(--muted);margin-top:6px}
+  .tday .sum{font-size:14px;line-height:1.5;margin-top:10px;white-space:pre-wrap}
+  .tday .sum.wait{color:var(--muted);font-style:italic}
+  .tday .owed{font-size:13px;margin-top:8px;line-height:1.5}
+  .tday .owed b{color:var(--danger,#A33B2E)}
+  .tday .owed a{color:var(--ink);text-decoration:none}
+  @media (max-width:420px){ .tday .num b{font-size:17px} }
+</style>
+<section class="tday" data-u="{{ act_uid or '' }}" data-d="{{ act.date }}">
+  <div class="hd"><b>Today</b>{% if act.summary_at %}<span>summary {{ act.summary_at }}</span>{% endif %}
+    {% if not full %}<a href="{{ url_for('vm_today') }}">Full day &rsaquo;</a>{% endif %}</div>
+  <div class="nums">
+    <div class="num"><b>{{ act.n.calls }}</b><small>calls</small></div>
+    <div class="num"><b>{{ act.n.vm }}</b><small>voicemails</small></div>
+    <div class="num"><b>{{ act.n.talk }}</b><small>talking</small></div>
+    <div class="num"><b>{{ act.n.finished }}</b><small>done</small></div>
+    <div class="num owe"><b>{{ act.n.owed }}</b><small>owed</small></div>
+  </div>
+  <div class="split">{{ act.n['in'] }} in · {{ act.n.out }} out · {{ act.n.missed }} missed</div>
+  {% if act.summary or act.summary_stale %}
+  <div class="sum {% if act.summary_stale and not act.summary %}wait{% endif %}" id="tdaysum" {% if act.summary_stale %}data-stale="1"{% endif %} dir="auto">{{ act.summary or 'Writing the day summary…' }}</div>
+  {% endif %}
+  {% if act.owed %}
+  <div class="owed"><b>Didn't call back:</b>
+    {% for t in act.owed[:5] %}<a href="{% if t.digits %}{{ url_for('vm_view', num=t.digits) }}{% else %}#{% endif %}" dir="auto">{{ t.who }} <small class="caveat">{{ t.ago|replace(' ago','') }}</small></a>{% if not loop.last %}, {% endif %}{% endfor %}{% if act.owed|length > 5 %} +{{ act.owed|length - 5 }} more{% endif %}
+  </div>
+  {% endif %}
+</section>
+<script>
+(function(){
+  var s=document.getElementById('tdaysum'); if(!s||!s.dataset.stale) return;
+  var box=s.closest('.tday'), fd=new FormData();
+  fd.append('d', box.dataset.d); if(box.dataset.u) fd.append('u', box.dataset.u);
+  fetch('{{ url_for("vm_today_summary") }}',{method:'POST',body:fd,credentials:'same-origin'})
+    .then(function(r){return r.json()}).then(function(j){
+      if(j.text){ s.textContent=j.text; s.classList.remove('wait'); }
+      else if(s.classList.contains('wait')){ s.remove(); }
+    }).catch(function(){});
+})();
+</script>

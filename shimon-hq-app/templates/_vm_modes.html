@@ -11,3 +11,4 @@
   <a class="{% if mode == 'mine' %}on{% endif %}" href="{{ url_for('vm_view', mode='mine') }}">Mine<small>my calls · delegate</small></a>
   {% if admin %}<a class="{% if mode == 'all' %}on{% endif %}" href="{{ url_for('vm_view', mode='all') }}">Everyone<small>admin · all calls</small></a>{% endif %}
 </nav>
+{% if admin and mode == 'all' %}<p style="margin:-8px 0 14px;font-size:13px"><a href="{{ url_for('vm_today') }}" style="color:var(--accent);font-weight:600;text-decoration:none">Team today &rsaquo;</a> <span class="caveat">calls, owed and a summary per person</span></p>{% endif %}

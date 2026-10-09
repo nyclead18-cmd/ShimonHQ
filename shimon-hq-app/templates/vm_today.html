@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Today · Call Center · {{ hq_title }}{% endblock %}
+{% block body %}
+{# v195: one person's day on the phone. Admins pick a person and a day. #}
+<div class="wrap vmpage vmtoday">
+<header class="top">
+  <div>
+    <div class="eyebrow"><a href="{{ url_for('vm_view') }}" style="color:inherit;text-decoration:none">&lsaquo; Call Center</a></div>
+    <h1>{% if act.today %}Today{% else %}{{ act.date }}{% endif %}{% if admin and person %} · {{ person.display_name }}{% endif %}</h1>
+  </div>
+  <div class="right">
+    {% set nav_on = 'vm_view' %}{% include "_nav.html" %}
+    <a class="logout" href="{{ url_for('account_view') }}">{{ session.get('name') or 'Account' }}</a>
+  </div>
+</header>
+<style>
+  .vmtoday .bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 14px}
+  .vmtoday .bar a,.vmtoday .bar select,.vmtoday .bar button{font:inherit;font-size:13.5px;padding:6px 12px;border-radius:999px;border:1px solid var(--border);background:var(--card);color:var(--ink);text-decoration:none;cursor:pointer}
+  .vmtoday .bar .sp{flex:1}
+  .vmtoday h2{font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;margin:18px 4px 6px}
+  .vmtoday .list{background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow)}
+  .vmtoday .c{display:grid;grid-template-columns:44px 22px minmax(0,1fr) auto;gap:2px 8px;padding:10px 12px;border-top:1px solid var(--border);align-items:start;color:var(--ink);text-decoration:none}
+  .vmtoday .c:first-child{border-top:0}
+  .vmtoday .c .tm{font-size:12.5px;color:var(--muted);padding-top:2px;font-variant-numeric:tabular-nums}
+  .vmtoday .c .ic{font-size:14px;text-align:center;padding-top:1px}
+  .vmtoday .c .nm{font-weight:600;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .vmtoday .c .nm small{font-weight:400;color:var(--muted);font-size:12.5px}
+  .vmtoday .c .gi{grid-column:3/5;color:var(--muted);font-size:13.5px;line-height:1.4}
+  .vmtoday .c .du{font-size:12px;color:var(--muted);text-align:right;padding-top:2px}
+  .vmtoday .c.quiet .nm{font-weight:400;color:var(--muted)}
+  .vmtoday .c.missed .ic{color:var(--danger,#A33B2E)}
+  .vmtoday .ok{color:var(--pill-done-tx,#3A6B3E)}
+  .vmtoday .team td,.vmtoday .team th{padding:8px 10px;border-top:1px solid var(--border);font-size:14px;text-align:right}
+  .vmtoday .team th{font-size:11.5px;color:var(--muted);font-weight:600;text-transform:uppercase;border-top:0}
+  .vmtoday .team td:first-child,.vmtoday .team th:first-child{text-align:left}
+  .vmtoday .team a{color:var(--ink);font-weight:600;text-decoration:none}
+  .vmtoday .team .owe{color:var(--danger,#A33B2E);font-weight:600}
+  .vmtoday .empty{padding:24px;text-align:center;color:var(--muted)}
+</style>
+
+<div class="bar">
+  <a href="{{ url_for('vm_today', u=uid if admin else None, d=prev) }}">&lsaquo; {{ prev[5:] }}</a>
+  {% if next %}<a href="{{ url_for('vm_today', u=uid if admin else None, d=next) }}">{{ next[5:] }} &rsaquo;</a>{% endif %}
+  {% if not act.today %}<a href="{{ url_for('vm_today', u=uid if admin else None) }}">Today</a>{% endif %}
+  <span class="sp"></span>
+  {% if admin %}
+  <select onchange="location.href='{{ url_for('vm_today') }}?d={{ act.date }}&u='+this.value">
+    {% for f in folk %}<option value="{{ f.id }}" {% if f.id == uid %}selected{% endif %}>{{ f.display_name or f.username }}</option>{% endfor %}
+  </select>
+  {% endif %}
+  <button type="button" id="resum">Rewrite summary</button>
+</div>
+
+{% set full = True %}{% set act_uid = uid if admin else None %}{% include "_vm_today.html" %}
+
+{% if admin and team %}
+<h2>Team · {{ 'today' if act.today else act.date }}</h2>
+<div class="list"><table class="team" style="width:100%;border-collapse:collapse">
+  <tr><th>Who</th><th>Calls</th><th>VM</th><th>Missed</th><th>Talk</th><th>Done</th><th>Owed</th></tr>
+  {% for p in team %}
+  <tr><td><a href="{{ url_for('vm_today', u=p.id, d=act.date) }}">{{ p.name }}</a></td><td>{{ p.n.calls }}</td><td>{{ p.n.vm }}</td>
+      <td>{{ p.n.missed }}</td><td>{{ p.n.talk }}</td><td>{{ p.n.finished }}</td>
+      <td class="{{ 'owe' if p.n.owed else '' }}">{{ p.n.owed if act.today else '–' }}</td></tr>
+  {% endfor %}
+</table></div>
+{% endif %}
+
+{% if act.owed %}
+<h2>Didn't call back · {{ act.owed|length }}</h2>
+<div class="list">
+  {% for t in act.owed %}
+  <a class="c" href="{% if t.digits %}{{ url_for('vm_view', num=t.digits) }}{% else %}{{ url_for('vm_view') }}{% endif %}">
+    <span class="tm">{{ t.ago|replace(' ago','') }}</span><span class="ic" style="color:var(--danger,#A33B2E)">&#9679;</span>
+    <span class="nm" dir="auto">{{ t.who }}{% if t.fam %} <small>{{ t.fam }}</small>{% endif %}</span><span class="du">{{ t.what }}</span>
+    {% if t.gist %}<span class="gi" dir="auto">{{ t.gist }}</span>{% endif %}
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+
+<h2>Every call · {{ act.calls|length }}</h2>
+<div class="list">
+  {% for c in act.calls %}
+  <a class="c {{ c.dir }} {{ 'quiet' if c.quiet else '' }}" href="{% if c.digits %}{{ url_for('vm_view', num=c.digits) }}{% elif c.id %}{{ url_for('vm_view', mode='mine') }}#vm-{{ c.id }}{% else %}#{% endif %}">
+    <span class="tm">{{ c.ts }}</span>
+    <span class="ic" title="{{ c.dir }}">{% if c.dir == 'in' %}&#8601;{% elif c.dir == 'out' %}&#8599;{% elif c.dir == 'missed' %}&#10005;{% else %}&#9993;{% endif %}</span>
+    <span class="nm" dir="auto">{{ c.who }}{% if c.fam %} <small>{{ c.fam }}</small>{% endif %}</span>
+    <span class="du">{{ c.dur }}{% if c.done %} <span class="ok">&#10003;</span>{% endif %}</span>
+    {% if c.gist %}<span class="gi" dir="auto">{{ c.gist }}</span>{% elif c.quiet %}<span class="gi">no summary (short or blank)</span>{% endif %}
+  </a>
+  {% else %}
+  <div class="empty">No calls {{ 'yet today' if act.today else 'this day' }}.</div>
+  {% endfor %}
+</div>
+</div>
+<script>
+document.getElementById('resum').addEventListener('click', function(){
+  var b=this, s=document.getElementById('tdaysum'), fd=new FormData();
+  fd.append('d','{{ act.date }}'); fd.append('force','1'); {% if admin %}fd.append('u','{{ uid }}');{% endif %}
+  b.disabled=true; b.textContent='Writing…';
+  fetch('{{ url_for("vm_today_summary") }}',{method:'POST',body:fd,credentials:'same-origin'}).then(function(r){return r.json()})
+    .then(function(j){ if(j.text){ if(!s){ location.reload(); return; } s.textContent=j.text; s.classList.remove('wait'); }
+      b.disabled=false; b.textContent=j.text?'Rewrite summary':'Nothing to summarize'; })
+    .catch(function(){ b.disabled=false; b.textContent='Rewrite summary'; });
+});
+</script>
+{% endblock %}
