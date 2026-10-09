@@ -1927,7 +1927,15 @@ def today_view():
     for c in con.execute("SELECT * FROM checks ORDER BY pos, id"):
         if c["item_id"] in tkeep:
             checks_by_item.setdefault(c["item_id"], []).append(c)
-    return render_template("today.html", rows=rows, on_me=on_me, waiting=waiting,
+    # v196: the calls line - one number from the Call Center, so Today is the one front door
+    calls = None
+    try:
+        a = day_activity(con, me())
+        if a["n"]["owed"] or a["n"]["calls"] or a["n"]["vm"]:
+            calls = a["n"]
+    except Exception as e:
+        app.logger.warning("today calls line: %s", e)
+    return render_template("today.html", rows=rows, on_me=on_me, waiting=waiting, calls=calls,
                            overdue=overdue, due_now=due_now, chosen=chosen,
                            done_today=done_today, inbox_flags=inbox_flags,
                            daystrip=daystrip,
@@ -6809,7 +6817,9 @@ def _reminder_loop():
         except Exception as e:
             app.logger.warning("ring tick failed: %s", e)
         try:
-            eod_tick()
+            fn = globals().get("eod_tick")     # defined further down; the loop can start first
+            if fn:
+                fn()
         except Exception as e:
             app.logger.warning("eod tick failed: %s", e)
         _time.sleep(60)

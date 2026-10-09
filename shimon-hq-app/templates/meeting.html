@@ -11,7 +11,7 @@
     </div>
   </div>
   <div class="right">
-    {% set nav_on = '' %}{% include "_nav.html" %}
+    {% set nav_on = 'meeting_view' %}{% include "_nav.html" %}
     <a class="logout" href="{{ url_for('account_view') }}">{{ session.get('name') or 'Account' }}</a>
     <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
   </div>

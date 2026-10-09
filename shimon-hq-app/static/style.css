@@ -1522,3 +1522,11 @@ body.lean .calmtog{display:none;}
 .grid.board li.item, .deskpage .msg, .vmpage .vm{transition:background-color .18s ease, box-shadow .18s ease;}
 .tabs .tab, .fapill, .bchip, .ghostbtn, .pill{transition:background-color .15s ease, color .15s ease, border-color .15s ease;}
 @media (prefers-reduced-motion: reduce){ .grid.board li.item, .deskpage .msg, .vmpage .vm, .tabs .tab, .fapill, .bchip, .ghostbtn, .pill{transition:none;} }
+
+/* ---------- v196: four tabs, the rest as a switch underneath ---------- */
+header.top .right{flex-wrap:wrap;}
+.subtabs{order:10; flex-basis:100%; display:flex; justify-content:flex-end; gap:4px; flex-wrap:wrap; margin-top:2px;}
+.subtabs .stab{font-size:12.5px; font-weight:600; color:var(--muted); text-decoration:none; padding:4px 11px; border-radius:999px; border:1px solid transparent;}
+.subtabs .stab.on{color:var(--ink); border-color:var(--border); background:var(--card);}
+@media (max-width:640px){ .subtabs{justify-content:flex-start;} .tabs{flex:1 1 auto; display:flex;} .tabs .tab{flex:1; text-align:center; padding:8px 6px;} }
+body.lean .subtabs{display:none;}

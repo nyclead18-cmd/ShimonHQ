@@ -1,15 +1,21 @@
-{# The one nav. Every page sets nav_on to its endpoint name; a tab with nothing behind it is not shown. #}
+{# v196: four tabs. Each groups the views that used to be tabs of their own; the
+   group's views show as a small switch under the tabs. Every page sets nav_on. #}
+{% set g_today = ('today_view', 'briefing_view', 'calendar_view', 'pulse_view') %}
+{% set g_board = ('board', 'os_view', 'pipeline_view', 'joel_view', 'archive_view') %}
+{% set g_people = ('people_view', 'list_view', 'agenda_view', 'meeting_view') %}
+{% set g_calls = ('vm_view', 'desk_view') %}
 <nav class="tabs">
-  <a class="tab{% if nav_on == 'os_view' %} on{% endif %}" href="{{ url_for('os_view') }}">OS</a>
-  <a class="tab{% if nav_on == 'today_view' %} on{% endif %}" href="{{ url_for('today_view') }}">Today</a>
-  <a class="tab{% if nav_on == 'board' %} on{% endif %}" href="{{ url_for('board') }}">Board</a>
-  {% if has_pipe %}<a class="tab{% if nav_on == 'pipeline_view' %} on{% endif %}" href="{{ url_for('pipeline_view') }}">Pipeline</a>{% endif %}
-  <a class="tab{% if nav_on == 'briefing_view' %} on{% endif %}" href="{{ url_for('briefing_view') }}">Brief{% if brief_unread %} <span class="badge">{{ brief_unread }}</span>{% endif %}</a>
-  {% if has_cal %}<a class="tab{% if nav_on == 'calendar_view' %} on{% endif %}" href="{{ url_for('calendar_view') }}">Calendar</a>{% endif %}
-  <a class="tab{% if nav_on == 'list_view' %} on{% endif %}" href="{{ url_for('list_view') }}">List</a>
-  <a class="tab{% if nav_on == 'people_view' %} on{% endif %}" href="{{ url_for('people_view') }}">People</a>
-  <a class="tab{% if nav_on in ('vm_view', 'desk_view') %} on{% endif %}" href="{{ url_for('vm_view') }}">Call Center</a>
+  <a class="tab{% if nav_on in g_today %} on{% endif %}" href="{{ url_for('today_view') }}">Today{% if brief_unread %} <span class="badge">{{ brief_unread }}</span>{% endif %}</a>
+  <a class="tab{% if nav_on in g_board %} on{% endif %}" href="{{ url_for('board') }}">Board</a>
+  <a class="tab{% if nav_on in g_people %} on{% endif %}" href="{{ url_for('people_view') }}">People</a>
+  <a class="tab{% if nav_on in g_calls %} on{% endif %}" href="{{ url_for('vm_view') }}">Calls</a>
   {% if nav_on == 'families_view' %}<a class="tab on" href="{{ url_for('families_view') }}">Families</a>{% endif %}
-  <a class="tab{% if nav_on == 'joel_view' %} on{% endif %}" href="{{ url_for('joel_view') }}">Review</a>
-  <a class="tab{% if nav_on == 'pulse_view' %} on{% endif %}" href="{{ url_for('pulse_view') }}">Pulse</a>
 </nav>
+{% macro sub(ep, label, extra=None) %}<a class="stab{% if nav_on == ep %} on{% endif %}" href="{{ url_for(ep, **(extra or {})) }}">{{ label }}</a>{% endmacro %}
+{% if nav_on in g_today %}
+<nav class="subtabs">{{ sub('today_view', 'Today') }}{{ sub('briefing_view', 'Brief' ~ (' · ' ~ brief_unread if brief_unread else '')) }}{% if has_cal %}{{ sub('calendar_view', 'Calendar') }}{% endif %}{{ sub('pulse_view', 'Week') }}</nav>
+{% elif nav_on in g_board %}
+<nav class="subtabs">{{ sub('os_view', 'Focus') }}{{ sub('board', 'Sections') }}{% if has_pipe %}{{ sub('pipeline_view', 'Pipeline') }}{% endif %}{{ sub('joel_view', 'Print') }}{{ sub('archive_view', 'Archive') }}</nav>
+{% elif nav_on in g_people %}
+<nav class="subtabs">{{ sub('people_view', 'Waiting on') }}{{ sub('list_view', 'Shared list') }}{% if nav_on in ('agenda_view', 'meeting_view') %}<a class="stab on" href="#">{{ 'Meeting' if nav_on == 'meeting_view' else 'Agenda' }}</a>{% endif %}</nav>
+{% endif %}

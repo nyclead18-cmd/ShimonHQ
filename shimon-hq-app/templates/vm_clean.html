@@ -59,10 +59,8 @@
 <div class="cbar">
   {% if admin and unassigned %}<a href="{{ url_for('vm_view', mode='all', q='') }}">{{ unassigned }} unassigned &rsaquo;</a>{% endif %}
   <span class="sp"></span>
-  <button type="button" class="b" id="sheetbtn">Call sheet</button>
   <a class="b" href="{{ url_for('vm_view', mode='clean', show='done') }}">&#10003; Done</a>
 </div>
-<div class="sheetbox" id="sheetbox">{{ summary.text or '' }}</div>
 
 {% macro row(t) %}
 <div class="t {{ t.state }}" data-ids="{{ t.ids|join(',') }}" data-missed="{{ t.missed|join(',') }}" data-vid="{{ t.latest_id or '' }}" data-who="{{ t.who }}">
@@ -163,14 +161,6 @@
     if (!e.target.closest('.menu')) closeMenus();
   });
 
-  var sb = document.getElementById('sheetbtn'), box = document.getElementById('sheetbox');
-  sb.addEventListener('click', function(){
-    if (box.classList.contains('on') && box.textContent.trim()) { box.classList.remove('on'); return; }
-    box.classList.add('on'); if (!box.textContent.trim()) box.textContent = 'Writing the call sheet\u2026';
-    sb.disabled = true;
-    post(SUM_URL, {}).then(function(x){ sb.disabled = false; box.textContent = (x.j && x.j.text) || 'Could not write it.'; })
-      .catch(function(){ sb.disabled = false; box.textContent = 'Could not write it \u2014 try again.'; });
-  });
 })();
 </script>
 {% endblock %}

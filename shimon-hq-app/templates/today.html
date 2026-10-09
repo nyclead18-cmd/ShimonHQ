@@ -35,6 +35,7 @@
   <a class="stat" href="#lane-picked"><div class="num">{{ chosen|length }}</div><div class="lbl">picked for today</div></a>
   <a class="stat" href="#lane-waiting"><div class="num">{{ waiting|length }}</div><div class="lbl">waiting on others</div></a>
   <a class="stat" href="{{ url_for('pulse_view') }}"><div class="num">{{ done_today }}</div><div class="lbl">finished today</div></a>
+  {% if calls %}<a class="stat{% if calls.owed %} alarm{% endif %}" href="{{ url_for('vm_view') }}"><div class="num">{{ calls.owed }}</div><div class="lbl">calls owed</div></a>{% endif %}
   {% if inbox_flags %}<a class="stat" href="#lane-inbox"><div class="num">{{ inbox_flags|length }}</div><div class="lbl">from your inbox</div></a>{% endif %}
   {% if cp and with_cp %}<a class="stat" href="#lane-cp"><div class="num">{{ with_cp|length }}</div><div class="lbl">with {{ cp.first }}</div></a>{% endif %}
 </div>
@@ -95,7 +96,7 @@ lands here &mdash; it stays where it lives, so there is only ever one copy of it
     </li>
     {% endfor %}
   </ul>
-  <p class="caveat">Pulled from your email by the morning sweep &mdash; the full set is on the Brief tab.</p>
+  <p class="caveat">Pulled from your email by the morning sweep &mdash; the full set is under <a href="{{ url_for('briefing_view') }}">Brief</a>.</p>
 </section>
 {% endif %}
 {% if cp and with_cp %}

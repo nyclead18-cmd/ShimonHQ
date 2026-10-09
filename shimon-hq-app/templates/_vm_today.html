@@ -22,7 +22,7 @@
   @media (max-width:420px){ .tday .num b{font-size:17px} }
 </style>
 <section class="tday" data-u="{{ act_uid or '' }}" data-d="{{ act.date }}">
-  <div class="hd"><b>Today</b>{% if act.summary_at %}<span>summary {{ act.summary_at }}</span>{% endif %}
+  <div class="hd"><b>Today's calls</b>{% if act.summary_at %}<span>summary {{ act.summary_at }}</span>{% endif %}
     {% if not full %}<a href="{{ url_for('vm_today') }}">Full day &rsaquo;</a>{% endif %}</div>
   {% set _u = act_uid or None %}{% set _f = f if full else '' %}
   <div class="nums">

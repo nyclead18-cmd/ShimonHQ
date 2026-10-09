@@ -226,7 +226,6 @@
   <div class="more"><button type="button" class="b quiet" data-menu>⋯</button>
     <div class="menu" style="top:calc(100% + 6px);bottom:auto">
       <a href="{{ url_for('families_view') }}">Families</a>
-      <a href="{{ url_for('desk_view', full=1) }}">Tasks from calls (old Desk)</a>
       <button type="button" onclick="document.getElementById('vmup').showModal()">Add a recording</button>
       <a href="{{ url_for('vm_view', show='short', src=src if src != 'all' else None) }}">Short / empty ({{ counts.short }})</a>
       <form method="post" action="{{ url_for('api_vm_sync', back=1) }}"><button type="submit">Check the lines now</button></form>
