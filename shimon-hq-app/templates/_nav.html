@@ -16,6 +16,4 @@
 <nav class="subtabs">{{ sub('today_view', 'Today') }}{{ sub('briefing_view', 'Brief' ~ (' · ' ~ brief_unread if brief_unread else '')) }}{% if has_cal %}{{ sub('calendar_view', 'Calendar') }}{% endif %}{{ sub('pulse_view', 'Week') }}</nav>
 {% elif nav_on in g_board %}
 <nav class="subtabs">{{ sub('os_view', 'Focus') }}{{ sub('board', 'Sections') }}{% if has_pipe %}{{ sub('pipeline_view', 'Pipeline') }}{% endif %}{{ sub('joel_view', 'Print') }}{{ sub('archive_view', 'Archive') }}</nav>
-{% elif nav_on in g_people %}
-<nav class="subtabs">{{ sub('people_view', 'Waiting on') }}{{ sub('list_view', 'Shared list') }}{% if nav_on in ('agenda_view', 'meeting_view') %}<a class="stab on" href="#">{{ 'Meeting' if nav_on == 'meeting_view' else 'Agenda' }}</a>{% endif %}</nav>
 {% endif %}

@@ -1,53 +1,54 @@
 {% extends "base.html" %}
-{% block title %}People · Pinta HQ{% endblock %}
+{% block title %}People · HQ{% endblock %}
 {% block body %}
-<div class="wrap wide">
+{# v198: one row per person; tap for their page (waiting on them, decisions, agenda, shared list, meeting). #}
+<div class="wrap">
 <header class="top">
   <div>
-    <div class="eyebrow">Who owes you what</div>
-    <h1>{{ board_name }}</h1>
+    <div class="eyebrow">{{ people|length }} people</div>
+    <h1>People</h1>
   </div>
   <div class="right">
     {% set nav_on = 'people_view' %}{% include "_nav.html" %}
-    <button type="button" class="notifbtn" id="notifbtn" title="Reminders on this device">&#9200;</button>
     <a class="logout" href="{{ url_for('account_view') }}">{{ session.get('name') or 'Account' }}</a>
     <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
   </div>
 </header>
-
-<p class="pageintro">Everything you're waiting on, grouped by person &mdash; open this before you call them.</p>
-
-<div class="grid">
-{% set palette = ['#B8892E', '#1F3A5F', '#3A6B3E', '#C24E2A', '#6B4A8A', '#2A6B6B'] %}
-{% for who, its in people %}
-<section class="card" style="--sa: {{ palette[loop.index0 % 6] }}">
-  <div class="sec-head">
-    <h2><span class="dot"></span><span dir="auto">{{ who }}</span></h2>
-    <span class="counts">{{ its | length }} &middot;
-      <a class="linky" href="{{ url_for('agenda_view', who=who) }}">agenda &#8599;</a></span>
-  </div>
-  <ul class="items">
-    {% for it in its %}
-    <li class="item {{ it.status }}">
-      <span class="pill {{ it.status }}">{{ 'Open' if it.status == 'open' else 'Waiting' }}</span>
-      <div class="body">
-        <div class="t" dir="auto"><a class="plain" href="{{ url_for('board', _anchor='item-' ~ it.id) }}">{{ it.title }}</a>
-          {% if it.note %} <span class="n" dir="auto">&mdash; {{ it.note }}</span>{% endif %}</div>
-        <div class="metaline">
-          {% if it.due_date %}<span class="due{% if it.due_date < today_iso %} over{% endif %}">due {{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }}</span>{% endif %}
-          <span class="w">{{ it.sec_title }}</span>
-        </div>
-      </div>
-    </li>
-    {% endfor %}
-  </ul>
-</section>
-{% endfor %}
+<style>
+  .pplist{background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);max-width:760px}
+  .pp{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 12px;padding:12px 14px;border-top:1px solid var(--border);color:var(--ink);text-decoration:none;align-items:center}
+  .pp:first-child{border-top:0}
+  .pp:active{opacity:.6}
+  .pp .nm{font-size:16px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pp .bits{grid-column:1/2;display:flex;gap:6px 10px;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}
+  .pp .bits .dec{color:#8C6BB1;font-weight:600}
+  .pp .bits .late{color:var(--danger,#A33B2E);font-weight:600}
+  .pp .nx{grid-row:1/3;grid-column:2;font-size:12px;color:var(--muted);text-align:right;line-height:1.3}
+  .pp .nx b{display:block;color:var(--ink);font-size:13px}
+  .ppfind{width:100%;max-width:760px;box-sizing:border-box;font:inherit;font-size:16px;padding:9px 12px;border:1px solid var(--border);border-radius:12px;background:var(--card);color:var(--ink);margin:0 0 12px}
+</style>
+<input class="ppfind" id="ppfind" type="search" placeholder="Find a person…" autocomplete="off">
+<div class="pplist" id="pplist">
+  {% for p in people %}
+  <a class="pp" href="{{ url_for('meeting_view', who=p.key) }}" data-k="{{ p.key }} {{ p.label|lower }}">
+    <span class="nm" dir="auto">{{ p.label }}</span>
+    <span class="nx">{% if p.next %}<b>{{ p.next[5:7]|int }}/{{ p.next[8:10]|int }}</b>next sit-down{% elif p.last %}last {{ p.last[5:7]|int }}/{{ p.last[8:10]|int }}{% endif %}</span>
+    <span class="bits">
+      {% if p.decide %}<span class="dec">{{ p.decide }} decision{{ '' if p.decide == 1 else 's' }}</span>{% endif %}
+      {% if p.waiting %}<span>{{ p.waiting }} waiting on them</span>{% endif %}
+      {% if p.late %}<span class="late">{{ p.late }} late</span>{% endif %}
+      {% if p.agenda %}<span>{{ p.agenda }} on agenda</span>{% endif %}
+      {% if p.shared %}<span>{{ p.shared }} shared</span>{% endif %}
+    </span>
+  </a>
+  {% endfor %}
 </div>
-{% if not people %}<p class="quiet">Nothing is waiting on anyone. Add a "waiting on" name to tasks and they group here.</p>{% endif %}
+{% if not people %}<p class="quiet">Nobody yet. Put a "waiting on" name on a task, or a decision for Joel, and they show up here.</p>{% endif %}
 </div>
-{% endblock %}
-
-{% block scripts %}
-<script src="{{ url_for('static', filename='board.js') }}?v={{ css_v }}"></script>
+<script>
+document.getElementById('ppfind').addEventListener('input', function(){
+  var q=this.value.trim().toLowerCase();
+  document.querySelectorAll('#pplist .pp').forEach(function(a){ a.style.display = !q || a.dataset.k.indexOf(q) >= 0 ? '' : 'none'; });
+});
+</script>
 {% endblock %}

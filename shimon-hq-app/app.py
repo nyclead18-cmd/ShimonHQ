@@ -2398,21 +2398,59 @@ def delete_project(proj_id):
 @app.route("/people")
 @login_required
 def people_view():
+    """v198: everybody you deal with, one row each - what is waiting on them, the
+    decisions they owe, what is parked for the next sit-down, what you share with
+    them in HQ. Tap a name for their page (it is also the meeting page)."""
     con = db()
-    where, args = sec_clause(con, "items.section_id")
-    rows = con.execute(
-        "SELECT items.*, sections.title AS sec_title FROM items"
-        " JOIN sections ON items.section_id = sections.id"
-        " WHERE items.status != 'done' AND items.archived=0 AND COALESCE(items.waiting_on,'') != ''"
-        + where +
-        " ORDER BY items.due_date IS NULL, items.due_date, items.id", args).fetchall()
-    groups = {}
-    for r in rows:
-        key = r["waiting_on"].strip()
-        groups.setdefault(key, []).append(r)
-    people = sorted(groups.items(), key=lambda kv: -len(kv[1]))
-    return render_template("people.html", people=people,
-                           today_iso=datetime.now().date().isoformat())
+    uid = me()
+    today = _now_local().date().isoformat()
+    ppl = {}
+
+    def get(name):
+        k = name.strip().lower()[:40]
+        if not k or k in ("me", "shimon"):
+            return None
+        if k not in ppl:
+            ppl[k] = {"key": k, "label": name.strip(), "waiting": 0, "late": 0, "decide": 0,
+                      "agenda": 0, "shared": 0, "next": "", "last": ""}
+        return ppl[k]
+    for r in _os_rows(con):
+        seen = set()
+        for nm in re.split(r"[,/+]| - ", "%s,%s" % (r["waiting_on"] or "", r["delegate_to"] or "")):
+            if not nm.strip() or nm.strip().lower() in seen:
+                continue
+            seen.add(nm.strip().lower())
+            p = get(nm)
+            if p:
+                p["waiting"] += 1
+                if (r["follow_up_at"] or "") and r["follow_up_at"] < today or \
+                        (r["due_date"] or "") and r["due_date"] < today:
+                    p["late"] += 1
+        if (r["meeting_slug"] or "").strip():
+            p = get(r["meeting_slug"])
+            if p:
+                p["agenda"] += 1
+        d = _decision_for(r["decision_for"], r["title"])
+        if d and d != "me" and not r["decided_at"]:
+            p = get(d)
+            if p:
+                p["decide"] += 1
+    for f in people_list(con):
+        if f["id"] == uid:
+            continue
+        n = len(_tagged_between(con, uid, f["id"])) + len(_tagged_between(con, f["id"], uid))
+        if n:
+            p = get((f["first_name"] or (f["display_name"] or f["username"]).split()[0]))
+            if p:
+                p["shared"] += n
+                p["label"] = f["display_name"] or p["label"]
+    for k, p in ppl.items():
+        p["next"] = uset(con, "meet:" + k + ":next") or ""
+        p["last"] = (uset(con, "meet:" + k) or "")[:10]
+        if p["label"].islower():
+            p["label"] = p["label"].title()
+    rows = sorted(ppl.values(), key=lambda p: (-(p["decide"] + p["agenda"] + p["waiting"] + p["shared"]), p["label"]))
+    return render_template("people.html", people=rows, today_iso=today)
 
 
 # ---------- joel meeting mode ----------
@@ -7478,6 +7516,7 @@ _MEET_DECIDER = {"joel": "joel", "yechiel": "yechiel", "me": "me", "shimon": "me
 
 
 @app.route("/meeting/<who>")
+@app.route("/person/<who>")
 @login_required
 def meeting_view(who):
     """The sit-down brief: everything to cover with one person, computed live
@@ -7496,20 +7535,36 @@ def meeting_view(who):
     for r in _os_rows(con):
         d = _decision_for(r["decision_for"], r["title"])
         # a meeting can be a person or a project - the slug matches either
-        blob = " ".join((r["waiting_on"] or "", r["delegate_to"] or "",
-                         r["proj_title"] or "", r["sec_title"] or "")).lower()
+        # v198: by name, not by substring - "joel" used to catch every task in the
+        # "Joel / Shimon Tracker" section, so the page and the People count disagreed
+        names = {x.strip().lower() for x in re.split(r"[,/+]| - ", "%s,%s" % (
+            r["waiting_on"] or "", r["delegate_to"] or "")) if x.strip()}
+        blob_hit = w in names or w in ((r["proj_title"] or "").strip().lower(),
+                                       (r["sec_title"] or "").strip().lower())
         if (r["meeting_slug"] or "").strip().lower() == w:
             agenda.append(r)
         elif dfor and d == dfor and not r["decided_at"]:
             decisions.append(r)
-        elif w in blob:
+        elif blob_hit:
             waiting.append(r)
     ids = {r["id"] for r in agenda} | {r["id"] for r in decisions} | {r["id"] for r in waiting}
     latest = {}
     for n in con.execute("SELECT item_id, body, created_at FROM item_notes ORDER BY id"):
         if n["item_id"] in ids:
             latest[n["item_id"]] = n
-    return render_template("meeting.html", who=w, label=w.title(), decisions=decisions,
+    # v198: the person page - if they are in HQ too, what the two of you share
+    hq_user, shared_mine, shared_theirs = None, [], []
+    for f in people_list(con):
+        names = {(f["first_name"] or "").lower(), (f["username"] or "").lower(),
+                 ((f["display_name"] or "").split() or [""])[0].lower(), (f["display_name"] or "").lower()}
+        if f["id"] != me() and w in names:
+            hq_user = f
+            shared_mine = [r for r in _tagged_between(con, me(), f["id"]) if r["status"] != "done"]
+            shared_theirs = [r for r in _tagged_between(con, f["id"], me()) if r["status"] != "done"]
+            break
+    label = (hq_user["display_name"] if hq_user else "") or w.title()
+    return render_template("meeting.html", who=w, label=label, decisions=decisions,
+                           hq_user=hq_user, shared_mine=shared_mine, shared_theirs=shared_theirs,
                            waiting=waiting, agenda=agenda, latest=latest, last=last,
                            prep=uset(con, "meet:" + w + ":prep"),
                            prep_at=uset(con, "meet:" + w + ":prep_at"),

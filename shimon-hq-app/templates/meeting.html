@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Sit-down · {{ label }} · HQ{% endblock %}
+{% block title %}{{ label }} · People · HQ{% endblock %}
 {% block body %}
 <div class="wrap">
 <header class="top">
@@ -7,7 +7,7 @@
     {% if has_logo %}<img class="hqlogo" src="{{ brand_url('logo.png') }}?v={{ css_v }}" alt="">{% endif %}
     <div>
       <div class="eyebrow">{{ pretty }}{% if last %} &middot; last sit-down {{ last|stamp }}{% endif %}</div>
-      <h1>Sit-down &middot; {{ label }}</h1>
+      <h1 dir="auto">{{ label }}</h1>
     </div>
   </div>
   <div class="right">
@@ -19,6 +19,8 @@
 
 <style>
   .meetwrap{max-width:860px; margin:0 auto;}
+  .meetwrap .t a, .meetwrap .q a{color:var(--ink); text-decoration:none;}
+  .meetwrap .pbtn{font-size:13px; padding:5px 12px; border-radius:999px; border:1px solid var(--border); background:var(--card); color:var(--ink); text-decoration:none;}
   .meetwrap h2{font-size:1.05rem; margin:22px 0 8px;}
   .meetwrap h2 .cnt{opacity:.55; font-weight:600; font-size:.9rem;}
   .dec{background:rgba(107,74,138,.06); border-radius:10px; margin:8px 0; padding:12px 14px;}
@@ -64,6 +66,14 @@
 
 <div class="meetwrap">
 
+<div class="noprint" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 6px;font-size:13.5px">
+  <a href="{{ url_for('people_view') }}" style="color:var(--accent);text-decoration:none;font-weight:600">&lsaquo; People</a>
+  <span style="flex:1"></span>
+  <span class="caveat" style="flex-basis:100%;order:3">{{ decisions|length }} decision{{ '' if decisions|length == 1 else 's' }} &middot; {{ waiting|length }} waiting &middot; {{ agenda|length }} on agenda{% if hq_user %} &middot; {{ shared_mine|length + shared_theirs|length }} shared{% endif %}</span>
+  <a class="pbtn" href="#" onclick="window.print();return false">Print</a>
+  <a class="pbtn" href="#debrief">Meeting notes &darr;</a>
+</div>
+
 <form class="nextrow noprint" method="post" action="{{ url_for('meeting_next', who=who) }}">
   <label>Next sit-down <input type="date" name="at" value="{{ nxt }}"></label>
   <button type="submit">Set</button>
@@ -103,8 +113,7 @@
 {% endfor %}
 {% endif %}
 
-<h2>Decisions {{ label }} owes <span class="cnt">{{ decisions|length }}</span></h2>
-{% if not decisions %}<p class="caveat">Nothing waiting on a decision.</p>{% endif %}
+{% if decisions %}<h2>Decisions {{ label.split()[0] }} owes <span class="cnt">{{ decisions|length }}</span></h2>{% endif %}
 {% for it in decisions %}
 <div class="dec">
   <div class="q"><a href="{{ url_for('task_view', item_id=it.id) }}">{{ it.title|replace('DECIDE: ','')|replace('JOEL: ','')|replace('YECHIEL: ','') }}</a>
@@ -126,8 +135,8 @@
 </div>
 {% endfor %}
 
-<h2>Waiting on {{ label }} <span class="cnt">{{ waiting|length }}</span></h2>
-{% if not waiting %}<p class="caveat">Nothing waiting.</p>{% endif %}
+{% if waiting %}<h2>Waiting on {{ label.split()[0] }} <span class="cnt">{{ waiting|length }}</span></h2>{% endif %}
+{% if not (decisions or waiting or agenda or shared_mine or shared_theirs) %}<p class="caveat">Nothing open with {{ label }}.</p>{% endif %}
 {% for it in waiting %}
 <div class="mrow">
   <div class="t"><a href="{{ url_for('task_view', item_id=it.id) }}">{{ it.title }}</a>
@@ -147,8 +156,16 @@
 </div>
 {% endfor %}
 
-<div class="debrief noprint">
-  <h2 style="margin-top:0">Debrief</h2>
+{% if hq_user and (shared_mine or shared_theirs) %}
+{% macro srow(it) %}<div class="mrow"><div class="t"><a href="{{ url_for('task_view', item_id=it.id) }}" dir="auto">{{ it.title }}</a>{% if last and (it.updated_at or '') > last %}<span class="newb">new</span>{% endif %}</div>
+  <div class="m">{% if it.waiting_on %}<b>{{ it.waiting_on }}</b> &middot; {% endif %}{% if it.due_date %}due {{ it.due_date[5:7]|int }}/{{ it.due_date[8:10]|int }} &middot; {% endif %}{{ it.proj_title or '' }}
+  {% set lw = latest.get(it.id) %}{% if lw %}<span class="lastword">&ldquo;{{ lw.body[:140] }}&rdquo; &middot; {{ lw.created_at|stamp }}</span>{% endif %}</div></div>{% endmacro %}
+{% if shared_mine %}<h2>You shared with {{ label.split()[0] }} <span class="cnt">{{ shared_mine|length }}</span></h2>{% for it in shared_mine %}{{ srow(it) }}{% endfor %}{% endif %}
+{% if shared_theirs %}<h2>{{ label.split()[0] }} shared with you <span class="cnt">{{ shared_theirs|length }}</span></h2>{% for it in shared_theirs %}{{ srow(it) }}{% endfor %}{% endif %}
+{% endif %}
+
+<div class="debrief noprint" id="debrief">
+  <h2 style="margin-top:0">Meeting notes</h2>
   <form method="post" action="{{ url_for('meeting_debrief', who=who) }}">
     <textarea name="notes" placeholder="One line per outcome&hellip;" dir="auto"></textarea>
     <div class="hint">Each line lands on the board: <b>JOEL:</b> / <b>YECHIEL:</b> / <b>DECIDE:</b> marks a decision &middot; <b>w Name: task</b> starts a wait with a chase date &middot; anything else is a task in the Inbox.</div>
