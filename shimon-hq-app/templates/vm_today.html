@@ -39,12 +39,12 @@
 </style>
 
 <div class="bar">
-  <a href="{{ url_for('vm_today', u=uid if admin else None, d=prev) }}">&lsaquo; {{ prev[5:] }}</a>
-  {% if next %}<a href="{{ url_for('vm_today', u=uid if admin else None, d=next) }}">{{ next[5:] }} &rsaquo;</a>{% endif %}
+  <a href="{{ url_for('vm_today', u=uid if admin else None, d=prev, f=f or None) }}">&lsaquo; {{ prev[5:] }}</a>
+  {% if next %}<a href="{{ url_for('vm_today', u=uid if admin else None, d=next, f=f or None) }}">{{ next[5:] }} &rsaquo;</a>{% endif %}
   {% if not act.today %}<a href="{{ url_for('vm_today', u=uid if admin else None) }}">Today</a>{% endif %}
   <span class="sp"></span>
   {% if admin %}
-  <select onchange="location.href='{{ url_for('vm_today') }}?d={{ act.date }}&u='+this.value">
+  <select onchange="location.href='{{ url_for('vm_today') }}?d={{ act.date }}{% if f %}&f={{ f }}{% endif %}&u='+this.value">
     {% for f in folk %}<option value="{{ f.id }}" {% if f.id == uid %}selected{% endif %}>{{ f.display_name or f.username }}</option>{% endfor %}
   </select>
   {% endif %}
@@ -65,7 +65,10 @@
 </table></div>
 {% endif %}
 
-{% if act.owed %}
+{% if f %}<div class="bar" style="margin-top:4px"><span class="caveat">Showing: <b>{{ {'calls':'calls','vm':'voicemails','talk':'calls (talk time)','done':'finished today','owed':"didn't call back",'in':'incoming','out':'outgoing','missed':'missed'}[f] }}</b></span>
+  <a href="{{ url_for('vm_today', u=uid if admin else None, d=act.date) }}">Show all &times;</a></div>{% endif %}
+
+{% if act.owed and f in ('', 'owed') %}
 <h2>Didn't call back · {{ act.owed|length }}</h2>
 <div class="list">
   {% for t in act.owed %}
@@ -78,9 +81,14 @@
 </div>
 {% endif %}
 
-<h2>Every call · {{ act.calls|length }}</h2>
+{% if f != 'owed' %}
+{% if f == 'done' %}{% set shown = act.finished_list %}
+{% elif f in ('calls', 'talk') %}{% set shown = act.calls|selectattr('dir', 'in', ['in', 'out', 'missed'])|list %}
+{% elif f in ('in', 'out', 'missed', 'vm') %}{% set shown = act.calls|selectattr('dir', 'equalto', f)|list %}
+{% else %}{% set shown = act.calls %}{% endif %}
+<h2>{{ 'Finished' if f == 'done' else 'Every call' }} · {{ shown|length }}</h2>
 <div class="list">
-  {% for c in act.calls %}
+  {% for c in shown %}
   <a class="c {{ c.dir }} {{ 'quiet' if c.quiet else '' }}" href="{% if c.digits %}{{ url_for('vm_view', num=c.digits) }}{% elif c.id %}{{ url_for('vm_view', mode='mine') }}#vm-{{ c.id }}{% else %}#{% endif %}">
     <span class="tm">{{ c.ts }}</span>
     <span class="ic" title="{{ c.dir }}">{% if c.dir == 'in' %}&#8601;{% elif c.dir == 'out' %}&#8599;{% elif c.dir == 'missed' %}&#10005;{% else %}&#9993;{% endif %}</span>
@@ -89,9 +97,10 @@
     {% if c.gist %}<span class="gi" dir="auto">{{ c.gist }}</span>{% elif c.quiet %}<span class="gi">no summary (short or blank)</span>{% endif %}
   </a>
   {% else %}
-  <div class="empty">No calls {{ 'yet today' if act.today else 'this day' }}.</div>
+  <div class="empty">Nothing {{ 'yet today' if act.today else 'this day' }}.</div>
   {% endfor %}
 </div>
+{% endif %}
 </div>
 <script>
 document.getElementById('resum').addEventListener('click', function(){

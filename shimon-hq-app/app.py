@@ -8785,7 +8785,17 @@ def day_activity(con, uid, d=None):
                       "fam": "", "digits": m["digits"] or "", "gist": "", "dur": "",
                       "done": bool(m["called_back_at"]), "quiet": False})
     calls.sort(key=lambda c: c["sort"], reverse=True)
-    return {"date": d, "today": today, "calls": calls, "owed": owed,
+    fin = []
+    for r in con.execute("SELECT * FROM voicemails WHERE closed_by=? AND substr(closed_at,1,10)=?"
+                         " ORDER BY closed_at DESC", (uid, d)).fetchall():
+        src = r["source"] or ""
+        fin.append({"ts": (r["closed_at"] or "")[11:16], "sort": r["closed_at"] or "", "id": r["id"],
+                    "dir": "out" if src == "call_out" else ("in" if src.startswith("call") else "vm"),
+                    "who": r["caller_name"] or fam(r) or vm.fmt_phone(r["caller_number"]) or "Unknown caller",
+                    "fam": fam(r) if r["caller_name"] else "", "digits": families.digits10(r["caller_number"]) or "",
+                    "gist": vm.reading(r).get("gist") or _short(r["english"] or r["rc_text"] or "", 160),
+                    "dur": _fmt_secs(r["duration"]), "done": True, "quiet": False})
+    return {"date": d, "today": today, "calls": calls, "owed": owed, "finished_list": fin,
             "n": {"calls": n_in + n_out + len(missed), "in": n_in, "out": n_out, "missed": len(missed),
                   "vm": n_vm, "talk": _fmt_secs(talk), "talk_s": talk, "finished": finished, "owed": len(owed)}}
 
@@ -8879,7 +8889,10 @@ def vm_today():
         dd = _now_local().date()
     act = _today_card(con, uid, dd.isoformat())
     person = user_row(con, uid)
-    return render_template("vm_today.html", act=act, uid=uid, admin=admin, folk=people_list(con),
+    f = request.args.get("f", "")
+    if f not in ("calls", "vm", "talk", "done", "owed", "in", "out", "missed"):
+        f = ""
+    return render_template("vm_today.html", act=act, f=f, uid=uid, admin=admin, folk=people_list(con),
                            person=person, team=team_today(con, dd.isoformat()) if admin else [],
                            prev=(dd - timedelta(days=1)).isoformat(),
                            next=(dd + timedelta(days=1)).isoformat() if dd < _now_local().date() else "")

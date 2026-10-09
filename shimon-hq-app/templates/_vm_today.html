@@ -6,7 +6,10 @@
   .tday .hd span{color:var(--muted);font-size:12.5px}
   .tday .hd a{margin-left:auto;font-size:13px;font-weight:600;color:var(--accent);text-decoration:none}
   .tday .nums{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}
-  .tday .num{background:var(--row,rgba(0,0,0,.03));border-radius:10px;padding:7px 4px;text-align:center;min-width:0}
+  .tday .num{display:block;background:var(--row,rgba(0,0,0,.03));border-radius:10px;padding:7px 4px;text-align:center;min-width:0;color:var(--ink);text-decoration:none;border:1px solid transparent;-webkit-tap-highlight-color:transparent}
+  .tday .num:active{opacity:.6}
+  .tday .num.on{border-color:var(--accent)}
+  .tday .split a{color:inherit;text-decoration:none}
   .tday .num b{display:block;font-size:19px;line-height:1.15}
   .tday .num small{display:block;font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .tday .num.owe b{color:var(--danger,#A33B2E)}
@@ -21,14 +24,15 @@
 <section class="tday" data-u="{{ act_uid or '' }}" data-d="{{ act.date }}">
   <div class="hd"><b>Today</b>{% if act.summary_at %}<span>summary {{ act.summary_at }}</span>{% endif %}
     {% if not full %}<a href="{{ url_for('vm_today') }}">Full day &rsaquo;</a>{% endif %}</div>
+  {% set _u = act_uid or None %}{% set _f = f if full else '' %}
   <div class="nums">
-    <div class="num"><b>{{ act.n.calls }}</b><small>calls</small></div>
-    <div class="num"><b>{{ act.n.vm }}</b><small>voicemails</small></div>
-    <div class="num"><b>{{ act.n.talk }}</b><small>talking</small></div>
-    <div class="num"><b>{{ act.n.finished }}</b><small>done</small></div>
-    <div class="num owe"><b>{{ act.n.owed }}</b><small>owed</small></div>
+    <a class="num {{ 'on' if _f == 'calls' }}" href="{{ url_for('vm_today', u=_u, d=act.date, f='calls') }}"><b>{{ act.n.calls }}</b><small>calls</small></a>
+    <a class="num {{ 'on' if _f == 'vm' }}" href="{{ url_for('vm_today', u=_u, d=act.date, f='vm') }}"><b>{{ act.n.vm }}</b><small>voicemails</small></a>
+    <a class="num {{ 'on' if _f == 'talk' }}" href="{{ url_for('vm_today', u=_u, d=act.date, f='talk') }}"><b>{{ act.n.talk }}</b><small>talking</small></a>
+    <a class="num {{ 'on' if _f == 'done' }}" href="{{ url_for('vm_today', u=_u, d=act.date, f='done') }}"><b>{{ act.n.finished }}</b><small>done</small></a>
+    <a class="num owe {{ 'on' if _f == 'owed' }}" href="{{ url_for('vm_today', u=_u, d=act.date, f='owed') }}"><b>{{ act.n.owed }}</b><small>owed</small></a>
   </div>
-  <div class="split">{{ act.n['in'] }} in · {{ act.n.out }} out · {{ act.n.missed }} missed</div>
+  <div class="split"><a href="{{ url_for('vm_today', u=_u, d=act.date, f='in') }}">{{ act.n['in'] }} in</a> · <a href="{{ url_for('vm_today', u=_u, d=act.date, f='out') }}">{{ act.n.out }} out</a> · <a href="{{ url_for('vm_today', u=_u, d=act.date, f='missed') }}">{{ act.n.missed }} missed</a></div>
   {% if act.summary or act.summary_stale %}
   <div class="sum {% if act.summary_stale and not act.summary %}wait{% endif %}" id="tdaysum" {% if act.summary_stale %}data-stale="1"{% endif %} dir="auto">{{ act.summary or 'Writing the day summary…' }}</div>
   {% endif %}
