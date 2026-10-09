@@ -196,27 +196,40 @@
 {% if not rc_ok %}<p class="hint">RingCentral is not connected — set <code>RC_CLIENT_ID</code>, <code>RC_CLIENT_SECRET</code>, <code>RC_JWT</code>, <code>RC_EXTENSION_ID</code> on Render.</p>{% endif %}
 {% if rc_ok and not yl_ok and not mirror %}<p class="hint">Recordings come in, but no transcripts until <code>YL_API_KEY</code> is set.</p>{% endif %}
 
+{% set qq = q if q != 'me' else None %}
+{% if admin and folk|length > 1 %}
+<div class="queues">
+  <a class="qchip {% if q == 'me' %}on{% endif %}" href="{{ url_for('vm_view', src=src if src != 'all' else None, show=show if show != 'open' else None, line=line or None) }}">Mine<b>{{ qcounts['me'] }}</b></a>
+  <a class="qchip {% if q == '' %}on{% endif %}" href="{{ url_for('vm_view', q='', src=src if src != 'all' else None, show=show if show != 'open' else None, line=line or None) }}" title="Nobody's yet - calls on the shared line that nobody picked up">Desk<b>{{ qcounts[''] }}</b></a>
+  {% for f in folk %}{% if f.id != me_id %}<a class="qchip {% if q == f.id|string %}on{% endif %}" href="{{ url_for('vm_view', q=f.id, src=src if src != 'all' else None, show=show if show != 'open' else None, line=line or None) }}">{{ f.display_name }}<b>{{ qcounts[f.id] }}</b></a>{% endif %}{% endfor %}
+  <a class="qchip {% if q == 'all' %}on{% endif %}" href="{{ url_for('vm_view', q='all', src=src if src != 'all' else None, show=show if show != 'open' else None, line=line or None) }}">Everyone<b>{{ qcounts['all'] }}</b></a>
+</div>
+{% endif %}
+
 <div class="bar">
   <div class="seg srcseg">
-    <a class="{% if src == 'vm' %}on{% endif %}" href="{{ url_for('vm_view', show=show, q=q if q else None, line=line if line else None) }}">Voicemails · {{ counts.vm_open }}</a>
-    <a class="{% if src == 'calls' %}on{% endif %}" href="{{ url_for('vm_view', src='calls', show=show, q=q if q else None, line=line if line else None) }}" title="Recorded calls - in and out - on every line">&#9742; Recorded calls · {{ counts.calls_open }}</a>
-    {% if line_uid %}<a class="{% if src == 'missed' %}on{% endif %}" href="{{ url_for('vm_view', src='missed', q=q if (q and admin) else None) }}" title="Calls on the personal line nobody picked up - clears when the number is called back">Missed · {{ missed_open }}</a>{% endif %}
+    <a class="{% if src == 'all' %}on{% endif %}" href="{{ url_for('vm_view', q=qq, show=show if show != 'open' else None, line=line or None) }}">All · {{ counts.all_open }}</a>
+    <a class="{% if src == 'vm' %}on{% endif %}" href="{{ url_for('vm_view', src='vm', q=qq, show=show if show != 'open' else None, line=line or None) }}">Voicemails · {{ counts.vm_open }}</a>
+    <a class="{% if src == 'calls' %}on{% endif %}" href="{{ url_for('vm_view', src='calls', q=qq, show=show if show != 'open' else None, line=line or None) }}">Calls · {{ counts.calls_open }}</a>
+    {% if line_uid %}<a class="{% if src == 'missed' %}on{% endif %}" href="{{ url_for('vm_view', src='missed', q=qq) }}" title="Calls nobody picked up - clears when the number is called back">Missed · {{ missed_open }}</a>{% endif %}
   </div>
+  {% if src != 'missed' %}
   <div class="seg">
-    <a class="{% if show == 'open' %}on{% endif %}" href="{{ url_for('vm_view', src=src if src != 'vm' else None, q=q if q else None, line=line if line else None) }}">Open · {{ counts.open }}</a>
-    <a class="{% if show == 'handled' %}on{% endif %}" href="{{ url_for('vm_view', src=src if src != 'vm' else None, show='handled', q=q if q else None, line=line if line else None) }}" title="What you filed away - handled, or finished by whoever it was passed to">&#10003; Handled · {{ counts.handled }}</a>
-    <a class="{% if show == 'short' %}on{% endif %}" href="{{ url_for('vm_view', src=src if src != 'vm' else None, show='short') }}">Short / empty · {{ counts.short }}</a>
-    <a class="{% if show == 'all' %}on{% endif %}" href="{{ url_for('vm_view', src=src if src != 'vm' else None, show='all') }}">Everything</a>
+    <a class="{% if show == 'open' %}on{% endif %}" href="{{ url_for('vm_view', src=src if src != 'all' else None, q=qq, line=line or None) }}">Open · {{ counts.open }}</a>
+    <a class="{% if show == 'done' %}on{% endif %}" href="{{ url_for('vm_view', src=src if src != 'all' else None, show='done', q=qq, line=line or None) }}">&#10003; Done</a>
   </div>
+  {% endif %}
   {% if counts.pending %}<span class="stat">{{ counts.pending }} transcribing</span>{% endif %}
-  {% if busy %}<span class="working">working in background</span>{% endif %}
+  {% if busy %}<span class="working">checking the lines</span>{% endif %}
   <span class="sp"></span>
-  <a class="b quiet" href="{{ url_for('families_view') }}">Families</a>
-  <button type="button" class="b quiet" onclick="document.getElementById('vmup').showModal()">Add recording</button>
-  <form method="post" action="{{ url_for('api_vm_sync', back=1) }}" style="margin:0"><button type="submit" class="b quiet">Check now</button></form>
   <div class="more"><button type="button" class="b quiet" data-menu>⋯</button>
     <div class="menu" style="top:calc(100% + 6px);bottom:auto">
-      {% if not mirror %}<form method="post" action="{{ url_for('api_vm_sync', back=1, days=365) }}"><button type="submit">Backfill 1 year</button></form>{% endif %}
+      <a href="{{ url_for('families_view') }}">Families</a>
+      <button type="button" onclick="document.getElementById('vmup').showModal()">Add a recording</button>
+      <a href="{{ url_for('vm_view', show='short', src=src if src != 'all' else None) }}">Short / empty ({{ counts.short }})</a>
+      <form method="post" action="{{ url_for('api_vm_sync', back=1) }}"><button type="submit">Check the lines now</button></form>
+      {% if admin %}<a href="{{ url_for('account_view') }}#phonelines">Whose line is whose</a>{% endif %}
+      {% if admin and not mirror %}<form method="post" action="{{ url_for('api_vm_sync', back=1, days=365) }}"><button type="submit">Backfill 1 year</button></form>{% endif %}
       {% if last_sync %}<hr><div class="hint" style="padding:6px 10px;font-size:12px">last check {{ last_sync[:16].replace('T',' ') }}</div>{% endif %}
     </div>
   </div>
@@ -225,18 +238,11 @@
 {% if admin and line_errors %}{% for ext, err in line_errors.items() %}<p class="hint" style="color:var(--pill-open-tx)">{% if ext.startswith('spec:') %}Cannot look up the extension “{{ ext[5:] }}” — {{ err|truncate(90) }}. {% if '403' in err %}The RingCentral app is missing the <b>ReadAccounts</b> permission (developer console → the app → Permissions), or use the extension ID instead of the name in RC_LINES.{% endif %}{% else %}{{ line_labels.get(ext, ext) }}: RingCentral refuses this mailbox ({{ err|truncate(80) }}). {% if '403' in err %}The JWT user needs permission to read it — make that user a Super Admin in the RingCentral admin portal, or give the app account-level Read Messages.{% endif %}{% endif %}</p>{% endfor %}{% endif %}
 {% if line_labels|length > 1 %}
 <div class="queues lines">
-  <a class="qchip {% if line == '' %}on{% endif %}" href="{{ url_for('vm_view', src=src if src != 'vm' else None, show=show, q=q) }}">All lines</a>
-  {% for ext, lab in line_labels.items() %}<a class="qchip {% if line == ext %}on{% endif %}" href="{{ url_for('vm_view', src=src if src != 'vm' else None, show=show, q=q, line=ext) }}">{{ lab }}<b>{{ lcounts.get(ext, 0) }}</b></a>{% endfor %}
+  <a class="qchip {% if line == '' %}on{% endif %}" href="{{ url_for('vm_view', src=src if src != 'all' else None, show=show if show != 'open' else None, q=qq) }}">All lines</a>
+  {% for ext, lab in line_labels.items() %}<a class="qchip {% if line == ext %}on{% endif %}" href="{{ url_for('vm_view', src=src if src != 'all' else None, show=show if show != 'open' else None, q=qq, line=ext) }}">{{ lab }}<b>{{ lcounts.get(ext, 0) }}</b></a>{% endfor %}
 </div>
 {% endif %}
 
-{% if admin and folk|length > 1 %}
-<div class="queues">
-  <a class="qchip {% if q == '' %}on{% endif %}" href="{{ url_for('vm_view', src=src if src != 'vm' else None, show=show, line=line) }}">Desk<b>{{ qcounts[''] }}</b></a>
-  {% for f in folk %}{% if not f.is_admin %}<a class="qchip {% if q == f.id|string %}on{% endif %}" href="{{ url_for('vm_view', src=src if src != 'vm' else None, show=show, q=f.id, line=line) }}">{{ f.display_name }}<b>{{ qcounts[f.id] }}</b></a>{% endif %}{% endfor %}
-  <a class="qchip {% if q == 'all' %}on{% endif %}" href="{{ url_for('vm_view', src=src if src != 'vm' else None, show=show, q='all', line=line) }}">Everyone</a>
-</div>
-{% endif %}
 
 <div id="vmdraft" class="vmdraft" hidden>
   <span>Recording not added yet: <b id="vmdraft-name"></b></span>
@@ -287,7 +293,7 @@
   <span class="mdot"></span>
   <div><div class="mwho" dir="auto">{{ mwho }}{% if m.name and m.number %} <small>{{ fmt_phone(m.number) }}</small>{% endif %}</div>
     <div class="msub">
-      {% if m.left_vm %}{% if m.vm_id %}<a href="{{ url_for('vm_view', q=q if (q and admin) else None) }}#vm-{{ m.vm_id }}">left voicemail &#8599;</a>{% else %}<span>left voicemail</span>{% endif %}{% else %}<span>no voicemail</span>{% endif %}
+      {% if m.left_vm %}{% if m.vm_id %}<a href="{{ url_for('vm_view', q=qq) }}#vm-{{ m.vm_id }}">left voicemail &#8599;</a>{% else %}<span>left voicemail</span>{% endif %}{% else %}<span>no voicemail</span>{% endif %}
       {% if m.called_back_at %}<span class="ok">&#10003; called back {{ m.called_back_at|stamp }}</span>{% else %}<span class="owe">not called back</span>{% endif %}
     </div></div>
   <div class="mwhen">{{ day_label((m.ts or '')[:10]) }}<br>{{ (m.ts or '')[11:16]|fmt12 }}</div>
@@ -307,7 +313,7 @@
 {% endif %}
 {% set fam = fam_of.get(digits10(r.caller_number)) %}
 {% set who = r.caller_name or (fam and fam_label(fam)) or fmt_phone(r.caller_number) or 'Unknown caller' %}
-{% set nunder = (0 if r.handled else 1) + (0 if (r.handled or r.item_id) else 1) %}
+{% set nunder = 0 if r.handled else 1 %}{% set rtags = tags.get(r.id, []) %}
 <article class="vm {% if r.handled %}done{% endif %}" id="vm-{{ r.id }}" data-id="{{ r.id }}"
   data-who="{{ who }}" data-num="{{ fmt_phone(r.caller_number) }}" data-when="{{ (r.ts or '')[:16].replace('T',' ') }}"
   data-dur="{{ r.duration or 0 }}" data-line="{{ line_of(r) }}" style="--uw:{{ nunder * 84 }}px"
@@ -315,20 +321,18 @@
   data-fname="Voicemail_{{ (r.ts or '')[:10] }}_{{ who|replace(' ','_')|replace('(','')|replace(')','')|replace('-','') }}.mp3"{% endif %}>
   <div class="rowwrap">
   {% if not r.handled %}
-  <div class="under">
-    {% if not r.item_id %}<form method="post" action="{{ url_for('vm_task', vid=r.id) }}" style="display:contents"><button type="submit" class="u-task">Task</button></form>{% endif %}
-    <button type="button" class="u-done" data-file>Handled</button>
-  </div>
+  <div class="under"><button type="button" class="u-done" data-file>Done</button></div>
   {% endif %}
   <div class="row">
     <span class="dot"></span>
     <div>
       <div class="who">{{ who }}{% if fam and r.caller_name %} <small class="famtag">{{ fam.name_en }}{% if fam.area %} · {{ fam.area }}{% endif %}</small>{% elif r.caller_name and r.caller_number %} <small>{{ fmt_phone(r.caller_number) }}</small>{% endif %}</div>
       <div class="peek">{% if r.english or r.rc_text %}{{ (r.english or r.rc_text)|truncate(160) }}{% elif r.tstatus == 'new' %}<i>Transcribing…</i>{% endif %}</div>
-      {% if r.tstatus in ('failed','short','empty','skipped') or r.item_id or r.dh_event_id or r.kind or r.source or (line_labels|length > 1 and not line) or (r.assignee and q in ('', 'all')) %}
+      {% if True %}
       <div class="tags">
         {% if r.source == 'call_in' %}<span class="tag call">&#9742; call in</span>{% elif r.source == 'call_out' %}<span class="tag call">&#9742; call out</span>{% endif %}
-        {% if r.assignee and q in ('', 'all') %}<span class="tag who" data-who-tag>&rarr; {{ r.assignee_name }}</span>{% endif %}
+        {% if r.assignee and r.assignee != me_id %}<span class="tag who" data-who-tag>{{ r.assignee_name }}</span>{% elif not r.assignee and q != '' %}<span class="tag who" data-who-tag>Desk</span>{% endif %}
+        {% for tu, tn in rtags %}<span class="tag who" data-tagged="{{ tu }}">@{{ tn }}</span>{% endfor %}
         {% if line_labels|length > 1 and not line %}<span class="tag line">{{ line_of(r).replace(' line', '') }}</span>{% endif %}
         {% if r.kind and r.kind != 'other' %}<span class="tag kind k-{{ r.kind }}">{{ kind_label.get(r.kind, r.kind) }}</span>{% endif %}
         {% if r.tstatus == 'failed' %}<span class="tag bad">transcript failed</span>
@@ -354,14 +358,18 @@
     <div class="ctl">
       <span class="note"></span>
       <div class="grp">
-        {% if not r.handled %}<button type="button" class="ib" data-file title="Handled"><svg viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5"/></svg>Handled</button>
-        {% else %}<form method="post" action="{{ url_for('vm_handled', vid=r.id) }}" style="margin:0"><input type="hidden" name="show" value="{{ show }}"><input type="hidden" name="undo" value="1"><button type="submit" class="ib quiet"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5"/></svg>Reopen</button></form>{% endif %}
-        {% if not r.item_id %}<form method="post" action="{{ url_for('vm_task', vid=r.id) }}" style="margin:0"><button type="submit" class="ib"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M12 8v8M8 12h8"/></svg>Task</button></form>{% endif %}
-        {% if folk|length > 1 and (admin or not r.assignee or r.assignee == me_id) %}
-        <div class="more"><button type="button" class="ib" data-menu><svg viewBox="0 0 24 24"><path d="M4 12h13M13 6l6 6-6 6"/></svg>To</button>
+        {% if not r.handled %}<button type="button" class="ib" data-file title="Done - for everybody"><svg viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5"/></svg>Done</button>
+        {% else %}<form method="post" action="{{ url_for('vm_close', vid=r.id) }}" style="margin:0"><input type="hidden" name="undo" value="1"><input type="hidden" name="back" value=""><button type="submit" class="ib quiet"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5"/></svg>Reopen</button></form>{% endif %}
+        {% if folk|length > 1 %}
+        <div class="more"><button type="button" class="ib" data-menu><svg viewBox="0 0 24 24"><path d="M4 12h13M13 6l6 6-6 6"/></svg>Pass / Tag</button>
           <div class="menu down" style="right:auto;left:0">
+            <div class="hint" style="padding:4px 10px;font-size:11.5px;text-transform:uppercase;letter-spacing:.05em">Pass to &mdash; it moves to them</div>
             {% for f in folk %}{% if f.id != r.assignee %}<button type="button" data-assign="{{ f.id }}">{{ f.display_name }}{% if f.id == me_id %} (me){% endif %}</button>{% endif %}{% endfor %}
-            {% if r.assignee and admin %}<hr><button type="button" data-assign="">Back to the desk</button>{% endif %}
+            {% if r.assignee and admin %}<button type="button" data-assign="">Back to the desk</button>{% endif %}
+            <hr>
+            <div class="hint" style="padding:4px 10px;font-size:11.5px;text-transform:uppercase;letter-spacing:.05em">Tag &mdash; they see it too</div>
+            {% set tagged_ids = rtags|map('first')|list %}
+            {% for f in folk %}{% if f.id != r.assignee and f.id != me_id %}<button type="button" data-tag="{{ f.id }}"{% if f.id in tagged_ids %} data-untag="1"{% endif %}>{% if f.id in tagged_ids %}&#10003; {% endif %}@{{ f.display_name }}</button>{% endif %}{% endfor %}
           </div>
         </div>
         {% endif %}
@@ -376,6 +384,9 @@
         {% if dh and not r.dh_event_id and r.stored_name %}<button type="button" class="ib" data-sheet="dh-{{ r.id }}"><svg viewBox="0 0 24 24"><path d="M4 5h11a3 3 0 0 1 3 3v11H7a3 3 0 0 1-3-3z"/><path d="M8 9h6M8 13h6"/></svg>Chronicle</button>{% endif %}
         <div class="more"><button type="button" class="ib quiet" data-menu><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/></svg>More</button>
           <div class="menu down">
+            {% if r.item_id %}<a href="{{ url_for('task_view', item_id=r.item_id) }}">Open its task</a>
+            {% else %}<form method="post" action="{{ url_for('vm_task', vid=r.id) }}"><button type="submit">Make it a task (needs follow-up)</button></form>{% endif %}
+            <hr>
             {% if r.stored_name %}<button type="button" data-copy="link">Copy web link</button>
             <a href="{{ url_for('vm_audio', vid=r.id, dl=1) }}">Download mp3</a>{% endif %}
             {% if not mirror %}<hr>
@@ -445,7 +456,8 @@
 (function(){
   var cards = Array.prototype.slice.call(document.querySelectorAll('article.vm'));
   var cardOf = function(el){ return el.closest('article.vm'); };
-  var HANDLED_URL = {{ url_for('vm_handled', vid=0)|tojson }};
+  var HANDLED_URL = {{ url_for('vm_close', vid=0)|tojson }};
+  var TAG_URL = {{ url_for('vm_tag', vid=0)|tojson }};
   var SHOW = {{ show|tojson }};
 
   // ---- heard / unheard dot (this phone remembers what it has played) ----
@@ -608,16 +620,34 @@
       .then(function(r){ if (!r.ok) throw 0; return r.json(); })
       .then(function(j){
         c.dataset.assignee = j.assignee || '';
-        var leaves = (Q === 'all') ? false : (String(j.assignee || '') !== String(Q));
+        var mine = {{ me_id|tojson }};
+        var leaves = (Q === 'all') ? false : (Q === 'me' ? String(j.assignee || '') !== String(mine) : String(j.assignee || '') !== String(Q));
         if (leaves) { note(c, j.name ? 'Sent to ' + j.name : 'Back on the desk'); setTimeout(function(){ fileAway.slide(c); }, 500); return; }
         var tg = c.querySelector('[data-who-tag]');
-        if (j.name) { if (!tg) { var tags = c.querySelector('.tags'); if (!tags) { tags = document.createElement('div'); tags.className = 'tags'; c.querySelector('.row > div').appendChild(tags); } tg = document.createElement('span'); tg.className = 'tag who'; tg.setAttribute('data-who-tag', ''); tags.prepend(tg); } tg.textContent = '\u2192 ' + j.name; }
+        if (j.name) { if (!tg) { var tags = c.querySelector('.tags'); if (!tags) { tags = document.createElement('div'); tags.className = 'tags'; c.querySelector('.row > div').appendChild(tags); } tg = document.createElement('span'); tg.className = 'tag who'; tg.setAttribute('data-who-tag', ''); tags.prepend(tg); } tg.textContent = j.name; }
         else if (tg) tg.remove();
         note(c, j.name ? 'Sent to ' + j.name : 'Back on the desk');
       }).catch(function(){ note(c, 'Could not send \u2014 try again'); });
   }
 
   fileAway.slide = slideAway;
+
+  // ---- tag somebody: the message shows in their list too; the holder stays the holder ----
+  function tag(c, btn){
+    var was = !!btn.dataset.untag;
+    var fd = new FormData(); fd.append('to', btn.dataset.tag); if (was) fd.append('undo', '1');
+    note(c, was ? 'Removing\u2026' : 'Tagging\u2026');
+    fetch(TAG_URL.replace('/0/', '/' + c.dataset.id + '/'), {method: 'POST', body: fd, credentials: 'same-origin'})
+      .then(function(r){ if (!r.ok) throw 0; return r.json(); })
+      .then(function(j){
+        var tags = c.querySelector('.tags'); if (!tags) { tags = document.createElement('div'); tags.className = 'tags'; c.querySelector('.row > div').appendChild(tags); }
+        tags.querySelectorAll('[data-tagged]').forEach(function(x){ x.remove(); });
+        var ids = {};
+        (j.tags || []).forEach(function(t){ ids[t.id] = 1; var sp = document.createElement('span'); sp.className = 'tag who'; sp.dataset.tagged = t.id; sp.textContent = '@' + t.name; tags.appendChild(sp); });
+        c.querySelectorAll('[data-tag]').forEach(function(b){ var on = !!ids[b.dataset.tag]; if (on) b.dataset.untag = '1'; else delete b.dataset.untag; b.innerHTML = (on ? '&#10003; ' : '') + '@' + b.textContent.replace(/^\u2713\s*/, '').replace(/^@/, ''); });
+        note(c, was ? 'Tag removed' : 'Tagged');
+      }).catch(function(){ note(c, 'Could not tag \u2014 try again'); });
+  }
 
   // ---- Add recording: what you picked survives a refresh or a walk away. The file
   // and the fields sit in IndexedDB on this phone until the upload actually lands.
@@ -705,6 +735,7 @@
     if (e.target.closest('[data-speed]')) { setSpeed(SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length]); return; }
     if (e.target.closest('[data-file]')) { fileAway(c); return; }
     var asg = e.target.closest('[data-assign]'); if (asg) { closeMenus(); assign(c, asg.dataset.assign); return; }
+    var tg = e.target.closest('[data-tag]'); if (tg) { closeMenus(); tag(c, tg); return; }
     var cp = e.target.closest('[data-copy]'); if (cp) { copy(textOf(c, cp.dataset.copy), c, cp.dataset.copy === 'link' ? 'Link copied' : 'Copied \u2014 ready to paste'); closeMenus(); return; }
     var sh = e.target.closest('[data-share-btn]'); if (sh) { shareFile(c, sh); return; }
     var st = e.target.closest('[data-sheet]'); if (st) { var sheet = document.getElementById(st.dataset.sheet); sheet.classList.toggle('open'); if (sheet.classList.contains('open')) { var f = sheet.querySelector('select,input'); if (f) f.focus(); } return; }

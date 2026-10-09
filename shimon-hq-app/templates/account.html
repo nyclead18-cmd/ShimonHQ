@@ -177,6 +177,22 @@
   <p class="caveat">A person's own RingCentral extension. Its voicemails and recorded calls go straight to their queue
   (not the Desk), its missed calls show on their Desk, and their Call buttons open the RingCentral app on the phone,
   so they call from their own number. Their HQ access stays as it is.</p>
+  {% if all_lines %}
+  <p class="caveat"><b>Whose line is whose.</b> Calls and voicemails on a line go straight to its person as they come in.
+  A shared line (the one that rings everybody) goes to whoever answered; what nobody picked up sits on the Desk.</p>
+  <div class="stack routerules">
+    {% for ln in all_lines %}
+    <form method="post" action="{{ url_for('set_user_lines') }}" class="routerow" style="grid-template-columns:minmax(0,1fr) 180px">
+      <input type="hidden" name="ext" value="{{ ln.spec }}">
+      <span>{{ ln.label }}{% if ln.spec != ln.label %} <small class="caveat">{{ ln.spec }}</small>{% endif %}</span>
+      <select name="user" onchange="this.form.submit()">
+        <option value="shared" {% if not ln.owner %}selected{% endif %}>Shared (Desk)</option>
+        {% for f in folk %}<option value="{{ f.id }}" {% if ln.owner == f.id %}selected{% endif %}>{{ f.display_name }}</option>{% endfor %}
+      </select>
+    </form>
+    {% endfor %}
+  </div>
+  {% endif %}
   {% if user_lines %}
   <div class="stack routerules">
     {% for spec, v in user_lines.items() %}

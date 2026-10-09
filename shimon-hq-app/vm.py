@@ -298,13 +298,13 @@ SMS_TEMPLATES = [
 
 # ---------- recorded calls: what was said when we called back ----------
 
-def rc_call_log(date_from, direction=None, ext="~", recorded_only=True, date_to=None):
+def rc_call_log(date_from, direction=None, ext="~", recorded_only=True, date_to=None, view="Simple"):
     """Recorded voice calls on one extension since `date_from` (ISO, UTC ok) - both
     directions unless one is named. Needs ReadCallLog on the app; the recording itself
     needs ReadCallRecording."""
     out, page = [], 1
     while True:
-        q = {"type": "Voice", "view": "Simple", "dateFrom": date_from, "perPage": 100, "page": page}
+        q = {"type": "Voice", "view": view, "dateFrom": date_from, "perPage": 100, "page": page}
         if recorded_only:
             q["withRecording"] = "true"
         if date_to:
