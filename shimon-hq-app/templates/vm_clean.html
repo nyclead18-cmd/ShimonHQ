@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block title %}Call Center · {{ hq_title }}{% endblock %}
+{% block body %}
+{# v193 Clean: my open callers, one row each. Call · Done · Pass. Tap a row for its whole history. #}
+<div class="wrap vmpage vmclean">
+<header class="top">
+  <div>
+    <div class="eyebrow">{{ threads|length }} open · {{ n_owe }} to call back</div>
+    <h1>Call Center</h1>
+  </div>
+  <div class="right">
+    {% set nav_on = 'vm_view' %}{% include "_nav.html" %}
+    <a class="logout" href="{{ url_for('account_view') }}">{{ session.get('name') or 'Account' }}</a>
+    <a class="logout" href="{{ url_for('logout') }}">Sign out</a>
+  </div>
+</header>
+
+<style>
+  .vmclean .cbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:-4px 0 14px;font-size:13px;color:var(--muted)}
+  .vmclean .cbar .sp{flex:1}
+  .vmclean .cbar a{color:var(--accent);text-decoration:none;font-weight:600}
+  .vmclean .b{font:inherit;font-size:13px;padding:6px 13px;border-radius:999px;border:1px solid var(--border);background:var(--card);color:var(--ink);cursor:pointer;text-decoration:none}
+  .vmclean .sheetbox{display:none;white-space:pre-wrap;font-size:14px;line-height:1.55;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px 16px;margin:0 0 16px}
+  .vmclean .sheetbox.on{display:block}
+  .vmclean .sec{margin:18px 4px 6px;font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600}
+  .vmclean .list{background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:visible;box-shadow:var(--shadow)}
+  .vmclean .t{display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:2px 12px;align-items:center;padding:12px 12px 12px 14px;border-top:1px solid var(--border);transition:opacity .25s,max-height .3s;max-height:240px}
+  .vmclean .t:first-child{border-top:0}
+  .vmclean .t.gone{opacity:0;max-height:0;padding-top:0;padding-bottom:0;overflow:hidden;border-top-width:0}
+  .vmclean .st{width:9px;height:9px;border-radius:50%;background:var(--danger,#A33B2E);align-self:start;margin-top:7px}
+  .vmclean .t.called .st{background:var(--pill-done-tx,#3A6B3E)}
+  .vmclean .main{min-width:0;color:var(--ink);text-decoration:none}
+  .vmclean .nm{font-size:16px;font-weight:600;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .vmclean .nm small{font-weight:400;color:var(--muted);font-size:12.5px}
+  .vmclean .gi{color:var(--muted);font-size:13.5px;line-height:1.4;margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .vmclean .sub{font-size:12px;color:var(--muted);margin-top:3px;display:flex;gap:8px;flex-wrap:wrap}
+  .vmclean .sub .owe{color:var(--danger,#A33B2E);font-weight:600}
+  .vmclean .sub .ok{color:var(--pill-done-tx,#3A6B3E);font-weight:600}
+  .vmclean .acts{display:flex;align-items:center;gap:6px;position:relative}
+  .vmclean .ab{width:40px;height:40px;border-radius:999px;display:grid;place-items:center;border:1px solid var(--border);background:var(--card);color:var(--ink);cursor:pointer;text-decoration:none;padding:0}
+  .vmclean .ab svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+  .vmclean .ab.call{background:var(--ink);color:var(--card);border-color:var(--ink)}
+  .vmclean .ab.call svg{fill:currentColor;stroke:none}
+  .vmclean .menu{display:none;position:absolute;right:0;top:calc(100% + 6px);z-index:30;min-width:200px;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.14);padding:6px}
+  .vmclean .menu.on{display:block}
+  .vmclean .menu .h{padding:4px 10px;font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  .vmclean .menu button{display:block;width:100%;text-align:left;font:inherit;font-size:14px;padding:9px 10px;border:0;background:none;color:var(--ink);border-radius:8px;cursor:pointer}
+  .vmclean .menu button:hover{background:var(--row)}
+  .vmclean .empty{padding:28px 16px;text-align:center;color:var(--muted)}
+  .vmclean .toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--btn-bg);color:var(--btn-tx);padding:8px 16px;border-radius:999px;font-size:13.5px;font-weight:600;opacity:0;transition:opacity .2s;pointer-events:none;z-index:60}
+  .vmclean .toast.on{opacity:1}
+  @media (max-width:640px){ .vmclean .ab{width:38px;height:38px} .vmclean .t{gap:2px 8px} }
+</style>
+
+{% include "_vm_modes.html" %}
+
+<div class="cbar">
+  {% if admin and unassigned %}<a href="{{ url_for('vm_view', mode='all', q='') }}">{{ unassigned }} unassigned &rsaquo;</a>{% endif %}
+  <span class="sp"></span>
+  <button type="button" class="b" id="sheetbtn">Call sheet</button>
+  <a class="b" href="{{ url_for('vm_view', mode='clean', show='done') }}">&#10003; Done</a>
+</div>
+<div class="sheetbox" id="sheetbox">{{ summary.text or '' }}</div>
+
+{% macro row(t) %}
+<div class="t {{ t.state }}" data-ids="{{ t.ids|join(',') }}" data-missed="{{ t.missed|join(',') }}" data-vid="{{ t.latest_id or '' }}" data-who="{{ t.who }}">
+  <span class="st"></span>
+  <a class="main" href="{% if t.digits %}{{ url_for('vm_view', num=t.digits) }}{% elif t.latest_id %}{{ url_for('vm_view', mode='mine') }}#vm-{{ t.latest_id }}{% else %}#{% endif %}">
+    <div class="nm" dir="auto">{{ t.who }}{% if t.fam %} <small>{{ t.fam }}</small>{% elif t.number and t.who != fmt_phone(t.number) %} <small>{{ fmt_phone(t.number) }}</small>{% endif %}</div>
+    {% if t.gist %}<div class="gi" dir="auto">{{ t.gist }}</div>{% endif %}
+    <div class="sub">
+      {% if t.state == 'owe' %}<span class="owe">call back</span>{% else %}<span class="ok">&#10003; called back</span>{% endif %}
+      <span>{{ t.what }}</span><span>{{ t.ago }}</span>
+      {% for n in t.tags %}<span>@{{ n }}</span>{% endfor %}
+    </div>
+  </a>
+  <div class="acts">
+    {% if t.number %}
+      {% if own_line %}<a class="ab call" href="{{ rc_url(t.number) }}" {% if t.latest_id %}data-rcdial="{{ url_for('vm_dialed', vid=t.latest_id) }}"{% endif %} aria-label="Call {{ t.who }}"><svg viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg></a>
+      {% elif outbound and t.latest_id %}<button type="button" class="ab call" data-ringout aria-label="Call {{ t.who }}"><svg viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg></button>
+      {% else %}<a class="ab call" href="tel:{{ t.number }}" aria-label="Call {{ t.who }}"><svg viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg></a>{% endif %}
+    {% endif %}
+    <button type="button" class="ab" data-done aria-label="Done" title="Done - for everybody"><svg viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5"/></svg></button>
+    {% if folk|length > 1 %}
+    <button type="button" class="ab" data-passbtn aria-label="Pass" title="Pass to somebody"><svg viewBox="0 0 24 24"><path d="M4 12h13M13 6l6 6-6 6"/></svg></button>
+    <div class="menu"><div class="h">Pass to</div>
+      {% for f in folk %}{% if f.id != me_id %}<button type="button" data-pass="{{ f.id }}">{{ f.display_name }}</button>{% endif %}{% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endmacro %}
+
+{% set owe = threads|selectattr('state', 'equalto', 'owe')|list %}
+{% set rest = threads|rejectattr('state', 'equalto', 'owe')|list %}
+{% if not threads %}
+<div class="list"><div class="empty">Nothing open. Every caller is handled.</div></div>
+{% else %}
+  {% if owe %}<div class="sec">To call back · {{ owe|length }}</div><div class="list">{% for t in owe %}{{ row(t) }}{% endfor %}</div>{% endif %}
+  {% if rest %}<div class="sec">Called back · finish with Done · {{ rest|length }}</div><div class="list">{% for t in rest %}{{ row(t) }}{% endfor %}</div>{% endif %}
+{% endif %}
+<div class="toast" id="toast"></div>
+</div>
+{% include "_dialpad.html" %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function(){
+  var THREAD_URL = {{ url_for('vm_thread')|tojson }};
+  var CALL_URL = {{ url_for('vm_call', vid=0)|tojson }};
+  var SUM_URL = {{ url_for('desk_summary_now')|tojson }};
+  var MY_PHONE = {{ my_phone|tojson }};
+  var toastT;
+  function toast(m){ var t = document.getElementById('toast'); t.textContent = m; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(function(){ t.classList.remove('on'); }, 2200); }
+  function post(url, data){
+    var fd = new FormData(); Object.keys(data).forEach(function(k){ fd.append(k, data[k]); });
+    return fetch(url, {method: 'POST', body: fd, credentials: 'same-origin'})
+      .then(function(r){ return r.json().then(function(j){ return {ok: r.ok, j: j}; }); });
+  }
+  function gone(row){ row.classList.add('gone'); setTimeout(function(){ var l = row.parentNode; row.remove(); if (l && !l.querySelector('.t')) { var s = l.previousElementSibling; l.remove(); if (s && s.classList.contains('sec')) s.remove(); } }, 320); }
+  function closeMenus(){ document.querySelectorAll('.vmclean .menu.on').forEach(function(m){ m.classList.remove('on'); }); }
+
+  document.addEventListener('click', function(e){
+    var row = e.target.closest('.t');
+    var d = e.target.closest('[data-done]');
+    if (d && row) {
+      post(THREAD_URL, {act: 'done', ids: row.dataset.ids, missed: row.dataset.missed}).then(function(x){
+        if (!x.ok) { toast(x.j.error || 'Could not finish'); return; }
+        gone(row); toast('Done \u00b7 ' + row.dataset.who);
+      }).catch(function(){ toast('Could not finish \u2014 try again'); });
+      return;
+    }
+    var pb = e.target.closest('[data-passbtn]');
+    if (pb) { var m = pb.nextElementSibling; var was = m.classList.contains('on'); closeMenus(); if (!was) m.classList.add('on'); e.stopPropagation(); return; }
+    var p = e.target.closest('[data-pass]');
+    if (p && row) {
+      closeMenus();
+      post(THREAD_URL, {act: 'pass', to: p.dataset.pass, ids: row.dataset.ids, missed: row.dataset.missed}).then(function(x){
+        if (!x.ok) { toast(x.j.error || 'Could not pass'); return; }
+        gone(row); toast('Passed to ' + x.j.name);
+      }).catch(function(){ toast('Could not pass \u2014 try again'); });
+      return;
+    }
+    var ro = e.target.closest('[data-ringout]');
+    if (ro && row) {
+      var mine = MY_PHONE;
+      if (!mine) { mine = prompt('Your phone number \u2014 RingCentral rings it first, then dials ' + row.dataset.who + '. Saved to your Account.'); if (!mine) return; }
+      var data = {}; if (mine !== MY_PHONE) data.from = mine;
+      toast('Calling\u2026');
+      post(CALL_URL.replace('/0/', '/' + row.dataset.vid + '/'), data).then(function(x){
+        if (!x.ok) { toast(x.j.error || 'Could not call'); return; }
+        if (x.j.mine) MY_PHONE = x.j.mine;
+        toast('Your phone is ringing');
+        row.classList.remove('owe'); row.classList.add('called');
+      }).catch(function(){ toast('Could not call \u2014 try again'); });
+      return;
+    }
+    var rc = e.target.closest('a.ab.call');
+    if (rc && row) { row.classList.remove('owe'); row.classList.add('called'); }
+    if (!e.target.closest('.menu')) closeMenus();
+  });
+
+  var sb = document.getElementById('sheetbtn'), box = document.getElementById('sheetbox');
+  sb.addEventListener('click', function(){
+    if (box.classList.contains('on') && box.textContent.trim()) { box.classList.remove('on'); return; }
+    box.classList.add('on'); if (!box.textContent.trim()) box.textContent = 'Writing the call sheet\u2026';
+    sb.disabled = true;
+    post(SUM_URL, {}).then(function(x){ sb.disabled = false; box.textContent = (x.j && x.j.text) || 'Could not write it.'; })
+      .catch(function(){ sb.disabled = false; box.textContent = 'Could not write it \u2014 try again.'; });
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,13 @@
+{# v193: the three ways to look at calls. Remembered per person. #}
+<style>
+  .vmmodes{display:flex;gap:0;border:1px solid var(--border);border-radius:12px;overflow:hidden;background:var(--card);margin:0 0 16px;max-width:460px}
+  .vmmodes a{flex:1;text-align:center;padding:9px 6px;font-size:14px;font-weight:600;color:var(--muted);text-decoration:none;border-right:1px solid var(--border);line-height:1.2}
+  .vmmodes a:last-child{border-right:0}
+  .vmmodes a small{display:block;font-weight:400;font-size:11px;opacity:.8;margin-top:1px}
+  .vmmodes a.on{background:var(--btn-bg);color:var(--btn-tx)}
+</style>
+<nav class="vmmodes">
+  <a class="{% if mode == 'clean' %}on{% endif %}" href="{{ url_for('vm_view', mode='clean') }}">Clean<small>one row per caller</small></a>
+  <a class="{% if mode == 'mine' %}on{% endif %}" href="{{ url_for('vm_view', mode='mine') }}">Mine<small>my calls · delegate</small></a>
+  {% if admin %}<a class="{% if mode == 'all' %}on{% endif %}" href="{{ url_for('vm_view', mode='all') }}">Everyone<small>admin · all calls</small></a>{% endif %}
+</nav>

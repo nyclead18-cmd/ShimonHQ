@@ -196,13 +196,14 @@
 {% if not rc_ok %}<p class="hint">RingCentral is not connected — set <code>RC_CLIENT_ID</code>, <code>RC_CLIENT_SECRET</code>, <code>RC_JWT</code>, <code>RC_EXTENSION_ID</code> on Render.</p>{% endif %}
 {% if rc_ok and not yl_ok and not mirror %}<p class="hint">Recordings come in, but no transcripts until <code>YL_API_KEY</code> is set.</p>{% endif %}
 
-{% set qq = q if q != 'me' else None %}
-{% if admin and folk|length > 1 %}
+{% set qq = q if q not in ('me', 'all') else None %}{% if q == 'all' and mode == 'all' %}{% set qq = None %}{% endif %}
+{% include "_vm_modes.html" %}
+{% if num %}<p class="hint" style="margin:-6px 0 14px">One caller's open messages · <a href="{{ url_for('vm_view') }}">&larr; back</a></p>{% endif %}
+{% if mode == 'all' and folk|length > 1 %}
 <div class="queues">
-  <a class="qchip {% if q == 'me' %}on{% endif %}" href="{{ url_for('vm_view', src=src if src != 'all' else None, show=show if show != 'open' else None, line=line or None) }}">Mine<b>{{ qcounts['me'] }}</b></a>
-  <a class="qchip {% if q == '' %}on{% endif %}" href="{{ url_for('vm_view', q='', src=src if src != 'all' else None, show=show if show != 'open' else None, line=line or None) }}" title="Nobody's yet - calls on the shared line that nobody picked up">Desk<b>{{ qcounts[''] }}</b></a>
-  {% for f in folk %}{% if f.id != me_id %}<a class="qchip {% if q == f.id|string %}on{% endif %}" href="{{ url_for('vm_view', q=f.id, src=src if src != 'all' else None, show=show if show != 'open' else None, line=line or None) }}">{{ f.display_name }}<b>{{ qcounts[f.id] }}</b></a>{% endif %}{% endfor %}
-  <a class="qchip {% if q == 'all' %}on{% endif %}" href="{{ url_for('vm_view', q='all', src=src if src != 'all' else None, show=show if show != 'open' else None, line=line or None) }}">Everyone<b>{{ qcounts['all'] }}</b></a>
+  <a class="qchip {% if q == 'all' %}on{% endif %}" href="{{ url_for('vm_view', src=src if src != 'all' else None, show=show if show != 'open' else None, line=line or None) }}">Everyone<b>{{ qcounts['all'] }}</b></a>
+  <a class="qchip {% if q == '' %}on{% endif %}" href="{{ url_for('vm_view', q='', src=src if src != 'all' else None, show=show if show != 'open' else None, line=line or None) }}" title="Nobody's yet - calls on the shared line that nobody picked up">Unassigned<b>{{ qcounts[''] }}</b></a>
+  {% for f in folk %}<a class="qchip {% if q == f.id|string %}on{% endif %}" href="{{ url_for('vm_view', q=f.id, src=src if src != 'all' else None, show=show if show != 'open' else None, line=line or None) }}">{{ f.display_name }}{% if f.id == me_id %} (me){% endif %}<b>{{ qcounts[f.id] }}</b></a>{% endfor %}
 </div>
 {% endif %}
 
@@ -225,6 +226,7 @@
   <div class="more"><button type="button" class="b quiet" data-menu>⋯</button>
     <div class="menu" style="top:calc(100% + 6px);bottom:auto">
       <a href="{{ url_for('families_view') }}">Families</a>
+      <a href="{{ url_for('desk_view', full=1) }}">Tasks from calls (old Desk)</a>
       <button type="button" onclick="document.getElementById('vmup').showModal()">Add a recording</button>
       <a href="{{ url_for('vm_view', show='short', src=src if src != 'all' else None) }}">Short / empty ({{ counts.short }})</a>
       <form method="post" action="{{ url_for('api_vm_sync', back=1) }}"><button type="submit">Check the lines now</button></form>
@@ -331,7 +333,7 @@
       {% if True %}
       <div class="tags">
         {% if r.source == 'call_in' %}<span class="tag call">&#9742; call in</span>{% elif r.source == 'call_out' %}<span class="tag call">&#9742; call out</span>{% endif %}
-        {% if r.assignee and r.assignee != me_id %}<span class="tag who" data-who-tag>{{ r.assignee_name }}</span>{% elif not r.assignee and q != '' %}<span class="tag who" data-who-tag>Desk</span>{% endif %}
+        {% if r.assignee and r.assignee != me_id %}<span class="tag who" data-who-tag>{{ r.assignee_name }}</span>{% elif not r.assignee and q != '' %}<span class="tag who" data-who-tag>Unassigned</span>{% endif %}
         {% for tu, tn in rtags %}<span class="tag who" data-tagged="{{ tu }}">@{{ tn }}</span>{% endfor %}
         {% if line_labels|length > 1 and not line %}<span class="tag line">{{ line_of(r).replace(' line', '') }}</span>{% endif %}
         {% if r.kind and r.kind != 'other' %}<span class="tag kind k-{{ r.kind }}">{{ kind_label.get(r.kind, r.kind) }}</span>{% endif %}
@@ -365,7 +367,7 @@
           <div class="menu down" style="right:auto;left:0">
             <div class="hint" style="padding:4px 10px;font-size:11.5px;text-transform:uppercase;letter-spacing:.05em">Pass to &mdash; it moves to them</div>
             {% for f in folk %}{% if f.id != r.assignee %}<button type="button" data-assign="{{ f.id }}">{{ f.display_name }}{% if f.id == me_id %} (me){% endif %}</button>{% endif %}{% endfor %}
-            {% if r.assignee and admin %}<button type="button" data-assign="">Back to the desk</button>{% endif %}
+            {% if r.assignee and admin %}<button type="button" data-assign="">Unassign (back to the desk)</button>{% endif %}
             <hr>
             <div class="hint" style="padding:4px 10px;font-size:11.5px;text-transform:uppercase;letter-spacing:.05em">Tag &mdash; they see it too</div>
             {% set tagged_ids = rtags|map('first')|list %}

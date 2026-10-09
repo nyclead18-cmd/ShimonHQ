@@ -6153,7 +6153,7 @@ def vm_route_now(con, days=14):
         for uid in {r for r in (_route_target(con, k) for k in vm.KINDS) if r}:
             try:
                 send_push("Messages moved to your desk", "%d voicemail%s were passed to you" % (n, "" if n == 1 else "s"),
-                          "/desk", uid=uid)
+                          "/vm", uid=uid)
             except Exception as e:
                 app.logger.warning("route now push failed: %s", e)
     return n
@@ -7348,12 +7348,218 @@ start_reminders()
 
 # ---------- voicemail (Shefa Yoel almanos / tzedakah line) ----------
 
+
+# ---------- Clean: one row per caller (v193) ----------
+#
+# Everything open on my plate from the phone, folded by the number it came from: three
+# voicemails and a missed call from the same mother are one row. One Call, one Done (closes
+# the whole conversation), Pass. Tap the row for the full history.
+
+def ensure_missed_dismiss(con):
+    ensure_missed_schema(con)
+    try:
+        con.execute("ALTER TABLE vm_missed ADD COLUMN dismissed_at TEXT")
+    except sqlite3.Error:
+        pass
+
+
+def _ago(iso):
+    a = _age(iso)
+    return "just now" if a == "now" else (a + " ago" if a else "")
+
+
+def clean_threads(con, uid):
+    ensure_tags_schema(con)
+    rows = con.execute(
+        "SELECT v.* FROM voicemails v WHERE v.closed_at IS NULL"
+        " AND v.tstatus NOT IN ('short','empty','skipped')"
+        " AND (v.assignee=? OR v.id IN (SELECT vm_id FROM vm_tags WHERE user_id=?))"
+        " ORDER BY v.ts DESC LIMIT 400", (uid, uid)).fetchall()
+    ids = [r["id"] for r in rows]
+    touched = set()
+    if ids:
+        qm = ",".join("?" * len(ids))
+        touched = {t[0] for t in con.execute("SELECT DISTINCT vm_id FROM vm_touch WHERE vm_id IN (%s)"
+                                             " AND COALESCE(status,'') NOT LIKE 'failed%%'" % qm, ids)}
+    missed = []
+    if uid in own_line_uids(con):
+        ensure_missed_dismiss(con)
+        missed = [m for m in missed_for(con, uid, days=7)
+                  if not m["called_back_at"] and not m["vm_id"] and not m["dismissed_at"]]
+    fam = _fam_label_for(con)
+    tags = tags_for(con, ids)
+    th = {}
+    order = []
+
+    def get(key):
+        if key not in th:
+            th[key] = {"key": key, "ids": [], "missed": [], "n_vm": 0, "n_in": 0, "n_out": 0, "n_missed": 0,
+                       "ts": "", "who": "", "fam": "", "number": "", "gist": "", "kind": "", "latest_id": None,
+                       "touched": False, "last_is_out": None, "tagged_by_me": False, "assignee": None}
+            order.append(key)
+        return th[key]
+
+    for r in rows:
+        d = families.digits10(r["caller_number"]) or ""
+        t = get(d or "vm%d" % r["id"])
+        src = r["source"] or ""
+        t["ids"].append(r["id"])
+        if src == "call_out":
+            t["n_out"] += 1
+        elif src.startswith("call"):
+            t["n_in"] += 1
+        else:
+            t["n_vm"] += 1
+        if r["id"] in touched:
+            t["touched"] = True
+        if r["assignee"] != uid:
+            t["tagged_by_me"] = True
+        t["assignee"] = t["assignee"] or r["assignee"]
+        if not t["ts"]:                                   # newest row (rows come newest first)
+            t["ts"] = r["ts"] or ""
+            t["last_is_out"] = (src == "call_out")
+            t["number"] = r["caller_number"] or ""
+            t["latest_id"] = r["id"]
+        if not t["who"]:
+            rd = vm.reading(r)
+            t["who"] = r["caller_name"] or ""
+            t["fam"] = fam(r)
+            if r["english"] or r["rc_text"]:
+                t["gist"] = rd.get("gist") or _short(r["english"] or r["rc_text"] or "", 140)
+            t["kind"] = r["kind"] or ""
+        elif not t["gist"] and (r["english"] or r["rc_text"]):
+            t["gist"] = vm.reading(r).get("gist") or _short(r["english"] or r["rc_text"] or "", 140)
+    for m in missed:
+        d = m["digits"] or families.digits10(m["number"]) or ""
+        t = get(d or "m%d" % m["id"])
+        t["missed"].append(m["id"])
+        t["n_missed"] += 1
+        if (m["ts"] or "") > t["ts"]:
+            t["ts"] = m["ts"] or ""
+            t["last_is_out"] = False
+        t["number"] = t["number"] or m["number"] or ""
+        t["who"] = t["who"] or m["name"] or ""
+        t["fam"] = t["fam"] or fam({"caller_number": m["number"]})
+    out = []
+    for k in order:
+        t = th[k]
+        t["who"] = t["who"] or t["fam"] or vm.fmt_phone(t["number"]) or "Unknown caller"
+        if t["fam"] == t["who"]:
+            t["fam"] = ""
+        t["digits"] = k if k.isdigit() else ""
+        if t["last_is_out"] or t["touched"]:
+            t["state"] = "called"            # we called/texted back; finish it with Done
+        else:
+            t["state"] = "owe"
+        bits = []
+        for n, one, many in ((t["n_vm"], "voicemail", "voicemails"), (t["n_in"], "call", "calls"),
+                             (t["n_missed"], "missed", "missed"), (t["n_out"], "outgoing", "outgoing")):
+            if n:
+                bits.append("%d %s" % (n, one if n == 1 else many))
+        t["what"] = " · ".join(bits)
+        t["ago"] = _ago(t["ts"])
+        t["tags"] = [n for i in t["ids"] for _, n in tags.get(i, [])]
+        out.append(t)
+    out.sort(key=lambda t: (t["state"] != "owe", "" if not t["ts"] else "~" + t["ts"]), reverse=False)
+    # newest first inside each group
+    owe = sorted([t for t in out if t["state"] == "owe"], key=lambda t: t["ts"], reverse=True)
+    rest = sorted([t for t in out if t["state"] != "owe"], key=lambda t: t["ts"], reverse=True)
+    return owe + rest
+
+
+def vm_clean(con):
+    uid = me()
+    threads = clean_threads(con, uid)
+    admin = bool(session.get("admin"))
+    unassigned = 0
+    if admin:
+        unassigned = con.execute("SELECT COUNT(*) FROM voicemails v WHERE v.closed_at IS NULL AND v.assignee IS NULL"
+                                 " AND v.tstatus NOT IN ('short','empty','skipped')").fetchone()[0]
+    me_row = user_row(con)
+    return render_template("vm_clean.html", threads=threads, folk=people_list(con), me_id=uid, admin=admin,
+                           unassigned=unassigned, own_line=uid in own_line_uids(con), rc_url=vm.rc_app_url,
+                           outbound=(vm.configured() and not vm.mirror_configured()),
+                           my_phone=vm.fmt_phone(me_row["phone"]) if me_row and me_row["phone"] else "",
+                           fmt_phone=vm.fmt_phone, summary=stored_summary(con, uid), mode="clean",
+                           n_owe=sum(1 for t in threads if t["state"] == "owe"))
+
+
+@app.route("/vm/thread", methods=["POST"])
+@login_required
+def vm_thread():
+    """One caller's open messages at once: act=done closes them all (and drops their missed
+    calls from my list); act=pass moves them all to somebody, with one push."""
+    con = db()
+    ensure_tags_schema(con)
+    act = request.form.get("act", "")
+    ids = [int(x) for x in (request.form.get("ids") or "").split(",") if x.strip().isdigit()]
+    mids = [int(x) for x in (request.form.get("missed") or "").split(",") if x.strip().isdigit()]
+    rows = []
+    if ids:
+        rows = con.execute("SELECT * FROM voicemails WHERE id IN (%s)" % ",".join("?" * len(ids)), ids).fetchall()
+        rows = [r for r in rows if _vm_can_touch(con, r)]
+    now = _now_local().replace(tzinfo=None).isoformat(timespec="seconds")
+    if act == "done":
+        for n, r in enumerate(rows):
+            if not r["closed_at"]:
+                _vm_close_one(con, r, False, notify=(n == 0))
+        if mids:
+            ensure_missed_dismiss(con)
+            con.execute("UPDATE vm_missed SET dismissed_at=? WHERE user_id=? AND id IN (%s)" % ",".join("?" * len(mids)),
+                        [now, me()] + mids)
+        commit_retry(con)
+        return jsonify(ok=True, n=len(rows) + len(mids))
+    if act == "pass":
+        to = request.form.get("to", "")
+        if not to.isdigit() or not con.execute("SELECT 1 FROM users WHERE id=?", (int(to),)).fetchone():
+            return jsonify(error="Pick somebody."), 400
+        to = int(to)
+        for r in rows:
+            _vm_assign_one(con, r, to)
+        if mids:
+            ensure_missed_dismiss(con)
+            con.execute("UPDATE vm_missed SET user_id=? WHERE user_id=? AND id IN (%s)" % ",".join("?" * len(mids)),
+                        [to, me()] + mids)
+        commit_retry(con)
+        if to != me() and wants(con, to, "vm") and (rows or mids):
+            r0 = rows[0] if rows else None
+            who = (r0 and (r0["caller_name"] or vm.fmt_phone(r0["caller_number"]))) or "a caller"
+            try:
+                send_push("Passed to you \u00b7 %s" % who,
+                          _short((r0 and r0["english"]) or "", 140) or "from %s" % _actor_name(con), "/vm", uid=to)
+            except Exception as e:
+                app.logger.warning("thread pass push failed: %s", e)
+        name = con.execute("SELECT display_name FROM users WHERE id=?", (to,)).fetchone()
+        return jsonify(ok=True, name=name["display_name"] if name else "")
+    return jsonify(error="Unknown action."), 400
+
+
 @app.route("/vm")
 @login_required
 def vm_view():
     con = db()
     ensure_tags_schema(con)
     vm_done_migrate(con)
+    # v193: three ways to look, remembered per person -
+    #   clean = my callers, one row each, only what is open;
+    #   mine  = my full list (mine + tagged), with Pass / Tag to delegate;
+    #   all   = admin: everybody's calls, a chip per person.
+    admin = bool(session.get("admin"))
+    mode = request.args.get("mode")
+    if mode in ("clean", "mine", "all"):
+        if mode == "all" and not admin:
+            mode = "mine"
+        if uset(con, "vm_mode") != mode:
+            uset_put(con, "vm_mode", mode)
+            commit_retry(con)
+    else:
+        mode = uset(con, "vm_mode") or "clean"
+        if mode not in ("clean", "mine", "all") or (mode == "all" and not admin):
+            mode = "clean"
+    num = re.sub(r"\D", "", request.args.get("num", ""))[-10:]
+    if (mode == "clean" and not num and request.args.get("show", "open") == "open"
+            and not request.args.get("src") and not request.args.get("line")):
+        return vm_clean(con)
     show = request.args.get("show", "open")
     if show == "handled":            # old links
         show = "done"
@@ -7362,10 +7568,9 @@ def vm_view():
     # Whose list (v192). Everybody lands on their own: what is theirs plus what they are
     # tagged on. An admin can also look at the desk (nobody's yet), one person, or everyone.
     folk = people_list(con)
-    admin = bool(session.get("admin"))
-    q = request.args.get("q", "me")
-    if not admin or q not in ("me", "", "all") and not (q.isdigit() and any(f["id"] == int(q) for f in folk)):
-        q = "me"
+    q = request.args.get("q", "all" if mode == "all" else "me")
+    if mode != "all" or not admin or q not in ("me", "", "all") and not (q.isdigit() and any(f["id"] == int(q) for f in folk)):
+        q = "all" if (mode == "all" and admin) else "me"
     def qfilter(qq):
         if qq == "":
             return " AND v.assignee IS NULL", ()
@@ -7374,6 +7579,11 @@ def vm_view():
         uid = me() if qq == "me" else int(qq)
         return (" AND (v.assignee=? OR v.id IN (SELECT vm_id FROM vm_tags WHERE user_id=?))", (uid, uid))
     qwhere, qargs = qfilter(q)
+    if len(num) >= 7:                 # one caller's whole conversation (from a Clean row)
+        qwhere += " AND v.caller_number LIKE ?"
+        qargs += ("%" + num,)
+    else:
+        num = ""
     # Lines: pick one or see all.
     line_labels = vm.line_labels(con)
     line = request.args.get("line", "")
@@ -7467,6 +7677,7 @@ def vm_view():
                            line_of=lambda r: vm.line_label(r["ext"], line_labels),
                            dh=dh, dh_url=vm.DH_URL, share_token=vm_share_token, day_label=day_label,
                            mirror=vm.mirror_configured(), folk=folk, q=q, qcounts=qcounts, admin=admin,
+                           mode=mode, num=num,
                            tags=tags_for(con, [r["id"] for r in rows]), owners=line_owners(con),
                            me_id=me(), fam_of=fam_of, digits10=families.digits10, fam_label=families.label,
                            fam_kids=families.children, kind_label=vm.KIND_LABEL,
@@ -7923,6 +8134,21 @@ def vm_backfill_desks(con):
     app.logger.info("vm: %d queued messages put on their boards", n)
 
 
+def _vm_assign_one(con, r, uid):
+    """Move one message to uid (None = back to the desk); its task goes with it."""
+    con.execute("UPDATE voicemails SET assignee=? WHERE id=?", (uid, r["id"]))
+    # the task goes with the message: made on their board if there is none yet
+    r = con.execute("SELECT * FROM voicemails WHERE id=?", (r["id"],)).fetchone()
+    try:
+        if r["item_id"]:
+            _vm_move_task(con, r)
+        elif uid is not None and r["tstatus"] == "done":
+            _vm_make_task(con, r)
+    except Exception as e:
+        app.logger.warning("vm %s task on assign failed: %s", r["id"], e)
+    return r
+
+
 @app.route("/vm/<int:vid>/assign", methods=["POST"])
 @login_required
 def vm_assign(vid):
@@ -7940,16 +8166,7 @@ def vm_assign(vid):
     uid = int(to) if to.isdigit() else None
     if uid is not None and not con.execute("SELECT 1 FROM users WHERE id=?", (uid,)).fetchone():
         abort(404)
-    con.execute("UPDATE voicemails SET assignee=? WHERE id=?", (uid, vid))
-    # the task goes with the message: made on their board if there is none yet
-    r = con.execute("SELECT * FROM voicemails WHERE id=?", (vid,)).fetchone()
-    try:
-        if r["item_id"]:
-            _vm_move_task(con, r)
-        elif uid is not None and r["tstatus"] == "done":
-            _vm_make_task(con, r)
-    except Exception as e:
-        app.logger.warning("vm %s task on assign failed: %s", vid, e)
+    r = _vm_assign_one(con, r, uid)
     commit_retry(con)
     if uid is not None and uid != me() and wants(con, uid, "vm"):
         who = r["caller_name"] or vm.fmt_phone(r["caller_number"]) or "Unknown caller"
@@ -7986,6 +8203,8 @@ def desk_view():
     """One person's desk: the voicemails in their queue, who still needs a call back,
     the open tasks those messages became (with their checklists), what got finished
     this week. Everyone has one; an admin can look at anybody's."""
+    if not request.args:
+        return redirect(url_for("vm_view"))
     con = db()
     folk = people_list(con)
     who = me()
@@ -8288,19 +8507,10 @@ def vm_tidy(vid):
     return redirect(url_for("vm_view", show=request.form.get("show", "open"), _anchor="vm-%d" % vid))
 
 
-@app.route("/vm/<int:vid>/close", methods=["POST"])
-@login_required
-def vm_close(vid):
-    """Done, for everybody: the message leaves every queue, its task closes, the person
-    who passed it on hears it is finished. undo=1 brings it all back."""
-    con = db()
-    r = con.execute("SELECT * FROM voicemails WHERE id=?", (vid,)).fetchone()
-    if not r:
-        abort(404)
-    ensure_tags_schema(con)
-    if not _vm_can_touch(con, r):
-        abort(403)
-    undo = bool(request.form.get("undo"))
+def _vm_close_one(con, r, undo=False, notify=True):
+    """Done (or Reopen) on one message - the core of /vm/<id>/close, shared with the
+    caller rows in Clean (v193), where one Done closes the whole conversation."""
+    vid = r["id"]
     now = datetime.now().isoformat(timespec="seconds")
     if r["item_id"]:
         was = con.execute("SELECT status, title FROM items WHERE id=?", (r["item_id"],)).fetchone()
@@ -8317,12 +8527,28 @@ def vm_close(vid):
             con.execute("UPDATE voicemails SET closed_at=?, closed_by=? WHERE id=?", (loc, me(), vid))
             con.execute("INSERT OR IGNORE INTO vm_handled(vm_id, user_id, at) SELECT ?, id, ? FROM users", (vid, loc))
             who = r["caller_name"] or vm.fmt_phone(r["caller_number"]) or "a caller"
-            for uid in [u[0] for u in con.execute("SELECT id FROM users WHERE is_admin=1 AND id<>?", (me(),))]:
+            for uid in ([] if not notify else [u[0] for u in con.execute("SELECT id FROM users WHERE is_admin=1 AND id<>?", (me(),))]):
                 if wants(con, uid, "done"):
                     try:
-                        send_push("%s finished a message" % _actor_name(con), who, "/desk", uid=uid)
+                        send_push("%s finished a message" % _actor_name(con), who, "/vm", uid=uid)
                     except Exception as e:
                         app.logger.warning("close push failed: %s", e)
+
+
+@app.route("/vm/<int:vid>/close", methods=["POST"])
+@login_required
+def vm_close(vid):
+    """Done, for everybody: the message leaves every queue, its task closes, the person
+    who passed it on hears it is finished. undo=1 brings it all back."""
+    con = db()
+    r = con.execute("SELECT * FROM voicemails WHERE id=?", (vid,)).fetchone()
+    if not r:
+        abort(404)
+    ensure_tags_schema(con)
+    if not _vm_can_touch(con, r):
+        abort(403)
+    undo = bool(request.form.get("undo"))
+    _vm_close_one(con, r, undo)
     commit_retry(con)
     if request.form.get("ajax"):
         return jsonify(ok=True, closed=not undo)
