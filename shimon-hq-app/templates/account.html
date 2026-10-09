@@ -213,6 +213,23 @@
   {% if missed_err %}<p class="savewarn">Missed calls: {{ missed_err }}</p>{% endif %}
 </section>
 {% endif %}
+{% if who and who.is_admin and ring and ring.configured %}
+<section class="card acct" id="ringalerts">
+  <div class="sec-head"><h2>Ring alerts</h2>
+    <span class="pill {{ 'done' if ring.on and ring.live and not ring.err else 'waiting' }}" style="cursor:default">{{ 'On' if ring.on and ring.live and not ring.err else ('Off' if not ring.on else 'Not live') }}</span></div>
+  <p class="caveat">When a call starts ringing, the line's owner gets a push with the number, the family and how many of
+  their calls are open. A shared line with no owner buzzes the admins. You still answer in RingCentral.
+  Each person can switch it off under Notifications.</p>
+  {% if ring.live %}<p class="caveat">{{ ring.lines }} line{{ '' if ring.lines == 1 else 's' }} · {{ ring.mode }} · renews by {{ ring.exp }}{% if ring.last %} · last event {{ ring.last }}{% else %} · no calls seen yet{% endif %}</p>{% endif %}
+  {% if ring.err %}<p class="savewarn">{{ ring.err }}</p>{% endif %}
+  {% if ring.test %}<p class="caveat">Test: {{ ring.test }}</p>{% endif %}
+  <div class="row" style="display:flex;gap:8px;flex-wrap:wrap">
+    <form method="post" action="{{ url_for('account_ring') }}"><input type="hidden" name="act" value="on"><button type="submit">{{ 'Repair' if ring.on else 'Turn on' }}</button></form>
+    <form method="post" action="{{ url_for('account_ring') }}"><input type="hidden" name="act" value="test"><button type="submit" class="ghostbtn">Send me a test</button></form>
+    {% if ring.on %}<form method="post" action="{{ url_for('account_ring') }}"><input type="hidden" name="act" value="off"><button type="submit" class="ghostbtn">Turn off</button></form>{% endif %}
+  </div>
+</section>
+{% endif %}
 
 {% if feed_url %}
 <section class="card acct">

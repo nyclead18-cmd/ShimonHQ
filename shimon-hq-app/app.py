@@ -3,6 +3,8 @@ import re
 import json
 import uuid
 import hmac
+import secrets
+import urllib.error
 import sqlite3
 from datetime import datetime, timezone, timedelta, date
 from functools import wraps
@@ -3475,7 +3477,8 @@ def _int_or_none(v):
 NOTIFY_KINDS = {"handed": "Someone passes a task to you",
                 "notes": "Someone responds on a shared task",
                 "done": "Someone closes a shared task",
-                "vm": "A new voicemail comes in on the Shefa Yoel line (or Mrs. Mayer's)"}
+                "vm": "A new voicemail comes in on the Shefa Yoel line (or Mrs. Mayer's)",
+                "ring": "A call is ringing on your line (who it is, before you pick up)"}
 
 
 def wants(con, uid, kind):
@@ -3579,6 +3582,7 @@ def _account_page(con, **extra):
                user_lines=user_lines_map(con), line_errors=vm.line_errors() if vm.configured() else {},
                all_lines=_lines_with_owners(con),
                missed_err=_setting(con, "vm_missed_err", ""),
+               ring=ring_status(con),
                feed_url=request.url_root.rstrip("/") + url_for("ics_feed", token=_feed_token(con)))
     ctx.update(extra)
     return render_template("account.html", **ctx)
@@ -6539,6 +6543,256 @@ def vm_tick():
     vm_work()
 
 
+# ---------- Ring alerts (v194) ----------
+# RingCentral tells HQ the moment a call starts ringing on a line HQ reads (a webhook
+# subscription on each line's telephony sessions). HQ pushes the line's owner - or the
+# admins, for a shared line nobody owns - with the caller, the family, and how many of
+# their calls are still open. You still answer in the RingCentral app; the push is so
+# you know who it is before you pick up.
+#
+# The subscription is kept alive by the minute loop (once an hour, one worker), and the
+# extension -> (label, owner) map is saved with it, so the webhook itself never calls
+# RingCentral and answers in milliseconds.
+
+RING_TTL = 7 * 24 * 3600          # ask for a week; renewed when under two days are left
+RING_RENEW = 2 * 24 * 3600
+RING_PATHS = {"tel": "/restapi/v1.0/account/~/extension/%s/telephony/sessions",
+              "pres": "/restapi/v1.0/account/~/extension/%s/presence?detailedTelephonyState=true"}
+
+
+def ring_enabled(con):
+    return _setting(con, "rc_ring_on", "1") == "1"
+
+
+def _ring_hook_url(con):
+    key = _setting(con, "rc_ring_key")
+    if not key:
+        key = secrets.token_urlsafe(24)
+        _set_setting(con, "rc_ring_key", key)
+    return _base_url() + "rc/ring?k=" + key, key
+
+
+def _ring_lines(con):
+    """{real extension id: {"label", "owner"}} for every line HQ reads. A line given as
+    '~' (the JWT user) is resolved to its real id, since events name the real one."""
+    own = line_owners(con)
+    out = {}
+    for ln in vm.lines():
+        ext = str(ln["id"])
+        real = ext
+        if ext == "~":
+            real = str(vm._rc_get("/restapi/v1.0/account/~/extension/~").get("id") or "~")
+        out[real] = {"label": (ln.get("label") or "").replace(" line", "").strip(),
+                     "owner": own.get(ext) or own.get(real)}
+    return out
+
+
+def ring_sync(con, force=False):
+    """Make sure one live subscription covers every line. Returns a short status line."""
+    if not vm.configured() or vm.mirror_configured():
+        return "RingCentral not configured here"
+    url, key = _ring_hook_url(con)
+    if not url.startswith("https://"):
+        return "needs a public https address (HQ_BASE_URL / RENDER_EXTERNAL_URL)"
+    cur = json.loads(_setting(con, "rc_ring_sub", "") or "{}")
+    try:
+        lines = _ring_lines(con)
+        _set_setting(con, "rc_ring_map", json.dumps(lines))
+        mode = cur.get("mode") or "tel"
+        filters = sorted(RING_PATHS[mode] % e for e in lines)
+        left = (cur.get("exp") or 0) - _time.time()
+        if cur.get("id") and not force and cur.get("filters") == filters and cur.get("url") == url \
+                and left > RING_RENEW:
+            return "on"
+        body = {"eventFilters": filters, "expiresIn": RING_TTL,
+                "deliveryMode": {"transportType": "WebHook", "address": url, "verificationToken": key}}
+        j = None
+        if cur.get("id"):
+            try:
+                j = vm._rc_send("PUT", "/restapi/v1.0/subscription/" + cur["id"], body)
+            except urllib.error.HTTPError as e:
+                if e.code not in (400, 404):
+                    raise
+                j = None                      # gone or stale - make a new one
+        if j is None:
+            try:
+                j = vm._rc_post("/restapi/v1.0/subscription", body)
+            except urllib.error.HTTPError as e:
+                if e.code != 403 or mode == "pres":
+                    raise
+                # no permission for telephony sessions: presence carries ringing too
+                mode = "pres"
+                filters = sorted(RING_PATHS[mode] % x for x in lines)
+                body["eventFilters"] = filters
+                j = vm._rc_post("/restapi/v1.0/subscription", body)
+        _set_setting(con, "rc_ring_sub", json.dumps({
+            "id": j.get("id"), "mode": mode, "filters": filters, "url": url,
+            "exp": _time.time() + int(j.get("expiresIn") or RING_TTL)}))
+        _set_setting(con, "rc_ring_err", "")
+        return "on"
+    except Exception as e:
+        msg = vm._rc_err(e) if hasattr(e, "code") else str(e)[:200]
+        _set_setting(con, "rc_ring_err", msg)
+        app.logger.warning("ring sync: %s", msg)
+        return msg
+
+
+def ring_off(con):
+    cur = json.loads(_setting(con, "rc_ring_sub", "") or "{}")
+    if cur.get("id"):
+        try:
+            vm._rc_send("DELETE", "/restapi/v1.0/subscription/" + cur["id"])
+        except Exception as e:
+            app.logger.warning("ring off: %s", e)
+    _set_setting(con, "rc_ring_sub", "")
+    _set_setting(con, "rc_ring_err", "")
+
+
+def ring_tick():
+    """From the minute loop: once an hour (one worker claims it) keep the subscription alive."""
+    if not vm.configured() or vm.mirror_configured():
+        return
+    con = sqlite3.connect(DB_PATH)
+    con.row_factory = sqlite3.Row
+    try:
+        if ring_enabled(con) and _claim(con, "ringsync:" + datetime.now().strftime("%Y%m%d%H")):
+            ring_sync(con)
+    finally:
+        con.close()
+
+
+def _ring_parse(j):
+    """A webhook body -> [(ext id, session id, from number, from name)] for calls that
+    have just started ringing in. Handles telephony-session and presence events."""
+    out = []
+    ev = j.get("event") or ""
+    b = j.get("body") or {}
+    m = re.search(r"/extension/(\d+)/", ev)
+    ev_ext = m.group(1) if m else str(j.get("ownerId") or b.get("extensionId") or "")
+    if "/telephony/sessions" in ev:
+        sid = b.get("telephonySessionId") or b.get("sessionId") or ""
+        for p in b.get("parties") or []:
+            st = (p.get("status") or {}).get("code") or ""
+            if p.get("direction") != "Inbound" or st not in ("Setup", "Proceeding"):
+                continue
+            fr = p.get("from") or {}
+            if fr.get("extensionId") and not fr.get("phoneNumber"):
+                continue                      # an internal call between extensions
+            out.append((str(p.get("extensionId") or ev_ext), sid,
+                        fr.get("phoneNumber") or "", fr.get("name") or ""))
+    elif "/presence" in ev:
+        for c in b.get("activeCalls") or []:
+            if c.get("direction") != "Inbound" or c.get("telephonyStatus") != "Ringing":
+                continue
+            out.append((str(b.get("extensionId") or ev_ext),
+                        c.get("telephonySessionId") or c.get("sessionId") or c.get("id") or "",
+                        c.get("from") or "", c.get("fromName") or ""))
+    return out
+
+
+def _ring_open_count(con, d10):
+    if not d10:
+        return 0
+    n = 0
+    for r in con.execute("SELECT caller_number FROM voicemails WHERE closed_at IS NULL"
+                         " AND tstatus NOT IN ('short','empty','skipped') AND caller_number LIKE ?",
+                         ("%" + d10[-4:],)):
+        if families.digits10(r[0]) == d10:
+            n += 1
+    return n
+
+
+def ring_handle(j):
+    """Off the request thread: push for each ringing call, once per call per person."""
+    con = sqlite3.connect(DB_PATH)
+    con.row_factory = sqlite3.Row
+    try:
+        _set_setting(con, "rc_ring_last", datetime.now().isoformat(timespec="seconds"))
+        calls = _ring_parse(j)
+        if not calls:
+            return
+        lmap = json.loads(_setting(con, "rc_ring_map", "") or "{}")
+        admins = [u[0] for u in con.execute("SELECT id FROM users WHERE is_admin=1")]
+        fam = _fam_label_for(con)
+        for ext, sid, num, cname in calls:
+            ln = lmap.get(ext) or {}
+            pool = [ln["owner"]] if ln.get("owner") else admins
+            who = [u for u in pool if wants(con, u, "ring")]
+            if not who:
+                continue
+            d10 = families.digits10(num) or ""
+            famname = fam({"caller_number": num}) if d10 else ""
+            open_n = _ring_open_count(con, d10)
+            title = "Ringing" + ((" \u00b7 " + ln["label"]) if ln.get("label") and len(lmap) > 1 else "")
+            body = " \u00b7 ".join(x for x in (
+                vm.fmt_phone(num) or "Unknown number",
+                famname or cname,
+                ("%d open" % open_n) if open_n else "") if x)
+            url = ("/vm?num=" + d10) if d10 else "/vm"
+            for uid in who:
+                if _claim(con, "ring:%s:%s" % (sid or (num + datetime.now().strftime("%H%M")), uid)):
+                    try:
+                        send_push(title, body, url, uid=uid)
+                    except Exception as e:
+                        app.logger.warning("ring push to %s failed: %s", uid, e)
+    except Exception as e:
+        app.logger.warning("ring handle failed: %s", e)
+    finally:
+        con.close()
+
+
+@app.route("/rc/ring", methods=["POST"])
+def rc_ring_hook():
+    """RingCentral's webhook. Open (RingCentral has no session) - guarded by the secret
+    key in the URL and the verification token RingCentral sends back on every event."""
+    vt = request.headers.get("Validation-Token")
+    con = db()
+    key = _setting(con, "rc_ring_key") or ""
+    if not key or not hmac.compare_digest(request.args.get("k", ""), key):
+        return "", 404
+    if vt:                                    # the handshake when the subscription is made
+        resp = app.response_class("", 200)
+        resp.headers["Validation-Token"] = vt
+        return resp
+    if not hmac.compare_digest(request.headers.get("Verification-Token", ""), key):
+        return "", 403
+    j = request.get_json(silent=True) or {}
+    threading.Thread(target=ring_handle, args=(j,), daemon=True).start()
+    return "", 200
+
+
+@app.route("/account/ring", methods=["POST"])
+@login_required
+def account_ring():
+    con = db()
+    u = user_row(con)
+    if not (u and u["is_admin"]):
+        return redirect(url_for("account_view"))
+    act = request.form.get("act")
+    if act == "off":
+        _set_setting(con, "rc_ring_on", "0")
+        ring_off(con)
+    elif act == "test":
+        n = send_push("Ringing \u00b7 test", "(718) 555-0100 \u00b7 Test family \u00b7 2 open", "/vm", uid=me())
+        _set_setting(con, "rc_ring_test", "sent to %d device%s" % (n, "" if n == 1 else "s"))
+    else:
+        _set_setting(con, "rc_ring_on", "1")
+        ring_sync(con, force=True)
+    return redirect(url_for("account_view") + "#ringalerts")
+
+
+def ring_status(con):
+    cur = json.loads(_setting(con, "rc_ring_sub", "") or "{}")
+    exp = cur.get("exp")
+    return {"on": ring_enabled(con), "live": bool(cur.get("id")),
+            "mode": {"tel": "call events", "pres": "presence"}.get(cur.get("mode"), ""),
+            "lines": len(cur.get("filters") or []),
+            "exp": datetime.fromtimestamp(exp).strftime("%b %d %H:%M") if exp else "",
+            "last": (_setting(con, "rc_ring_last", "") or "").replace("T", " ")[:16],
+            "err": _setting(con, "rc_ring_err", ""), "test": _setting(con, "rc_ring_test", ""),
+            "configured": vm.configured() and not vm.mirror_configured()}
+
+
 def _reminder_loop():
     while True:
         try:
@@ -6549,6 +6803,10 @@ def _reminder_loop():
             vm_tick()
         except Exception as e:
             app.logger.warning("vm tick failed: %s", e)
+        try:
+            ring_tick()
+        except Exception as e:
+            app.logger.warning("ring tick failed: %s", e)
         _time.sleep(60)
 
 

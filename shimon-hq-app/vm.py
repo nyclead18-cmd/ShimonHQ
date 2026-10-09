@@ -188,6 +188,15 @@ def _rc_post(path, body):
     return _retry(lambda: _req(url, data=json.dumps(body).encode(), headers=h, method="POST", timeout=60))
 
 
+def _rc_send(method, path, body=None):
+    """PUT / DELETE (or POST) with a JSON body - for the ring-alert subscription (v194)."""
+    url = path if path.startswith("http") else RC_SERVER + path
+    h = {"Authorization": "Bearer " + rc_token(), "Accept": "application/json",
+         "Content-Type": "application/json"}
+    data = json.dumps(body).encode() if body is not None else None
+    return _retry(lambda: _req(url, data=data, headers=h, method=method, timeout=60))
+
+
 def _rc_err(e):
     """A RingCentral error in one readable line, with the permission named when that is it."""
     try:
